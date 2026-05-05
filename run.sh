@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Helper para tareas comunes del monorepo.
+# Requisitos: Node 20+, pnpm (corepack), MySQL 8 corriendo localmente en :3306.
+#
 # Uso:
-#   ./run.sh build   -> instala deps + levanta MySQL + buildea todo
-#   ./run.sh dev     -> levanta MySQL + arranca api y web en modo desarrollo
-#   ./run.sh stop    -> detiene MySQL y procesos node lanzados por dev
-#   ./run.sh status  -> muestra estado de docker y puertos 3000/4000
-#   ./run.sh logs    -> sigue los logs de MySQL
+#   ./run.sh build    -> instala deps + buildea shared/api/web
+#   ./run.sh dev      -> verifica MySQL local y arranca api+web (modo watch)
+#   ./run.sh stop     -> detiene los procesos node lanzados por dev
+#   ./run.sh status   -> muestra estado de puertos 3000/4000/3306
+#   ./run.sh db:init  -> crea la base 'inventory' y el usuario en tu MySQL local
+#                        (te pide la contraseña de root)
 
 set -euo pipefail
 
@@ -40,21 +43,23 @@ ensure_env_files() {
   fi
 }
 
-start_mysql() {
-  color "Levantando MySQL en docker"
-  docker compose up -d mysql
-  color "Esperando a que MySQL esté healthy"
-  local tries=0
-  until [ "$(docker inspect --format='{{.State.Health.Status}}' inventory-mysql 2>/dev/null || echo starting)" = "healthy" ]; do
-    sleep 2
-    tries=$((tries + 1))
-    if [ $tries -gt 60 ]; then
-      err "MySQL no llegó a healthy en 120s"
-      docker compose logs mysql | tail -30
-      exit 1
-    fi
-  done
-  color "MySQL OK (puerto 3306)"
+check_mysql() {
+  if ! command -v mysql >/dev/null 2>&1; then
+    err "No encuentro el cliente 'mysql' en tu PATH. Instalá MySQL o agregá su bin al PATH."
+    exit 1
+  fi
+  if ! lsof -i :3306 -sTCP:LISTEN >/dev/null 2>&1; then
+    err "No hay nada escuchando en :3306. Asegurate de tener MySQL corriendo:"
+    echo "      brew services start mysql      (Homebrew)"
+    echo "      o System Settings -> MySQL -> Start MySQL Server (instalador oficial)"
+    exit 1
+  fi
+  if ! mysql -h 127.0.0.1 -P 3306 -u inventory -pinventory -e "SELECT 1" inventory >/dev/null 2>&1; then
+    err "MySQL está arriba pero no puedo conectar como inventory@127.0.0.1 a la base 'inventory'."
+    echo "      Corré una vez: ./run.sh db:init"
+    exit 1
+  fi
+  color "MySQL local OK (inventory@127.0.0.1:3306/inventory)"
 }
 
 cmd_build() {
@@ -62,7 +67,6 @@ cmd_build() {
   ensure_env_files
   color "pnpm install"
   pnpm install
-  start_mysql
   color "Build de packages/shared"
   pnpm --filter @inventory/shared build
   color "Build de apps/api"
@@ -75,7 +79,7 @@ cmd_build() {
 cmd_dev() {
   ensure_pnpm
   ensure_env_files
-  start_mysql
+  check_mysql
   mkdir -p "$ROOT_DIR/.run"
 
   if [ -f "$API_PID" ] && kill -0 "$(cat "$API_PID")" 2>/dev/null; then
@@ -122,7 +126,7 @@ cmd_dev() {
   color "Listo:"
   echo "   API   -> http://localhost:4000/api/health"
   echo "   Web   -> http://localhost:3000"
-  echo "   MySQL -> localhost:3306 (user: inventory, db: inventory)"
+  echo "   MySQL -> 127.0.0.1:3306 (user: inventory, db: inventory)"
   echo
   echo "Para detener todo: ./run.sh stop"
   echo "Logs: tail -f $API_LOG  |  tail -f $WEB_LOG"
@@ -141,15 +145,10 @@ cmd_stop() {
       rm -f "$pidfile"
     fi
   done
-  color "Apagando MySQL"
-  docker compose down
-  color "Stop OK"
+  color "Stop OK (MySQL local sigue corriendo; gestionalo con tu init system)"
 }
 
 cmd_status() {
-  color "Docker"
-  docker compose ps || true
-  echo
   color "Puertos"
   for port in 3000 4000 3306; do
     if lsof -i ":$port" -sTCP:LISTEN >/dev/null 2>&1; then
@@ -158,10 +157,34 @@ cmd_status() {
       echo "   $port -> libre"
     fi
   done
+  echo
+  color "Procesos del proyecto"
+  for pidfile in "$API_PID" "$WEB_PID"; do
+    if [ -f "$pidfile" ]; then
+      local pid
+      pid="$(cat "$pidfile")"
+      if kill -0 "$pid" 2>/dev/null; then
+        echo "   $(basename "$pidfile" .pid) -> PID $pid (running)"
+      else
+        echo "   $(basename "$pidfile" .pid) -> PID $pid (muerto, archivo viejo)"
+      fi
+    fi
+  done
 }
 
-cmd_logs() {
-  docker compose logs -f mysql
+cmd_db_init() {
+  if [ ! -f scripts/init-db.sql ]; then
+    err "No encuentro scripts/init-db.sql"
+    exit 1
+  fi
+  if ! command -v mysql >/dev/null 2>&1; then
+    err "No encuentro el cliente 'mysql' en tu PATH"
+    exit 1
+  fi
+  color "Voy a ejecutar scripts/init-db.sql en tu MySQL local (127.0.0.1:3306)"
+  echo "   Ingresá la contraseña de root cuando te la pida:"
+  mysql -h 127.0.0.1 -P 3306 -u root -p < scripts/init-db.sql
+  color "DB y usuario 'inventory' listos"
 }
 
 usage() {
@@ -169,20 +192,21 @@ usage() {
 Uso: ./run.sh <comando>
 
 Comandos:
-  build    Instala dependencias, levanta MySQL y compila shared/api/web
-  dev      Levanta MySQL y arranca api+web en background (modo watch)
-  stop     Detiene api, web y MySQL
-  status   Muestra estado de docker y puertos 3000/4000/3306
-  logs     Sigue los logs de MySQL
+  build     Instala deps y compila shared/api/web
+  dev       Verifica MySQL local y arranca api+web en background (watch)
+  stop      Detiene api y web
+  status    Muestra puertos 3000/4000/3306 y procesos del proyecto
+  db:init   Crea la base 'inventory' y el usuario en tu MySQL local
+            (te pide la contraseña de root)
 EOF
 }
 
 case "${1:-}" in
-  build)  cmd_build ;;
-  dev|up) cmd_dev ;;
+  build)    cmd_build ;;
+  dev|up)   cmd_dev ;;
   stop|down) cmd_stop ;;
-  status) cmd_status ;;
-  logs)   cmd_logs ;;
+  status)   cmd_status ;;
+  db:init|db-init) cmd_db_init ;;
   ""|-h|--help|help) usage ;;
   *) err "Comando desconocido: $1"; usage; exit 1 ;;
 esac

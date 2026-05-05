@@ -38,8 +38,5 @@ Thumbs.db
 .eslintcache
 *.tsbuildinfo
 
-# Datos locales
-docker/mysql-data
-
 # run.sh artifacts
 .run
