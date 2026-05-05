@@ -1,0 +1,25 @@
+{
+  "name": "@inventory/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tipos, DTOs y schemas Zod compartidos entre web y api",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo \"(shared) no lint configured\""
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}
