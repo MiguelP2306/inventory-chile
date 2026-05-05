@@ -40,3 +40,6 @@ Thumbs.db
 
 # Datos locales
 docker/mysql-data
+
+# run.sh artifacts
+.run
