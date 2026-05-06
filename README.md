@@ -39,37 +39,89 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 
 ## Requisitos previos
 
+Mismos para cualquier OS:
+
 - **Node.js `>=20.11`** (recomendado 22.x — ver [.nvmrc](.nvmrc))
 - **pnpm** — se habilita automáticamente con `corepack enable` (no instalar global)
-- **MySQL 8** corriendo localmente en `127.0.0.1:3306`. Probado con MySQL 8.4 nativo (Homebrew o instalador oficial). **No usamos Docker.**
+- **MySQL 8** instalado localmente con cliente CLI en el `PATH` (`mysql` y `mysqladmin`). Probado con MySQL 8.4. **No usamos Docker.**
+- **Git Bash** o **WSL2** si estás en **Windows**. El `run.sh` no corre en PowerShell/cmd nativos.
+
+### Cómo cumplir los requisitos por OS
+
+<details>
+<summary><b>macOS</b></summary>
+
+```bash
+# Node + corepack (recomendado vía nvm)
+brew install nvm
+nvm install 22 && nvm use 22
+corepack enable
+
+# MySQL (incluye cliente CLI)
+brew install mysql
+brew services start mysql
+```
+</details>
+
+<details>
+<summary><b>Linux (Ubuntu/Debian)</b></summary>
+
+```bash
+# Node + corepack (vía nodesource o nvm — ejemplo con nvm)
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.0/install.sh | bash
+nvm install 22 && nvm use 22
+corepack enable
+
+# MySQL
+sudo apt update
+sudo apt install mysql-server mysql-client
+sudo systemctl start mysql
+
+# Una sola vez: dejar root sin contraseña (solo para dev local)
+# (o ajustá scripts/init-db.sql para usar contraseña de root)
+sudo mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY ''"
+```
+</details>
+
+<details>
+<summary><b>Windows</b></summary>
+
+Tenés dos caminos:
+
+**Opción A — Git Bash (más fácil):**
+1. Instalá [Git for Windows](https://git-scm.com/download/win) — incluye Git Bash.
+2. Instalá [Node.js 22 LTS](https://nodejs.org/) (incluye corepack).
+3. Instalá [MySQL Installer for Windows](https://dev.mysql.com/downloads/installer/) — durante el setup, **agregá la carpeta `bin` al PATH** y dejá el root sin contraseña (development setup).
+4. Abrí **Git Bash** desde el menú inicio y desde ahí corrés todos los `./run.sh ...`.
+
+**Opción B — WSL2 (recomendado para dev serio):**
+1. Instalá WSL2 con Ubuntu (`wsl --install` en PowerShell admin).
+2. Adentro del WSL seguí las instrucciones de Linux de arriba.
+</details>
 
 ---
 
 ## Primera configuración (one-time)
 
+**Un solo comando** instala todo de cero. Es idempotente: lo podés correr varias veces sin romper nada.
+
 ```bash
-# 1. Habilitar pnpm vía corepack (una sola vez por máquina)
-corepack enable
+./run.sh setup
+```
 
-# 2. Asegurate de que tu MySQL local esté corriendo
-brew services start mysql              # Homebrew
-# o System Settings → MySQL → Start MySQL Server (instalador oficial)
+Esto hace, en orden:
+1. Verifica/habilita pnpm vía corepack
+2. Verifica que MySQL esté corriendo (intenta iniciarlo con `brew services start mysql` en Mac o `systemctl start mysql` en Linux si está caído)
+3. Crea `apps/api/.env.local` y `apps/web/.env.local` desde sus `.env.example`
+4. Corre `pnpm install`
+5. Compila `@inventory/shared` (la api lo necesita en runtime)
+6. Crea la base `inventory` y el usuario `inventory@127.0.0.1` con password `Inv3ntory!` en tu MySQL local
+7. Aplica todas las migraciones pendientes
+8. Carga los seeds (admin, almacén, categorías, settings)
 
-# 3. Clonar el repo y entrar
-cd inventory-management
+Cuando termina, arrancás el proyecto con:
 
-# 4. Instalar deps + build inicial (incluye packages/shared, requerido por la api)
-./run.sh build
-
-# 5. Crear la base 'inventory' y el usuario en tu MySQL local
-#    Asume que tu root no tiene contraseña.
-./run.sh db:init
-
-# 6. Aplicar migración inicial y cargar seeds
-pnpm --filter @inventory/api db:migrate
-pnpm --filter @inventory/api db:seed
-
-# 7. Levantar api + web en watch mode
+```bash
 ./run.sh dev
 ```
 
@@ -77,6 +129,8 @@ Una vez levantado:
 - **Web:** http://localhost:3000
 - **API:** http://localhost:4000/api/health
 - **Login:** `admin@inventory.local` / `admin123`
+
+Si algo falla en el setup, corré `./run.sh doctor` para ver qué requisito está faltando.
 
 ---
 
@@ -135,30 +189,58 @@ Para conectar **MySQL Workbench**: `127.0.0.1:3306` con `inventory` / `Inv3ntory
 
 ## Comandos diarios
 
+Todo se hace desde `./run.sh`. Si pasás algún argumento que no entiende, te muestra el listado completo.
+
+### Setup y diagnóstico
+
 | Comando | Qué hace |
 | --- | --- |
-| `./run.sh dev` | Verifica MySQL local + arranca api+web en background (watch) |
+| `./run.sh setup` | Instalación completa de cero (idempotente) |
+| `./run.sh doctor` | Diagnostica qué falta sin tocar nada (Node, pnpm, MySQL, .env, etc.) |
+| `./run.sh status` | Muestra qué servicios están arriba y qué procesos del proyecto corren |
+
+### Desarrollo diario
+
+| Comando | Qué hace |
+| --- | --- |
+| `./run.sh dev` | Arranca api+web en watch mode (background), espera que respondan |
 | `./run.sh stop` | Detiene los procesos node de api y web |
-| `./run.sh status` | Muestra puertos 3000/4000/3306 y procesos del proyecto |
-| `./run.sh build` | Instala deps + build de shared/api/web |
-| `./run.sh db:init` | Crea base `inventory` y usuario en tu MySQL local (one-time) |
-| `pnpm --filter @inventory/api db:migrate` | Aplica migraciones pendientes |
-| `pnpm --filter @inventory/api db:migrate:revert` | Revierte la última migración |
-| `pnpm --filter @inventory/api db:migrate:generate src/database/migrations/Nombre` | Genera una migración desde el diff entidades vs DB |
-| `pnpm --filter @inventory/api db:seed` | Corre los seeds (idempotente) |
-| `pnpm --filter @inventory/shared dev` | tsc --watch del paquete shared (si vas a modificar enums) |
+| `./run.sh logs` | `tail -f` de los logs de api y web |
+| `./run.sh build` | Rebuild de shared/api/web |
+
+### Base de datos
+
+| Comando | Qué hace |
+| --- | --- |
+| `./run.sh db:init` | Crea base `inventory` y usuario en tu MySQL local |
+| `./run.sh db:migrate` | Aplica migraciones pendientes |
+| `./run.sh db:revert` | Revierte la última migración aplicada |
+| `./run.sh db:generate <Nombre>` | Genera una nueva migración desde el diff entidades vs DB |
+| `./run.sh db:seed` | Corre los seeds (idempotente) |
+| `./run.sh db:reset` | DROP + CREATE de la base + migrate + seed (**borra todos los datos**) |
+
+### MySQL
+
+| Comando | Qué hace |
+| --- | --- |
+| `./run.sh mysql:restart` | Reinicia el servicio MySQL local (`brew services restart mysql` o `systemctl restart mysql`) |
+| `./run.sh mysql:cli` | Abre shell `mysql` como `inventory@127.0.0.1/inventory` |
+
+### Otros (vía pnpm directamente)
+
+| Comando | Qué hace |
+| --- | --- |
 | `pnpm typecheck` | Type-check de todos los paquetes |
 | `pnpm lint` | Lint de todos los paquetes |
 | `pnpm format` | Prettier sobre todo el repo |
+| `pnpm --filter @inventory/shared dev` | tsc --watch del paquete shared (si vas a modificar enums seguido) |
 
 ### Logs en dev mode
 
-Cuando corrés `./run.sh dev`, los logs van a:
-- API: `.run/api.log`
-- Web: `.run/web.log`
+Cuando corrés `./run.sh dev`, los logs van a `.run/api.log` y `.run/web.log`. Atajo:
 
 ```bash
-tail -f .run/api.log .run/web.log
+./run.sh logs
 ```
 
 ---
@@ -301,18 +383,18 @@ NEXT_PUBLIC_API_URL=http://localhost:4000/api
 - **Nunca** poner `synchronize: true`. Todo cambio de schema pasa por migraciones.
 - Para agregar/modificar entidades:
   1. Editar el archivo en `apps/api/src/database/entities/`
-  2. Generar migración: `pnpm --filter @inventory/api db:migrate:generate apps/api/src/database/migrations/NombreDescriptivo`
-  3. Revisar el SQL generado a mano (a veces TypeORM emite cosas raras con renames)
-  4. Aplicar: `pnpm --filter @inventory/api db:migrate`
+  2. Generar migración: `./run.sh db:generate AddProductTags`
+  3. Revisar el SQL generado a mano en `apps/api/src/database/migrations/` (a veces TypeORM emite cosas raras con renames)
+  4. Aplicar: `./run.sh db:migrate`
+- Si te equivocaste y querés revertir la última: `./run.sh db:revert`
 
 ### Reset completo de la DB en dev
 
 ```bash
-mysql -u root -e "DROP DATABASE inventory; CREATE DATABASE inventory CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-./run.sh db:init                                    # recrea el usuario
-pnpm --filter @inventory/api db:migrate
-pnpm --filter @inventory/api db:seed
+./run.sh db:reset
 ```
+
+(equivale a DROP + CREATE de la base + migrate + seed; te avisa con 3s para cancelar antes de borrar)
 
 ---
 
@@ -453,7 +535,27 @@ rm -rf .run
 
 ### Necesito resetear la DB completa
 
-Ver sección [Reset completo de la DB en dev](#reset-completo-de-la-db-en-dev).
+```bash
+./run.sh db:reset
+```
+
+### MySQL se cuelga o se comporta raro
+
+```bash
+./run.sh mysql:restart
+```
+
+### Quiero entrar al shell de MySQL como la app
+
+```bash
+./run.sh mysql:cli
+```
+
+### No estoy seguro de qué falta para arrancar
+
+```bash
+./run.sh doctor
+```
 
 ### Necesito otro usuario admin con otra contraseña
 
