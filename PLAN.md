@@ -172,13 +172,15 @@ inventory-management/
 4. `.env.example` documentado.
 5. README con comandos de arranque + `run.sh` con `build` / `dev` / `stop` / `db:init`.
 
-### Fase 1 — Base de datos y auth
+### Fase 1 — Base de datos y auth ✅
 1. Configurar TypeORM: `DataSource` (`apps/api/src/database/data-source.ts`) que se reutiliza en CLI y en `TypeOrmModule.forRootAsync` de NestJS. `synchronize: false` siempre — se trabaja con migraciones explícitas.
 2. Definir todas las entidades con decoradores `@Entity()` en `database/entities/` (incluye Caja y CompanySettings). Relaciones `@OneToMany`/`@ManyToOne` con `cascade` y `onDelete` explícitos.
 3. Generar migración inicial (`typeorm migration:generate`) y seed: usuario admin, 1 almacén, categorías base, categorías de gasto (arriendo, transporte, publicidad, servicios, otros), `CompanySettings` con datos placeholder.
 4. Scripts npm: `db:migrate`, `db:migrate:revert`, `db:migrate:generate`, `db:seed`.
 5. Módulo `auth` NestJS: `POST /auth/login`, `POST /auth/refresh`, guard JWT global, decorador `@CurrentUser()`.
 6. Frontend: layout protegido, login, tokens en httpOnly cookie + refresh, interceptor axios, redirect en 401.
+
+> Credenciales del admin seedeado: `admin@inventory.local` / `admin123` (overridable vía `SEED_ADMIN_EMAIL` y `SEED_ADMIN_PASSWORD`).
 
 ### Fase 2 — Catálogo de productos + compatibilidad vehicular
 1. CRUD de `Category`, `Brand`, `VehicleMake`, `VehicleModel`.
