@@ -607,6 +607,86 @@ Si un producto se crea **antes** de tener stock, no aparece como fila en la tabl
 
 ---
 
+## Pantallas del frontend
+
+Recorrido de cada pantalla con qué hace, dónde está el código y qué endpoints consume. Las rutas siguen el App Router de Next.js — el grupo `(auth)/` es público, `(dashboard)/` es protegido y se renderiza dentro del shell con sidebar + header.
+
+### Shell global del dashboard
+
+Visible en todas las pantallas dentro de `(dashboard)/`:
+
+- **[`app/(dashboard)/layout.tsx`](apps/web/app/(dashboard)/layout.tsx)** — Server Component. Llama `getCurrentUser()`; si la cookie no es válida, hace `redirect('/login')`. Compone Sidebar + header + slot principal.
+- **[`components/sidebar.tsx`](apps/web/components/sidebar.tsx)** — Nav lateral con secciones (`Catálogo`, `Operación`). Cada item resalta cuando el `pathname` coincide (exact o prefix). Oculto en móvil (`md:flex`).
+- **Header** — Muestra a la izquierda el `<QuickSearch>` (botón con atajo) y a la derecha el email del usuario con el botón "Cerrar sesión".
+- **[`components/quick-search.tsx`](apps/web/components/quick-search.tsx)** — Buscador global tipo Cmd+K. Atajo: `⌘K` en Mac, `Ctrl+K` en Linux/Windows. Debounce 250 ms, llama `GET /products/quick-search?q=...` y al seleccionar navega a `/productos/[id]`.
+- **[`components/logout-button.tsx`](apps/web/components/logout-button.tsx)** — `POST /auth/logout` y redirige a `/login`.
+
+### Login
+
+| Ruta | Archivo | Para qué sirve |
+| --- | --- | --- |
+| `/login` | [`app/(auth)/login/page.tsx`](apps/web/app/(auth)/login/page.tsx) | Form de email + password con RHF + Zod. En éxito el backend setea cookies httpOnly y redirige a `/`. Si el password es incorrecto, muestra el mensaje del 401 en el card. |
+
+### Dashboard
+
+| Ruta | Archivo | Para qué sirve |
+| --- | --- | --- |
+| `/` | [`app/(dashboard)/page.tsx`](apps/web/app/(dashboard)/page.tsx) | Placeholder: saludo al usuario logueado. Se llena con KPIs y alertas en **Fase 9**. |
+
+### Catálogo
+
+| Ruta | Archivo | Para qué sirve |
+| --- | --- | --- |
+| `/productos` | [`app/(dashboard)/productos/page.tsx`](apps/web/app/(dashboard)/productos/page.tsx) | Lista paginada de productos (20/página). Filtros: búsqueda libre por SKU/partNumber/barcode/nombre (debounce 250 ms), categoría, marca. Sección dedicada **"Buscar por vehículo compatible"** (marca → modelo → año) que cambia la query de `/products` por `/products/by-vehicle`. Click en una fila navega a la edición. |
+| `/productos/nuevo` | [`app/(dashboard)/productos/nuevo/page.tsx`](apps/web/app/(dashboard)/productos/nuevo/page.tsx) | Form de creación. Renderiza el `<ProductForm>` sin valores iniciales. |
+| `/productos/[id]` | [`app/(dashboard)/productos/[id]/page.tsx`](apps/web/app/(dashboard)/productos/[id]/page.tsx) | Form de edición. Server Component que llama `GET /products/:id` y rehidrata el `<ProductForm>` con todos los campos + fitments. Si el id no existe, `notFound()`. |
+| `/categorias` | [`app/(dashboard)/categorias/page.tsx`](apps/web/app/(dashboard)/categorias/page.tsx) | CRUD simple de categorías de producto (`Motor`, `Frenos`, etc. — las del seed). Usa el componente reutilizable `<SimpleNameList>` con tabla + dialog para crear/editar. |
+| `/marcas` | [`app/(dashboard)/marcas/page.tsx`](apps/web/app/(dashboard)/marcas/page.tsx) | CRUD de marcas de **repuestos** (NGK, Bosch, etc.). Mismo patrón que categorías. |
+| `/vehiculos` | [`app/(dashboard)/vehiculos/page.tsx`](apps/web/app/(dashboard)/vehiculos/page.tsx) | Pestañas internas. **Marcas:** CRUD de `VehicleMake` (Toyota, Ford). **Modelos:** CRUD de `VehicleModel` con selector de marca obligatorio. La unicidad es `(makeId, name)`. Estos datos alimentan la sub-form de Compatibilidad de productos y el filtro "buscar por vehículo". |
+
+#### Componente `<ProductForm>` (3 tabs)
+
+Vive en [`components/forms/product-form.tsx`](apps/web/components/forms/product-form.tsx) y lo usan tanto `nuevo` como `[id]`:
+
+- **Datos:** SKU (único), partNumber, barcode, nombre, descripción, categoría, marca, ubicación física, activo/inactivo.
+- **Precios y stock:** costo, precio de venta, stock mínimo (umbral del semáforo amarillo), stock máximo opcional. Recordatorio: el stock real lo gestiona Inventario, acá sólo se define el `minStock` que activa la alerta.
+- **Compatibilidad:** filas dinámicas (`useFieldArray` de RHF). Cada fila tiene selector de modelo de vehículo + año desde + año hasta. Validación: `desde <= hasta`. La estrategia del backend es replace — se reenvían **todas** las filas en cada save.
+
+### Operación
+
+| Ruta | Archivo | Para qué sirve |
+| --- | --- | --- |
+| `/inventario` | [`app/(dashboard)/inventario/page.tsx`](apps/web/app/(dashboard)/inventario/page.tsx) | Vista de **stock por producto** con badges del semáforo (`OK` verde / `Bajo stock` amarillo / `Sin stock` rojo). Arriba muestra el conteo por estado. Filtros: búsqueda libre + estado. Cada fila tiene un botón ⚙️ que abre `<AdjustStockDialog>` para corregir cantidades. |
+| `/inventario/movimientos` | [`app/(dashboard)/inventario/movimientos/page.tsx`](apps/web/app/(dashboard)/inventario/movimientos/page.tsx) | Historial paginado (50/página) de **todos** los `InventoryMovement`. Filtros: tipo (compra/venta/ajuste/devoluciones), rango de fechas. La columna "Cantidad" se colorea: rojo si negativa, verde si positiva. Muestra fecha local del usuario, badge del tipo, producto (con SKU), costo unitario si aplica, origen (`PurchaseEntry`, `Adjustment`, etc.) y email del usuario que hizo el movimiento. |
+| `/compras` | [`app/(dashboard)/compras/page.tsx`](apps/web/app/(dashboard)/compras/page.tsx) | Lista de entradas de mercadería (`PurchaseEntry`). Filtros por rango de fechas. Muestra fecha, proveedor, notas y total. |
+| `/compras/nuevo` | [`app/(dashboard)/compras/nuevo/page.tsx`](apps/web/app/(dashboard)/compras/nuevo/page.tsx) | Form de **registrar una entrada**. Selector de proveedor + fecha + notas + tabla dinámica de items. El botón "Agregar producto" abre el `<ProductPicker>` (búsqueda + click). Por cada fila se editan cantidad y costo unitario; subtotal y total se calculan en vivo. Al guardar se dispara el flujo transaccional del backend (`PurchaseEntry` + items + `applyMovement(PURCHASE_IN)` por item). |
+| `/proveedores` | [`app/(dashboard)/proveedores/page.tsx`](apps/web/app/(dashboard)/proveedores/page.tsx) | CRUD de proveedores con dialog completo (nombre, taxId, email, teléfono, dirección, notas). Implementado en Fase 3 porque las compras lo requieren — el detalle con tab *Historial de compras* llega en **Fase 4**. |
+
+### Componentes reutilizables del frontend
+
+| Componente | Para qué sirve |
+| --- | --- |
+| [`components/forms/product-form.tsx`](apps/web/components/forms/product-form.tsx) | Form de producto con tabs Datos / Precios / Compatibilidad. Usado en `nuevo` y `[id]`. |
+| [`components/product-picker.tsx`](apps/web/components/product-picker.tsx) | Dialog de búsqueda de producto (SKU/partNumber/barcode/nombre). Devuelve el producto elegido vía callback. **Pensado para reutilizar en cotizaciones (Fase 6) y ventas (Fase 7).** |
+| [`components/adjust-stock-dialog.tsx`](apps/web/components/adjust-stock-dialog.tsx) | Diálogo de ajuste manual de stock. Muestra stock actual y resultante en vivo, bloquea si daría negativo. |
+| [`components/simple-name-list.tsx`](apps/web/components/simple-name-list.tsx) | CRUD genérico para entidades single-field (categorías, marcas, makes). Acepta `list`/`create`/`update`/`remove` por props. |
+| [`components/quick-search.tsx`](apps/web/components/quick-search.tsx) | Buscador global Cmd+K. Vive en el header del `(dashboard)`. |
+| [`components/sidebar.tsx`](apps/web/components/sidebar.tsx) | Nav lateral con secciones. Para agregar un item nuevo, editar el array `SECTIONS`. |
+| [`components/providers.tsx`](apps/web/components/providers.tsx) | `QueryClientProvider` con `staleTime: 30s` y `refetchOnWindowFocus: false`. |
+| [`components/logout-button.tsx`](apps/web/components/logout-button.tsx) | Botón "Cerrar sesión" del header. |
+
+### Helpers de datos
+
+| Archivo | Qué hace |
+| --- | --- |
+| [`lib/api.ts`](apps/web/lib/api.ts) | Cliente axios browser-side, `withCredentials: true`, interceptor de refresh en 401. |
+| [`lib/server-api.ts`](apps/web/lib/server-api.ts) | `serverFetch()` para Server Components — forwarda las cookies entrantes al backend. Sin refresh (el layout protegido se encarga del redirect). |
+| [`lib/catalog-api.ts`](apps/web/lib/catalog-api.ts) | Wrappers tipados de `/categories`, `/brands`, `/vehicles`, `/products` + helper `apiErrorMessage()`. |
+| [`lib/inventory-api.ts`](apps/web/lib/inventory-api.ts) | Wrappers tipados de `/suppliers`, `/inventory/*`, `/purchases`. |
+| [`lib/utils.ts`](apps/web/lib/utils.ts) | `cn()` — merge de clases Tailwind con `clsx + twMerge`. |
+
+---
+
 ## Convenciones de código
 
 ### TypeScript
