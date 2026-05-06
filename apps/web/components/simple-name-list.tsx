@@ -1,0 +1,209 @@
+'use client';
+
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { useState } from 'react';
+import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { apiErrorMessage } from '@/lib/catalog-api';
+
+interface NamedItem {
+  id: string;
+  name: string;
+}
+
+interface Props {
+  title: string;
+  resourceLabel: string; // ej: "categoría", "marca"
+  queryKey: string;
+  list: () => Promise<NamedItem[]>;
+  create: (input: { name: string }) => Promise<NamedItem>;
+  update: (id: string, input: { name: string }) => Promise<NamedItem>;
+  remove: (id: string) => Promise<unknown>;
+}
+
+export function SimpleNameList({
+  title,
+  resourceLabel,
+  queryKey,
+  list,
+  create,
+  update,
+  remove,
+}: Props) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<NamedItem | null>(null);
+  const [name, setName] = useState('');
+
+  const query = useQuery({ queryKey: [queryKey], queryFn: list });
+
+  const createMut = useMutation({
+    mutationFn: (n: string) => create({ name: n }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [queryKey] });
+      toast.success(`${capitalize(resourceLabel)} creada`);
+      closeDialog();
+    },
+    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo crear')),
+  });
+
+  const updateMut = useMutation({
+    mutationFn: ({ id, n }: { id: string; n: string }) => update(id, { name: n }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [queryKey] });
+      toast.success(`${capitalize(resourceLabel)} actualizada`);
+      closeDialog();
+    },
+    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo actualizar')),
+  });
+
+  const removeMut = useMutation({
+    mutationFn: (id: string) => remove(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [queryKey] });
+      toast.success(`${capitalize(resourceLabel)} eliminada`);
+    },
+    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo eliminar')),
+  });
+
+  function closeDialog() {
+    setOpen(false);
+    setEditing(null);
+    setName('');
+  }
+
+  function startCreate() {
+    setEditing(null);
+    setName('');
+    setOpen(true);
+  }
+
+  function startEdit(item: NamedItem) {
+    setEditing(item);
+    setName(item.name);
+    setOpen(true);
+  }
+
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (editing) updateMut.mutate({ id: editing.id, n: trimmed });
+    else createMut.mutate(trimmed);
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">{title}</h1>
+        <Button onClick={startCreate}>
+          <Plus className="h-4 w-4" />
+          Nueva
+        </Button>
+      </div>
+
+      <div className="rounded-md border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Nombre</TableHead>
+              <TableHead className="w-[120px]" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {query.isLoading && (
+              <>
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <TableRow key={i}>
+                    <TableCell><Skeleton className="h-4 w-40" /></TableCell>
+                    <TableCell />
+                  </TableRow>
+                ))}
+              </>
+            )}
+            {query.data && query.data.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={2} className="text-center text-muted-foreground">
+                  Sin {resourceLabel}s todavía. Creá la primera con el botón.
+                </TableCell>
+              </TableRow>
+            )}
+            {query.data?.map((item) => (
+              <TableRow key={item.id}>
+                <TableCell>{item.name}</TableCell>
+                <TableCell className="text-right">
+                  <div className="flex justify-end gap-1">
+                    <Button variant="ghost" size="icon" onClick={() => startEdit(item)}>
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => {
+                        if (confirm(`¿Eliminar "${item.name}"?`)) removeMut.mutate(item.id);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      <Dialog open={open} onOpenChange={(v) => (v ? setOpen(true) : closeDialog())}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {editing ? `Editar ${resourceLabel}` : `Nueva ${resourceLabel}`}
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={onSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">Nombre</Label>
+              <Input
+                id="name"
+                autoFocus
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={closeDialog}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={createMut.isPending || updateMut.isPending}>
+                {editing ? 'Guardar' : 'Crear'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function capitalize(s: string) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}

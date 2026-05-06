@@ -12,8 +12,8 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 | --- | --- | --- |
 | 0 | Bootstrap monorepo (pnpm, Next.js, NestJS, MySQL local) | ✅ |
 | 1 | Base de datos (21 entidades, migración inicial, seeds) + auth JWT con cookies httpOnly | ✅ |
-| 2 | Catálogo de productos + compatibilidad vehicular | ⏳ siguiente |
-| 3 | Inventario (entradas, salidas, ajustes) | pendiente |
+| 2 | Catálogo de productos + compatibilidad vehicular + búsqueda global Cmd+K | ✅ |
+| 3 | Inventario (entradas, salidas, ajustes) | ⏳ siguiente |
 | 4 | Clientes y proveedores | pendiente |
 | 5 | Caja y gastos | pendiente |
 | 6 | Cotizaciones + envío WhatsApp/email | pendiente |
@@ -368,13 +368,53 @@ NEXT_PUBLIC_API_URL=http://localhost:4000/api
 
 ### Modelo
 
-21 entidades agrupadas por dominio (ver [PLAN.md](PLAN.md#modelo-de-datos-entidades-clave) para el modelo conceptual):
+21 entidades agrupadas por dominio. Los archivos están en [`apps/api/src/database/entities/`](apps/api/src/database/entities/) y se exportan desde [`entities/index.ts`](apps/api/src/database/entities/index.ts). Ver [PLAN.md](PLAN.md#modelo-de-datos-entidades-clave) para el modelo conceptual completo.
 
-- **Catálogo:** `Product`, `Brand`, `Category`, `VehicleMake`, `VehicleModel`, `VehicleFitment`
-- **Inventario:** `Stock` (caché actual), `InventoryMovement` (fuente de verdad), `Warehouse`
-- **Comercial:** `Customer`, `Supplier`, `Quotation` + `QuotationItem`, `Sale` + `SaleItem`, `PurchaseEntry` + `PurchaseEntryItem`
-- **Caja:** `CashTransaction`, `ExpenseCategory`
-- **Settings:** `User`, `CompanySettings`
+#### Catálogo de productos
+
+| Entidad | Tabla | Propósito | Notas clave |
+| --- | --- | --- | --- |
+| `Product` | `products` | Repuesto que se vende. Carga la mayoría de los datos del negocio (SKU, partNumber, barcode, precio, costo, stock mínimo/máximo, ubicación física). | `sku` único. `cost` y `price` son `decimal(15,2)` mapeados a `string` (no `number`) para no perder precisión. |
+| `Category` | `categories` | Agrupador jerárquico de productos. | Auto-referencia opcional `parentId` (categoría padre). `onDelete: SET NULL` para no borrar hijos al eliminar el padre. |
+| `Brand` | `brands` | Marca del repuesto (Bosch, NGK, etc.). **No** marca de vehículo. | `name` único. |
+| `VehicleMake` | `vehicle_makes` | Marca de vehículo (Toyota, Ford). | `name` único. |
+| `VehicleModel` | `vehicle_models` | Modelo de vehículo asociado a una marca (Corolla, Hilux, Fiesta). | `(makeId, name)` único. |
+| `VehicleFitment` | `vehicle_fitments` | Asocia un `Product` con un `VehicleModel` y un rango de años. Permite la búsqueda "qué tengo para Toyota Corolla 2015". | `yearFrom` y `yearTo` son nullables — `null` significa "cualquier año". `onDelete: CASCADE` con producto. |
+
+#### Inventario
+
+| Entidad | Tabla | Propósito | Notas clave |
+| --- | --- | --- | --- |
+| `Warehouse` | `warehouses` | Almacén físico. Por ahora hay 1 (`Principal`); el modelo soporta N para una fase futura. | Seed crea uno con nombre `Principal`. |
+| `Stock` | `stocks` | **Caché** del stock actual por (producto, almacén). | Único `(productId, warehouseId)`. **Se actualiza dentro de la misma transacción que inserta un `InventoryMovement`**. La fuente de verdad sigue siendo `InventoryMovement`. |
+| `InventoryMovement` | `inventory_movements` | **Fuente de verdad** del stock: cada entrada/salida/ajuste se registra acá. Permite recalcular el stock desde cero auditándolo. | `type`: `PURCHASE_IN`, `SALE_OUT`, `ADJUSTMENT`, `RETURN_IN`, `RETURN_OUT`. `qty` es signada (positiva entradas, negativa salidas). `unitCost` se llena en compras. `reference` + `refId` apuntan al documento origen genéricamente (no FK porque puede ser de varias tablas). |
+
+#### Comercial
+
+| Entidad | Tabla | Propósito | Notas clave |
+| --- | --- | --- | --- |
+| `Customer` | `customers` | Cliente al que se le cotiza/vende. | Tiene `internalNotes` (texto libre interno, no se imprime en PDFs). El `phone` se usa para WhatsApp en Fase 6. |
+| `Supplier` | `suppliers` | Proveedor de mercadería. | Asociable a `Product.supplierId` y a `PurchaseEntry`. |
+| `Quotation` | `quotations` | Cotización emitida a un cliente. | Numeración correlativa (`COT-2026-00001`). `status`: `DRAFT`, `SENT`, `APPROVED`, `REJECTED`, `CONVERTED`, `EXPIRED`. `validUntil` opcional. Se convierte a `Sale` en Fase 7. |
+| `QuotationItem` | `quotation_items` | Línea de una cotización (producto + cantidad + precio + descuento + subtotal). | `onDelete: CASCADE` con cotización. |
+| `Sale` | `sales` | Nota de venta confirmada. | Numeración correlativa (`VTA-2026-00001`). `status`: `PENDING`, `PAID`, `CANCELLED`. `paymentMethod`: `CASH`, `TRANSFER`, `CARD`. `quotationId` opcional (FK a la cotización origen, `SET NULL` si se borra). |
+| `SaleItem` | `sale_items` | Línea de una venta. | **`unitCost` se congela** al confirmar la venta — clave para reportes de rentabilidad históricos cuando el costo del producto cambia después. `onDelete: CASCADE` con venta. |
+| `PurchaseEntry` | `purchase_entries` | Entrada directa de mercadería desde un proveedor. (No hay OC formal en MVP.) | Genera `InventoryMovement(PURCHASE_IN)` por cada item y un `CashTransaction(EXPENSE, source=PURCHASE)`. |
+| `PurchaseEntryItem` | `purchase_entry_items` | Línea de una entrada de compra (producto + cantidad + costo unitario + subtotal). | `onDelete: CASCADE` con la entrada. |
+
+#### Caja y gastos
+
+| Entidad | Tabla | Propósito | Notas clave |
+| --- | --- | --- | --- |
+| `CashTransaction` | `cash_transactions` | Movimiento del libro de caja consolidado: ingresos por ventas + egresos por compras + gastos manuales. | `type`: `INCOME` / `EXPENSE`. `source`: `SALE`, `PURCHASE`, `MANUAL`. `sourceId` apunta al documento origen (no FK porque puede ser `sales.id`, `purchase_entries.id` o `null` para manuales). `expenseCategoryId` solo se usa cuando `source=MANUAL`. `isVoided` marca la transacción anulada cuando se cancela una venta/compra. |
+| `ExpenseCategory` | `expense_categories` | Categoría de gasto manual (arriendo, transporte, publicidad, servicios, sueldos, otros). Seedeadas. | `name` único. |
+
+#### Settings
+
+| Entidad | Tabla | Propósito | Notas clave |
+| --- | --- | --- | --- |
+| `User` | `users` | Usuario que se loguea al sistema. En MVP solo hay rol `ADMIN`. | `email` único. `passwordHash` (bcrypt) marcado `select: false` — solo se trae explícitamente en login. |
+| `CompanySettings` | `company_settings` | Singleton con datos de la empresa (nombre, dirección, teléfono, logo, moneda, footer de cotización, validez por defecto). | Convención: 1 sola fila. Editable desde la pantalla de Configuración (Fase 1+ refinada). |
 
 ### Reglas de integridad críticas
 
@@ -579,7 +619,7 @@ Si el admin ya existe, **el seed no lo recrea** — borralo manualmente primero 
 
 Cada fase es un PR independiente con verificación end-to-end al cierre. Ver [PLAN.md](PLAN.md#plan-de-implementación-por-fases) para el detalle.
 
-**Fase 2 (siguiente):** CRUD de productos con tabs *Datos / Precios y stock / Compatibilidad vehicular*, búsqueda paginada por SKU/partNumber/barcode/descripción, búsqueda por compatibilidad ("qué tengo para Toyota Corolla 2015").
+**Fase 3 (siguiente):** Inventario — entradas directas de mercadería, salidas, ajustes manuales con motivo, vista de movimientos con filtros, vista de stock con semáforo (verde/amarillo/rojo según `quantity` vs `minStock`).
 
 ---
 

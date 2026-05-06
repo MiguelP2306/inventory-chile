@@ -182,12 +182,12 @@ inventory-management/
 
 > Credenciales del admin seedeado: `admin@inventory.local` / `admin123` (overridable vía `SEED_ADMIN_EMAIL` y `SEED_ADMIN_PASSWORD`).
 
-### Fase 2 — Catálogo de productos + compatibilidad vehicular
+### Fase 2 — Catálogo de productos + compatibilidad vehicular ✅
 1. CRUD de `Category`, `Brand`, `VehicleMake`, `VehicleModel`.
 2. CRUD de `Product` con búsqueda paginada por SKU/partNumber/barcode/descripción.
 3. UI de producto con tabs: *Datos* / *Precios y stock* / *Compatibilidad vehicular* (multi-fila marca + modelo + año desde/hasta).
 4. Búsqueda por compatibilidad: "qué tengo para Toyota Corolla 2015".
-5. Buscador rápido global con debounce y atajo de teclado.
+5. Buscador rápido global con debounce y atajo de teclado (Cmd/Ctrl + K).
 
 ### Fase 3 — Inventario (entradas/salidas/ajustes)
 1. `InventoryService.applyMovement()` — única vía para mutar stock, transaccional.
