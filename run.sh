@@ -8,7 +8,7 @@
 #   ./run.sh stop     -> detiene los procesos node lanzados por dev
 #   ./run.sh status   -> muestra estado de puertos 3000/4000/3306
 #   ./run.sh db:init  -> crea la base 'inventory' y el usuario en tu MySQL local
-#                        (te pide la contraseña de root)
+#                        (password 'Inv3ntory!', ya cargado en apps/api/.env.local)
 
 set -euo pipefail
 
@@ -54,7 +54,7 @@ check_mysql() {
     echo "      o System Settings -> MySQL -> Start MySQL Server (instalador oficial)"
     exit 1
   fi
-  if ! mysql -h 127.0.0.1 -P 3306 -u inventory -pinventory -e "SELECT 1" inventory >/dev/null 2>&1; then
+  if ! mysql -h 127.0.0.1 -P 3306 -u inventory -p'Inv3ntory!' -e "SELECT 1" inventory >/dev/null 2>&1; then
     err "MySQL está arriba pero no puedo conectar como inventory@127.0.0.1 a la base 'inventory'."
     echo "      Corré una vez: ./run.sh db:init"
     exit 1
@@ -181,10 +181,9 @@ cmd_db_init() {
     err "No encuentro el cliente 'mysql' en tu PATH"
     exit 1
   fi
-  color "Voy a ejecutar scripts/init-db.sql en tu MySQL local (127.0.0.1:3306)"
-  echo "   Ingresá la contraseña de root cuando te la pida:"
-  mysql -h 127.0.0.1 -P 3306 -u root -p < scripts/init-db.sql
-  color "DB y usuario 'inventory' listos"
+  color "Ejecutando scripts/init-db.sql en tu MySQL local (127.0.0.1:3306, root sin contraseña)"
+  mysql -h 127.0.0.1 -P 3306 -u root < scripts/init-db.sql
+  color "DB y usuario 'inventory' listos (password 'Inv3ntory!', ya cargado en .env.local)"
 }
 
 usage() {
@@ -197,7 +196,8 @@ Comandos:
   stop      Detiene api y web
   status    Muestra puertos 3000/4000/3306 y procesos del proyecto
   db:init   Crea la base 'inventory' y el usuario en tu MySQL local
-            (te pide la contraseña de root)
+            (password 'Inv3ntory!' ya cargado en .env.local).
+            Asume root sin contraseña.
 EOF
 }
 

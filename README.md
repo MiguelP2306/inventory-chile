@@ -29,7 +29,7 @@ pnpm install
 #    Instalador oficial: System Settings -> MySQL -> Start MySQL Server
 
 # 4. Crear la base 'inventory' y el usuario en tu MySQL local
-#    (te pide la contraseña de root)
+#    (asume que tu root no tiene contraseña; si la tiene, abrí scripts/init-db.sql en Workbench)
 ./run.sh db:init
 
 # 5. Arrancar api + web (copia .env.local automáticamente si no existen)
@@ -46,8 +46,10 @@ pnpm install
 | Host | `127.0.0.1` |
 | Puerto | `3306` |
 | Usuario | `inventory` |
-| Contraseña | `inventory` |
+| Contraseña | `Inv3ntory!` |
 | Base | `inventory` |
+
+> Nota: tu MySQL local tiene `validate_password=MEDIUM` instalado, así que el usuario `inventory` necesita una contraseña que cumpla la política. Esa contraseña ya está en [apps/api/.env.example](apps/api/.env.example) y se copia automáticamente a `.env.local` la primera vez, así que no la tipeás nunca. En Workbench la cargás una sola vez y queda guardada.
 
 Estos valores los usa la API ([apps/api/.env.example](apps/api/.env.example)) y son los mismos que podés cargar en MySQL Workbench.
 
