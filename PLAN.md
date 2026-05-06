@@ -165,12 +165,12 @@ inventory-management/
 
 > Cada fase es un PR/iteración independiente. Después de cada fase verificamos juntos antes de pasar a la siguiente.
 
-### Fase 0 — Bootstrap del monorepo
+### Fase 0 — Bootstrap del monorepo ✅
 1. Inicializar pnpm workspace, `apps/web` (Next.js + Tailwind + shadcn), `apps/api` (NestJS), `packages/shared`.
 2. ESLint + Prettier + tsconfig base compartido.
-3. `docker-compose.yml` con MySQL 8 para desarrollo local.
+3. ~~`docker-compose.yml` con MySQL 8 para desarrollo local.~~ → MySQL local nativo + `scripts/init-db.sql` (decisión revertida durante Fase 0; el cliente prefiere instalación nativa).
 4. `.env.example` documentado.
-5. README con comandos de arranque.
+5. README con comandos de arranque + `run.sh` con `build` / `dev` / `stop` / `db:init`.
 
 ### Fase 1 — Base de datos y auth
 1. Configurar TypeORM: `DataSource` (`apps/api/src/database/data-source.ts`) que se reutiliza en CLI y en `TypeOrmModule.forRootAsync` de NestJS. `synchronize: false` siempre — se trabaja con migraciones explícitas.
