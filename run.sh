@@ -273,19 +273,45 @@ cmd_dev() {
   echo "  Logs:         tail -f $API_LOG  $WEB_LOG"
 }
 
+kill_tree() {
+  # Mata recursivamente el proceso y TODOS sus descendientes (no solo hijos directos).
+  # Necesario porque pnpm → nest --watch → node, y pkill -P solo agarra un nivel.
+  local pid=$1 children child
+  children="$(pgrep -P "$pid" 2>/dev/null || true)"
+  for child in $children; do
+    kill_tree "$child"
+  done
+  kill -TERM "$pid" 2>/dev/null || true
+}
+
+kill_port() {
+  # Red de seguridad: si algún node quedó huérfano (reparentado a PID 1)
+  # lo encontramos por el puerto que sigue escuchando.
+  local port=$1 pids
+  pids="$(lsof -ti tcp:"$port" 2>/dev/null || true)"
+  [ -z "$pids" ] && return
+  warn "Puerto :$port aún ocupado por PID(s): $pids — matando"
+  echo "$pids" | xargs kill -TERM 2>/dev/null || true
+  sleep 1
+  pids="$(lsof -ti tcp:"$port" 2>/dev/null || true)"
+  [ -z "$pids" ] && return
+  echo "$pids" | xargs kill -KILL 2>/dev/null || true
+}
+
 cmd_stop() {
   for pidfile in "$API_PID" "$WEB_PID"; do
     if [ -f "$pidfile" ]; then
       local pid
       pid="$(cat "$pidfile")"
       if kill -0 "$pid" 2>/dev/null; then
-        color "Deteniendo PID $pid"
-        pkill -P "$pid" 2>/dev/null || true
-        kill "$pid" 2>/dev/null || true
+        color "Deteniendo PID $pid (árbol completo)"
+        kill_tree "$pid"
       fi
       rm -f "$pidfile"
     fi
   done
+  kill_port 4000
+  kill_port 3000
   ok "Stop OK (MySQL local sigue corriendo; gestionalo con tu init system)"
 }
 

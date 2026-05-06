@@ -134,6 +134,66 @@ Si algo falla en el setup, corré `./run.sh doctor` para ver qué requisito est�
 
 ---
 
+## Levantar y apagar el proyecto
+
+Una vez hecho el `setup`, el día a día se reduce a dos comandos.
+
+### Levantar
+
+```bash
+./run.sh dev
+```
+
+Qué hace:
+
+1. Verifica que MySQL esté corriendo (lo intenta arrancar si no lo está).
+2. Confirma que la conexión `inventory@127.0.0.1/inventory` funciona — si no, te pide correr `./run.sh setup` primero.
+3. Arranca **api** y **web** en background (modo watch), guardando los PIDs en [.run/api.pid](.run/) y [.run/web.pid](.run/), y los logs en [.run/api.log](.run/) y [.run/web.log](.run/).
+4. Espera hasta 90s a que ambos respondan en sus puertos. Si la api no levanta, imprime las últimas 30 líneas de su log y aborta.
+
+Cuando termina te quedás con el shell libre (no bloquea) y los servicios corriendo:
+
+- **Web:** http://localhost:3000
+- **API health:** http://localhost:4000/api/health
+- **Login:** `admin@inventory.local` / `admin123`
+
+> `./run.sh dev` y `./run.sh up` son equivalentes (alias).
+
+### Ver logs mientras corre
+
+```bash
+./run.sh logs       # tail -f de api.log y web.log
+./run.sh status     # qué está arriba (MySQL, API, Web, PIDs)
+```
+
+### Apagar
+
+```bash
+./run.sh stop
+```
+
+Qué hace:
+
+1. Lee los PIDs guardados en `.run/` y mata el **árbol completo** de procesos de cada uno (pnpm → `nest --watch` / `next dev` → node app), no solo el padre.
+2. Como red de seguridad, barre cualquier proceso que haya quedado escuchando en `:4000` o `:3000` — esto cubre el caso en que el watcher de NestJS reparenta el server a PID 1 y el kill por árbol no lo alcanza.
+3. Borra los pidfiles de `.run/`.
+
+**Lo que NO toca:** MySQL local sigue corriendo (gestionalo con tu init system: `brew services stop mysql` en Mac, `sudo systemctl stop mysql` en Linux, o `./run.sh mysql:restart` si lo querés reiniciar). Y `./run.sh down` es alias de `stop`.
+
+### Verificar que quedó todo apagado
+
+```bash
+./run.sh status
+```
+
+Tiene que decir `API :4000 no responde` y `Web :3000 no responde`. Si alguno sigue arriba, repetí `./run.sh stop` — si insiste, hay algo externo al script ocupando el puerto:
+
+```bash
+lsof -i :4000 -i :3000   # ¿qué proceso es?
+```
+
+---
+
 ## Datos por defecto (seed)
 
 El seed es **idempotente** — corré `./run.sh db:seed` cuantas veces quieras, no duplica nada.
