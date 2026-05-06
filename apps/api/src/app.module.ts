@@ -6,7 +6,10 @@ import { BrandsModule } from './brands/brands.module';
 import { CategoriesModule } from './categories/categories.module';
 import { dataSourceOptions } from './database/data-source';
 import { HealthController } from './health.controller';
+import { InventoryModule } from './inventory/inventory.module';
 import { ProductsModule } from './products/products.module';
+import { PurchasesModule } from './purchases/purchases.module';
+import { SuppliersModule } from './suppliers/suppliers.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 
 @Module({
@@ -21,6 +24,9 @@ import { VehiclesModule } from './vehicles/vehicles.module';
     BrandsModule,
     VehiclesModule,
     ProductsModule,
+    SuppliersModule,
+    InventoryModule,
+    PurchasesModule,
   ],
   controllers: [HealthController],
   providers: [],

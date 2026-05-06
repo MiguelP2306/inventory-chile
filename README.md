@@ -13,8 +13,8 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 | 0 | Bootstrap monorepo (pnpm, Next.js, NestJS, MySQL local) | ✅ |
 | 1 | Base de datos (21 entidades, migración inicial, seeds) + auth JWT con cookies httpOnly | ✅ |
 | 2 | Catálogo de productos + compatibilidad vehicular + búsqueda global Cmd+K | ✅ |
-| 3 | Inventario (entradas, salidas, ajustes) | ⏳ siguiente |
-| 4 | Clientes y proveedores | pendiente |
+| 3 | Inventario (compras, ajustes, movimientos, stock con semáforo) + Suppliers básico | ✅ |
+| 4 | Clientes y proveedores (detalle con tabs) | ⏳ siguiente |
 | 5 | Caja y gastos | pendiente |
 | 6 | Cotizaciones + envío WhatsApp/email | pendiente |
 | 7 | Ventas con caja integrada | pendiente |
@@ -258,23 +258,22 @@ inventory-management/
 ├── apps/
 │   ├── api/                              # NestJS — REST API
 │   │   ├── src/
-│   │   │   ├── auth/                     # módulo de autenticación
-│   │   │   │   ├── auth.controller.ts    # /auth/login, /refresh, /logout, /me
-│   │   │   │   ├── auth.service.ts       # bcrypt + sign JWT
-│   │   │   │   ├── auth.module.ts        # registra JwtAuthGuard como APP_GUARD
-│   │   │   │   ├── decorators/
-│   │   │   │   │   ├── public.decorator.ts       # @Public() para rutas sin auth
-│   │   │   │   │   └── current-user.decorator.ts # @CurrentUser() inyecta JwtPayload
-│   │   │   │   ├── guards/               # JwtAuthGuard (global), JwtRefreshGuard
-│   │   │   │   ├── strategies/           # JwtStrategy (cookie/header), JwtRefreshStrategy
-│   │   │   │   ├── dto/login.dto.ts
-│   │   │   │   └── types.ts              # JwtPayload, RefreshJwtPayload
+│   │   │   ├── auth/                     # JWT + cookies httpOnly + guard global
 │   │   │   ├── database/
 │   │   │   │   ├── data-source.ts        # DataSource compartido (CLI + runtime)
 │   │   │   │   ├── entities/             # 21 entidades + index.ts (barrel)
 │   │   │   │   ├── migrations/           # SQL versionado (no editar a mano)
 │   │   │   │   └── seeds/run-seeds.ts    # admin, almacén, categorías, settings
-│   │   │   ├── app.module.ts             # ConfigModule + TypeOrm + Auth
+│   │   │   ├── categories/               # CRUD categorías de producto
+│   │   │   ├── brands/                   # CRUD marcas de producto
+│   │   │   ├── vehicles/                 # CRUD VehicleMake + VehicleModel
+│   │   │   ├── products/                 # CRUD productos + búsqueda + by-vehicle + quick-search
+│   │   │   ├── suppliers/                # CRUD proveedores
+│   │   │   ├── inventory/
+│   │   │   │   ├── inventory.service.ts  # applyMovement() — ÚNICA vía para mutar stock
+│   │   │   │   └── inventory.controller.ts # GET /stock, GET /movements, POST /adjust
+│   │   │   ├── purchases/                # PurchaseEntry + items, dispara applyMovement
+│   │   │   ├── app.module.ts
 │   │   │   ├── health.controller.ts      # GET /api/health (público)
 │   │   │   └── main.ts                   # bootstrap, cookie-parser, CORS, ValidationPipe
 │   │   ├── .env.example                  # vars de la api (PORT, DB_*, JWT_*, RESEND_*)
@@ -283,21 +282,34 @@ inventory-management/
 │   │
 │   └── web/                              # Next.js 15 App Router
 │       ├── app/
-│       │   ├── (auth)/                   # grupo público
-│       │   │   ├── layout.tsx            # centrado en card sobre fondo muted
-│       │   │   └── login/page.tsx        # form RHF + Zod
-│       │   ├── (dashboard)/              # grupo protegido
-│       │   │   ├── layout.tsx            # llama getCurrentUser → redirect /login si null
-│       │   │   └── page.tsx              # dashboard placeholder
-│       │   ├── globals.css               # tokens shadcn + paleta semáforo (stock-ok/low/out)
-│       │   └── layout.tsx                # root layout con QueryClientProvider
+│       │   ├── (auth)/login/             # form RHF + Zod
+│       │   └── (dashboard)/              # grupo protegido — layout llama getCurrentUser()
+│       │       ├── page.tsx              # dashboard placeholder
+│       │       ├── productos/            # lista + nuevo + [id] (form con tabs)
+│       │       ├── categorias/           # CRUD via SimpleNameList
+│       │       ├── marcas/               # CRUD via SimpleNameList
+│       │       ├── vehiculos/            # tabs: marcas / modelos
+│       │       ├── proveedores/          # CRUD con dialog completo
+│       │       ├── inventario/           # vista de stock con semáforo + ajuste inline
+│       │       │   └── movimientos/      # historial paginado con filtros
+│       │       └── compras/              # lista + nuevo (form con items + ProductPicker)
 │       ├── components/
-│       │   ├── ui/                       # shadcn: Button, Input, Label, Card
-│       │   ├── providers.tsx             # QueryClient (staleTime 30s)
+│       │   ├── ui/                       # shadcn: button, input, label, card, select, tabs,
+│       │   │                             #   table, dialog, dropdown-menu, badge, separator,
+│       │   │                             #   skeleton, command, toaster (sonner)
+│       │   ├── forms/product-form.tsx    # 3 tabs: Datos / Precios y stock / Compatibilidad
+│       │   ├── sidebar.tsx               # nav lateral por secciones (Catálogo / Operación)
+│       │   ├── quick-search.tsx          # Cmd+K global
+│       │   ├── product-picker.tsx        # dialog de búsqueda — reusable en compras/cotizaciones/ventas
+│       │   ├── adjust-stock-dialog.tsx   # ajuste inline desde la vista de inventario
+│       │   ├── simple-name-list.tsx      # CRUD genérico de entidades single-field
+│       │   ├── providers.tsx             # QueryClientProvider
 │       │   └── logout-button.tsx
 │       ├── lib/
 │       │   ├── api.ts                    # axios + interceptor refresh (browser)
 │       │   ├── server-api.ts             # fetch + cookies forwarded (Server Components)
+│       │   ├── catalog-api.ts            # wrappers tipados de productos/categorías/marcas/vehículos
+│       │   ├── inventory-api.ts          # wrappers tipados de stock/movements/suppliers/purchases
 │       │   └── utils.ts                  # cn() helper
 │       ├── components.json               # config shadcn
 │       ├── tailwind.config.ts            # tokens semáforo, container, etc.
@@ -307,12 +319,13 @@ inventory-management/
 │   └── shared/                           # ⚠️ debe estar buildeado para que la api lo use
 │       ├── src/
 │       │   ├── enums.ts                  # InventoryMovementType, QuotationStatus, etc.
+│       │   ├── types.ts                  # ProductDto, StockSummary, MovementDto, etc.
 │       │   └── index.ts
 │       └── package.json                  # main → dist/index.js (CommonJS)
 │
 ├── scripts/
 │   └── init-db.sql                       # crea DB + usuario inventory en MySQL local
-├── run.sh                                # helper: build/dev/stop/status/db:init
+├── run.sh                                # helper: setup/dev/stop/db:*/mysql:*/shared:*
 ├── pnpm-workspace.yaml
 ├── tsconfig.base.json                    # config TS compartida
 ├── PLAN.md                               # plan completo de implementación
@@ -491,6 +504,109 @@ NEXT_PUBLIC_API_URL=http://localhost:4000/api
 
 ---
 
+## Inventario y movimientos de stock
+
+> **Regla arquitectónica clave:** **toda mutación de stock pasa por `InventoryService.applyMovement()`.** Nunca llamar `Stock` repo directamente desde otros servicios — bypassearía la validación de stock negativo y el registro del `InventoryMovement` (la fuente de verdad).
+
+### `applyMovement(manager, input)` — la única vía
+
+Vive en [`apps/api/src/inventory/inventory.service.ts`](apps/api/src/inventory/inventory.service.ts) y recibe un `EntityManager` (no un repo) para componerse con transacciones externas.
+
+```typescript
+await this.dataSource.transaction(async (manager) => {
+  // ... otras operaciones tuyas ...
+  await this.inventory.applyMovement(manager, {
+    productId,
+    warehouseId,
+    type: InventoryMovementType.PURCHASE_IN,  // o SALE_OUT, ADJUSTMENT, RETURN_IN, RETURN_OUT
+    qty: 100,                                  // SIGNADA: + entrada, - salida
+    unitCost: '3.50',                          // opcional, sólo PURCHASE_IN/RETURN_OUT
+    reference: 'PurchaseEntry',                // tabla origen (texto libre)
+    refId: entry.id,                           // id del documento origen
+    userId,
+  });
+});
+```
+
+Lo que hace `applyMovement`, en orden, dentro de la transacción que recibe:
+
+1. Valida que `productId` y `warehouseId` existan.
+2. Inserta el `InventoryMovement` (la fuente de verdad).
+3. UPSERT atómico en `stocks` con `INSERT ... ON DUPLICATE KEY UPDATE quantity = quantity + VALUES(quantity)`. Esto serializa updates concurrentes a nivel MySQL.
+4. Re-lee `stocks` y, si `quantity < 0`, hace `throw ConflictException` (HTTP 409). El throw rollbackea **toda** la transacción, incluyendo lo que hayas hecho antes.
+
+### Convenciones de `qty`
+
+- **Signada**: `+100` para una compra, `-5` para una merma o venta.
+- `qty = 0` → 400 Bad Request.
+- `unitCost` solo tiene sentido en entradas (compras o devoluciones de venta).
+
+### Cómo escribir un servicio nuevo que mueve stock
+
+Patrón que sigue [`PurchasesService.create()`](apps/api/src/purchases/purchases.service.ts) — replicalo en Sales (Fase 7), Returns, etc.:
+
+```typescript
+const entryId = await this.dataSource.transaction(async (manager) => {
+  // 1. Insertar el documento "padre" (PurchaseEntry, Sale, etc.)
+  const entry = manager.create(PurchaseEntry, { ... });
+  await manager.save(entry);
+
+  // 2. Por cada item: insertar el item Y disparar applyMovement
+  for (const item of items) {
+    const itemEntity = manager.create(PurchaseEntryItem, { ... });
+    await manager.save(itemEntity);
+    await this.inventory.applyMovement(manager, {
+      productId: item.productId,
+      warehouseId,
+      type: InventoryMovementType.PURCHASE_IN,
+      qty: item.qty,
+      unitCost: item.unitCost,
+      reference: 'PurchaseEntry',
+      refId: entry.id,
+      userId,
+    });
+  }
+  return entry.id;
+});
+return this.getOne(entryId);  // re-leer DESPUÉS del commit
+```
+
+Notar: `getOne()` se llama **fuera** de la transacción. Si lo metés adentro, no ve sus propios writes hasta el commit (TypeORM 0.3 no usa view-after-write dentro de la misma transacción).
+
+### Semáforo de stock (vista `/inventario`)
+
+`GET /api/inventory/stock` devuelve un row por producto **activo** (incluso productos sin movimientos aparecen con `quantity: 0`). El campo `status` lo computa el backend:
+
+| Condición | Estado | Color | Badge |
+| --- | --- | --- | --- |
+| `quantity <= 0` | `out` | rojo (`--stock-out`) | `<Badge variant="out">` |
+| `0 < quantity <= product.minStock` | `low` | amarillo (`--stock-low`) | `<Badge variant="low">` |
+| `quantity > product.minStock` | `ok` | verde (`--stock-ok`) | `<Badge variant="ok">` |
+
+Los tokens viven en [`apps/web/app/globals.css`](apps/web/app/globals.css) y las variantes del Badge en [`apps/web/components/ui/badge.tsx`](apps/web/components/ui/badge.tsx). Para usar los colores en otros lados: `bg-stock-ok`, `text-stock-low/15`, etc. (Tailwind ya los conoce).
+
+### Ajuste manual
+
+`POST /api/inventory/adjust` con `{ productId, qty (signada), reason, unitCost? }`:
+- Internamente llama `applyMovement` con `type: ADJUSTMENT`, `reference: 'Adjustment'`.
+- `reason` es texto libre obligatorio. Por ahora se loggea pero no se persiste en una columna dedicada (futuro: ampliar `InventoryMovement.reason`).
+- Desde la UI: cualquier fila de `/inventario` tiene un botón ⚙️ que abre [`AdjustStockDialog`](apps/web/components/adjust-stock-dialog.tsx). El diálogo muestra el stock resultante en vivo y bloquea el submit si daría negativo (validación cliente — el backend igual valida y devuelve 409 si pasa de largo).
+
+### Compras (entrada de mercadería)
+
+`POST /api/purchases` recibe `{ supplierId, date?, notes?, items: [{productId, qty, unitCost}] }` y crea, en una sola transacción atómica:
+- Un `PurchaseEntry` con `total` calculado.
+- Un `PurchaseEntryItem` por cada item.
+- Un `InventoryMovement(PURCHASE_IN)` por cada item, vía `applyMovement`.
+
+**Importante:** todavía no genera el `CashTransaction(EXPENSE, source=PURCHASE)` — eso llega en Fase 5 (Caja). El gancho del flujo está, falta el wiring.
+
+### Productos sin compatibilidad histórica con `Stock`
+
+Si un producto se crea **antes** de tener stock, no aparece como fila en la tabla `stocks` hasta su primer movimiento. La query de `GET /inventory/stock` hace `LEFT JOIN ... COALESCE(s.quantity, 0)` para mostrar todos los productos activos con `quantity = 0` por default.
+
+---
+
 ## Convenciones de código
 
 ### TypeScript
@@ -508,6 +624,19 @@ NEXT_PUBLIC_API_URL=http://localhost:4000/api
 - Decimales monetarios: `decimal(15, 2)` mapeado a `string` en TS (no `number`, para no perder precisión).
 - Cantidades: `int` (los repuestos automotrices son enteros).
 - Timestamps: `datetime(6)` con `@CreateDateColumn` / `@UpdateDateColumn`.
+
+### Servicios que mutan stock o caja
+
+- **Stock:** siempre vía `InventoryService.applyMovement(manager, ...)`. Nunca tocar `Stock` repo directamente. Ver sección [Inventario y movimientos de stock](#inventario-y-movimientos-de-stock).
+- **Caja** (Fase 5+): mismo patrón con `CashboxService.recordTransaction(manager, ...)`.
+- Si tu operación abarca varios writes que deben ser atómicos (ej. crear `Sale` + items + movimientos + transacción de caja), envolvé todo en `dataSource.transaction(async (manager) => ...)` y pasá ese `manager` a cada service llamado.
+- Re-leer entidades para devolver al cliente (`getOne(...)`) **fuera** de la transacción, después del commit.
+
+### DTOs y validación
+
+- Cada controlador valida via `class-validator` con DTOs explícitos. `ValidationPipe` está global en `main.ts` con `whitelist: true` + `forbidNonWhitelisted: true`, así que campos extra del cliente devuelven 400.
+- Para PATCHes parciales usar `extends PartialType(CreateXDto)` de `@nestjs/mapped-types` — hace todos los campos opcionales sin repetir la definición.
+- `@ParseUUIDPipe()` en cada `:id` de ruta para que IDs malformados devuelvan 400 antes de tocar la DB.
 
 ### Commits
 
@@ -591,6 +720,18 @@ rm -rf .run
 ./run.sh mysql:restart
 ```
 
+### `409 Stock insuficiente para "..."` al hacer un ajuste o venta
+
+`InventoryService.applyMovement` valida que el stock resultante no quede negativo y rollbackea si pasa. Significa lo que dice: la cantidad signada que pasaste haría que `quantity < 0`. Verificá el stock actual en `/inventario` y ajustá hacia arriba primero, o reducí la cantidad. Para hacer un conteo físico que “fija” el stock en X (no incremental), por ahora usá un ajuste con `qty = X - currentQty`.
+
+### Después de cambiar `minStock` en un producto, el semáforo no se actualiza en `/inventario`
+
+TanStack Query cachea la respuesta de `/inventory/stock` por 30s (`staleTime` default en [`components/providers.tsx`](apps/web/components/providers.tsx)). Refrescá la página o esperá. Si querés invalidación instantánea, agregá `qc.invalidateQueries({ queryKey: ['stock'] })` en el `onSuccess` del mutate del producto (en `components/forms/product-form.tsx`).
+
+### Quiero crear un producto sin stock pero ya aparece como "Sin stock" en `/inventario`
+
+Es esperado: la vista incluye todos los productos activos, así sepan o no de movimientos. Para ocultarlo de la lista, desactivá el producto (`isActive=false` en su form) — la query filtra por `p.isActive = TRUE`.
+
 ### Quiero entrar al shell de MySQL como la app
 
 ```bash
@@ -619,7 +760,7 @@ Si el admin ya existe, **el seed no lo recrea** — borralo manualmente primero 
 
 Cada fase es un PR independiente con verificación end-to-end al cierre. Ver [PLAN.md](PLAN.md#plan-de-implementación-por-fases) para el detalle.
 
-**Fase 3 (siguiente):** Inventario — entradas directas de mercadería, salidas, ajustes manuales con motivo, vista de movimientos con filtros, vista de stock con semáforo (verde/amarillo/rojo según `quantity` vs `minStock`).
+**Fase 4 (siguiente):** Clientes y proveedores con detalle (tabs *Datos / Cotizaciones / Ventas* para clientes, *Datos / Compras* para proveedores), validación de teléfono internacional (clave para WhatsApp en Fase 6), notas internas, historial.
 
 ---
 

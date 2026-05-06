@@ -60,3 +60,75 @@ export interface PaginatedResult<T> {
   page: number;
   pageSize: number;
 }
+
+// ---------- Inventario ----------
+
+export type StockStatus = 'ok' | 'low' | 'out';
+
+export interface StockSummary {
+  product: {
+    id: string;
+    sku: string;
+    name: string;
+    partNumber: string | null;
+    barcode: string | null;
+    minStock: number;
+    maxStock: number | null;
+    location: string | null;
+    cost: string;
+    price: string;
+    category: { id: string; name: string } | null;
+    brand: { id: string; name: string } | null;
+  };
+  warehouseId: string;
+  quantity: number;
+  status: StockStatus;
+}
+
+export interface MovementDto {
+  id: string;
+  type: 'PURCHASE_IN' | 'SALE_OUT' | 'ADJUSTMENT' | 'RETURN_IN' | 'RETURN_OUT';
+  qty: number;
+  unitCost: string | null;
+  reference: string | null;
+  refId: string | null;
+  createdAt: string;
+  product: { id: string; sku: string; name: string } | null;
+  warehouse: { id: string; name: string } | null;
+  user: { id: string; name: string; email: string } | null;
+}
+
+// ---------- Suppliers ----------
+
+export interface SupplierDto {
+  id: string;
+  name: string;
+  taxId: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  notes: string | null;
+}
+
+// ---------- Purchases ----------
+
+export interface PurchaseEntryItemDto {
+  id: string;
+  productId: string;
+  qty: number;
+  unitCost: string;
+  subtotal: string;
+  product?: { id: string; sku: string; name: string };
+}
+
+export interface PurchaseEntryDto {
+  id: string;
+  supplierId: string;
+  date: string;
+  total: string;
+  notes: string | null;
+  userId: string;
+  supplier?: SupplierDto;
+  items?: PurchaseEntryItemDto[];
+  user?: { id: string; name: string; email: string };
+}

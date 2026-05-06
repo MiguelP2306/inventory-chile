@@ -1,0 +1,270 @@
+'use client';
+
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { useState } from 'react';
+import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { apiErrorMessage } from '@/lib/catalog-api';
+import {
+  createSupplier,
+  deleteSupplier,
+  listSuppliers,
+  updateSupplier,
+  type SupplierInput,
+} from '@/lib/inventory-api';
+import type { SupplierDto } from '@inventory/shared';
+
+const empty: SupplierInput = {
+  name: '',
+  taxId: '',
+  email: '',
+  phone: '',
+  address: '',
+  notes: '',
+};
+
+export default function ProveedoresPage() {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<SupplierDto | null>(null);
+  const [form, setForm] = useState<SupplierInput>(empty);
+
+  const list = useQuery({ queryKey: ['suppliers'], queryFn: () => listSuppliers() });
+
+  const createMut = useMutation({
+    mutationFn: (input: SupplierInput) => createSupplier(toApi(input)),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['suppliers'] });
+      toast.success('Proveedor creado');
+      close();
+    },
+    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo crear')),
+  });
+  const updateMut = useMutation({
+    mutationFn: ({ id, input }: { id: string; input: SupplierInput }) =>
+      updateSupplier(id, toApi(input)),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['suppliers'] });
+      toast.success('Proveedor actualizado');
+      close();
+    },
+    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo actualizar')),
+  });
+  const removeMut = useMutation({
+    mutationFn: (id: string) => deleteSupplier(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['suppliers'] });
+      toast.success('Proveedor eliminado');
+    },
+    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo eliminar')),
+  });
+
+  function startCreate() {
+    setEditing(null);
+    setForm(empty);
+    setOpen(true);
+  }
+
+  function startEdit(s: SupplierDto) {
+    setEditing(s);
+    setForm({
+      name: s.name,
+      taxId: s.taxId ?? '',
+      email: s.email ?? '',
+      phone: s.phone ?? '',
+      address: s.address ?? '',
+      notes: s.notes ?? '',
+    });
+    setOpen(true);
+  }
+
+  function close() {
+    setOpen(false);
+    setEditing(null);
+    setForm(empty);
+  }
+
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.name.trim()) return;
+    if (editing) updateMut.mutate({ id: editing.id, input: form });
+    else createMut.mutate(form);
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Proveedores</h1>
+        <Button onClick={startCreate}>
+          <Plus className="h-4 w-4" />
+          Nuevo proveedor
+        </Button>
+      </div>
+
+      <div className="rounded-md border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Nombre</TableHead>
+              <TableHead>Email</TableHead>
+              <TableHead>Teléfono</TableHead>
+              <TableHead>NIT/RUC</TableHead>
+              <TableHead className="w-[100px]" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {list.isLoading && (
+              <>
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <TableRow key={i}>
+                    <TableCell colSpan={5}>
+                      <Skeleton className="h-4 w-full" />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </>
+            )}
+            {list.data && list.data.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
+                  Sin proveedores todavía.
+                </TableCell>
+              </TableRow>
+            )}
+            {list.data?.map((s) => (
+              <TableRow key={s.id}>
+                <TableCell className="font-medium">{s.name}</TableCell>
+                <TableCell className="text-muted-foreground">{s.email ?? '—'}</TableCell>
+                <TableCell className="text-muted-foreground">{s.phone ?? '—'}</TableCell>
+                <TableCell className="text-muted-foreground">{s.taxId ?? '—'}</TableCell>
+                <TableCell className="text-right">
+                  <div className="flex justify-end gap-1">
+                    <Button variant="ghost" size="icon" onClick={() => startEdit(s)}>
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => {
+                        if (confirm(`¿Eliminar proveedor "${s.name}"?`)) removeMut.mutate(s.id);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      <Dialog open={open} onOpenChange={(v) => (v ? setOpen(true) : close())}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {editing ? `Editar ${editing.name}` : 'Nuevo proveedor'}
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={onSubmit} className="space-y-3">
+            <Field label="Nombre">
+              <Input
+                autoFocus
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+              />
+            </Field>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <Field label="Email">
+                <Input
+                  type="email"
+                  value={form.email ?? ''}
+                  onChange={(e) => setForm({ ...form, email: e.target.value })}
+                />
+              </Field>
+              <Field label="Teléfono">
+                <Input
+                  value={form.phone ?? ''}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  placeholder="+54 11 5555-1234"
+                />
+              </Field>
+              <Field label="NIT/RUC">
+                <Input
+                  value={form.taxId ?? ''}
+                  onChange={(e) => setForm({ ...form, taxId: e.target.value })}
+                />
+              </Field>
+              <Field label="Dirección">
+                <Input
+                  value={form.address ?? ''}
+                  onChange={(e) => setForm({ ...form, address: e.target.value })}
+                />
+              </Field>
+            </div>
+            <Field label="Notas">
+              <textarea
+                rows={3}
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                value={form.notes ?? ''}
+                onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              />
+            </Field>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={close}>
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={!form.name.trim() || createMut.isPending || updateMut.isPending}
+              >
+                {editing ? 'Guardar' : 'Crear'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// Convierte strings vacíos a null para que el backend no los persista como ''.
+function toApi(input: SupplierInput): SupplierInput {
+  const blank = (v: string | null | undefined) => (v && v.trim() !== '' ? v.trim() : null);
+  return {
+    name: input.name.trim(),
+    email: blank(input.email),
+    phone: blank(input.phone),
+    taxId: blank(input.taxId),
+    address: blank(input.address),
+    notes: blank(input.notes),
+  };
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      {children}
+    </div>
+  );
+}

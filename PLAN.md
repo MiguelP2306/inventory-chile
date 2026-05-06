@@ -189,12 +189,14 @@ inventory-management/
 4. Búsqueda por compatibilidad: "qué tengo para Toyota Corolla 2015".
 5. Buscador rápido global con debounce y atajo de teclado (Cmd/Ctrl + K).
 
-### Fase 3 — Inventario (entradas/salidas/ajustes)
+### Fase 3 — Inventario (entradas/salidas/ajustes) ✅
 1. `InventoryService.applyMovement()` — única vía para mutar stock, transaccional.
 2. Endpoint de entrada directa de mercadería (proveedor + items + costos).
 3. Endpoint de ajuste manual con motivo.
 4. UI de movimientos con filtros (fechas, producto, tipo).
 5. Vista de stock con badge **rojo** si `quantity = 0`, **amarillo** si `<= minStock`, **verde** caso contrario.
+
+> Suppliers básico (CRUD) implementado en esta fase porque PurchaseEntry lo requiere; la pantalla de cliente/proveedor con tabs llega en Fase 4.
 
 ### Fase 4 — Clientes y proveedores
 1. CRUD de `Customer` con datos fiscales, contacto, **notas internas**.
