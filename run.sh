@@ -455,6 +455,17 @@ cmd_logs() {
   tail -f "$API_LOG" "$WEB_LOG" 2>/dev/null
 }
 
+cmd_shared_build() {
+  ensure_pnpm
+  build_shared
+}
+
+cmd_shared_watch() {
+  ensure_pnpm
+  color "tsc --watch sobre packages/shared (Ctrl+C para salir)"
+  exec pnpm --filter @inventory/shared dev
+}
+
 usage() {
   cat <<EOF
 Uso: ./run.sh <comando>
@@ -483,6 +494,10 @@ MySQL:
   mysql:restart    Reinicia el servicio MySQL local
   mysql:cli        Abre el cliente mysql como inventory@127.0.0.1/inventory
 
+Paquete shared (enums/tipos):
+  shared:build     Compila packages/shared (necesario tras modificar enums)
+  shared:watch     tsc --watch sobre packages/shared
+
 Compatibilidad:
   Mac/Linux:  funciona out of the box
   Windows:    usá Git Bash (viene con Git for Windows) o WSL2
@@ -506,6 +521,8 @@ case "${1:-}" in
   db:reset|db-reset)           cmd_db_reset ;;
   mysql:restart|mysql-restart) cmd_mysql_restart ;;
   mysql:cli|mysql-cli)         cmd_mysql_cli ;;
+  shared:build|shared-build)   cmd_shared_build ;;
+  shared:watch|shared-watch)   cmd_shared_watch ;;
   ""|-h|--help|help) usage ;;
   *) err "Comando desconocido: $1"; usage; exit 1 ;;
 esac

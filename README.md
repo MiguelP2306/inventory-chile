@@ -136,7 +136,7 @@ Si algo falla en el setup, corré `./run.sh doctor` para ver qué requisito est�
 
 ## Datos por defecto (seed)
 
-El seed es **idempotente** — corré `pnpm --filter @inventory/api db:seed` cuantas veces quieras, no duplica nada.
+El seed es **idempotente** — corré `./run.sh db:seed` cuantas veces quieras, no duplica nada.
 
 ### Usuario admin
 
@@ -226,6 +226,13 @@ Todo se hace desde `./run.sh`. Si pasás algún argumento que no entiende, te mu
 | `./run.sh mysql:restart` | Reinicia el servicio MySQL local (`brew services restart mysql` o `systemctl restart mysql`) |
 | `./run.sh mysql:cli` | Abre shell `mysql` como `inventory@127.0.0.1/inventory` |
 
+### Paquete shared (enums/tipos)
+
+| Comando | Qué hace |
+| --- | --- |
+| `./run.sh shared:build` | Compila `packages/shared` (necesario tras modificar enums) |
+| `./run.sh shared:watch` | `tsc --watch` sobre `packages/shared` |
+
 ### Otros (vía pnpm directamente)
 
 | Comando | Qué hace |
@@ -233,7 +240,6 @@ Todo se hace desde `./run.sh`. Si pasás algún argumento que no entiende, te mu
 | `pnpm typecheck` | Type-check de todos los paquetes |
 | `pnpm lint` | Lint de todos los paquetes |
 | `pnpm format` | Prettier sobre todo el repo |
-| `pnpm --filter @inventory/shared dev` | tsc --watch del paquete shared (si vas a modificar enums seguido) |
 
 ### Logs en dev mode
 
@@ -484,7 +490,7 @@ Race entre tsc-watch y nest-cli. Ya está mitigado con `deleteOutDir: false` en 
 
 ```bash
 rm -rf apps/api/dist apps/api/tsconfig.tsbuildinfo apps/api/tsconfig.build.tsbuildinfo
-pnpm --filter @inventory/api build
+./run.sh build
 ./run.sh dev
 ```
 
@@ -493,13 +499,13 @@ pnpm --filter @inventory/api build
 El paquete `@inventory/shared` se consume **en runtime** desde la api (CommonJS). Si modificás algo en `packages/shared/src/`, tenés que rebuildear:
 
 ```bash
-pnpm --filter @inventory/shared build
+./run.sh shared:build
 ```
 
 O dejá tsc en watch en otra terminal:
 
 ```bash
-pnpm --filter @inventory/shared dev
+./run.sh shared:watch
 ```
 
 ### `EADDRINUSE: address already in use :::4000` (o :3000)
@@ -562,7 +568,7 @@ rm -rf .run
 Antes de seedear (o como variables de entorno al correr seed):
 
 ```bash
-SEED_ADMIN_EMAIL=otro@ejemplo.com SEED_ADMIN_PASSWORD=otra-pass pnpm --filter @inventory/api db:seed
+SEED_ADMIN_EMAIL=otro@ejemplo.com SEED_ADMIN_PASSWORD=otra-pass ./run.sh db:seed
 ```
 
 Si el admin ya existe, **el seed no lo recrea** — borralo manualmente primero o cambialo desde la pantalla de Configuración (cuando exista).
