@@ -85,4 +85,17 @@ export class ListStockQueryDto {
   @IsOptional()
   @IsEnum(['ok', 'low', 'out'] as const)
   status?: 'ok' | 'low' | 'out';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  pageSize?: number;
 }

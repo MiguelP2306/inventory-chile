@@ -22,6 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { formatCurrency } from '@/lib/format';
 import {
   listBrands,
   listCategories,
@@ -30,30 +31,51 @@ import {
   listVehicleModels,
   productsByVehicle,
 } from '@/lib/catalog-api';
+import { useUrlFilters } from '@/lib/use-url-filters';
 import type { ProductDto } from '@inventory/shared';
 
 const ALL = '__all__';
+const PAGE_SIZE = 20;
+const MIN_YEAR = 1980;
+const MAX_YEAR = new Date().getFullYear() + 1;
+const YEAR_OPTIONS = Array.from(
+  { length: MAX_YEAR - MIN_YEAR + 1 },
+  (_, i) => MAX_YEAR - i,
+);
+
+const filterDefaults = {
+  q: '',
+  category: '',
+  brand: '',
+  vmake: '',
+  vmodel: '',
+  vyear: '',
+  page: '',
+} as const;
 
 export default function ProductosPage() {
-  const [q, setQ] = useState('');
-  const [debouncedQ, setDebouncedQ] = useState('');
-  const [categoryId, setCategoryId] = useState<string>(ALL);
-  const [brandId, setBrandId] = useState<string>(ALL);
-  const [page, setPage] = useState(1);
+  const { values, setFilter, setFilters, clear } = useUrlFilters(filterDefaults);
 
-  // Búsqueda por vehículo
-  const [vehMakeId, setVehMakeId] = useState<string>(ALL);
-  const [vehModelId, setVehModelId] = useState<string>(ALL);
-  const [vehYear, setVehYear] = useState<string>('');
-  const vehicleSearchActive = vehMakeId !== ALL || vehModelId !== ALL || vehYear !== '';
+  const q = values.q ?? '';
+  const categoryId = values.category || ALL;
+  const brandId = values.brand || ALL;
+  const vehMakeId = values.vmake || ALL;
+  const vehModelId = values.vmodel || ALL;
+  const vehYear = values.vyear ?? '';
+  const page = Number(values.page || '1');
 
+  const [debouncedQ, setDebouncedQ] = useState(q);
   useEffect(() => {
-    const t = setTimeout(() => {
-      setDebouncedQ(q.trim());
-      setPage(1);
-    }, 250);
+    const t = setTimeout(() => setDebouncedQ(q.trim()), 250);
     return () => clearTimeout(t);
   }, [q]);
+
+  const vehicleSearchActive = vehMakeId !== ALL || vehModelId !== ALL || vehYear !== '';
+  const filtersActive =
+    debouncedQ !== '' ||
+    categoryId !== ALL ||
+    brandId !== ALL ||
+    vehicleSearchActive;
 
   const categories = useQuery({ queryKey: ['categories'], queryFn: listCategories });
   const brands = useQuery({ queryKey: ['brands'], queryFn: listBrands });
@@ -72,7 +94,7 @@ export default function ProductosPage() {
         categoryId: categoryId === ALL ? undefined : categoryId,
         brandId: brandId === ALL ? undefined : brandId,
         page,
-        pageSize: 20,
+        pageSize: PAGE_SIZE,
       }),
     enabled: !vehicleSearchActive,
   });
@@ -94,14 +116,8 @@ export default function ProductosPage() {
   const total = vehicleSearchActive ? items.length : (list.data?.total ?? 0);
   const totalPages = useMemo(() => {
     if (vehicleSearchActive) return 1;
-    return Math.max(1, Math.ceil((list.data?.total ?? 0) / 20));
+    return Math.max(1, Math.ceil((list.data?.total ?? 0) / PAGE_SIZE));
   }, [list.data, vehicleSearchActive]);
-
-  function clearVehicleSearch() {
-    setVehMakeId(ALL);
-    setVehModelId(ALL);
-    setVehYear('');
-  }
 
   return (
     <div className="space-y-6">
@@ -120,14 +136,11 @@ export default function ProductosPage() {
         <Input
           placeholder="Buscar por SKU, número de parte, código de barras o nombre"
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onChange={(e) => setFilters({ q: e.target.value, page: null })}
         />
         <Select
           value={categoryId}
-          onValueChange={(v) => {
-            setCategoryId(v);
-            setPage(1);
-          }}
+          onValueChange={(v) => setFilters({ category: v === ALL ? null : v, page: null })}
         >
           <SelectTrigger>
             <SelectValue placeholder="Categoría" />
@@ -143,10 +156,7 @@ export default function ProductosPage() {
         </Select>
         <Select
           value={brandId}
-          onValueChange={(v) => {
-            setBrandId(v);
-            setPage(1);
-          }}
+          onValueChange={(v) => setFilters({ brand: v === ALL ? null : v, page: null })}
         >
           <SelectTrigger>
             <SelectValue placeholder="Marca" />
@@ -167,7 +177,11 @@ export default function ProductosPage() {
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-medium">Buscar por vehículo compatible</h2>
           {vehicleSearchActive && (
-            <Button variant="ghost" size="sm" onClick={clearVehicleSearch}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setFilters({ vmake: null, vmodel: null, vyear: null })}
+            >
               Limpiar
             </Button>
           )}
@@ -175,10 +189,9 @@ export default function ProductosPage() {
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <Select
             value={vehMakeId}
-            onValueChange={(v) => {
-              setVehMakeId(v);
-              setVehModelId(ALL);
-            }}
+            onValueChange={(v) =>
+              setFilters({ vmake: v === ALL ? null : v, vmodel: null })
+            }
           >
             <SelectTrigger>
               <SelectValue placeholder="Marca" />
@@ -194,7 +207,7 @@ export default function ProductosPage() {
           </Select>
           <Select
             value={vehModelId}
-            onValueChange={setVehModelId}
+            onValueChange={(v) => setFilter('vmodel', v === ALL ? null : v)}
             disabled={vehMakeId === ALL}
           >
             <SelectTrigger>
@@ -209,16 +222,32 @@ export default function ProductosPage() {
               ))}
             </SelectContent>
           </Select>
-          <Input
-            type="number"
-            placeholder="Año (ej: 2015)"
-            value={vehYear}
-            onChange={(e) => setVehYear(e.target.value)}
-            min={1900}
-            max={2100}
-          />
+          <Select
+            value={vehYear || ALL}
+            onValueChange={(v) => setFilter('vyear', v === ALL ? null : v)}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Año" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>Cualquier año</SelectItem>
+              {YEAR_OPTIONS.map((y) => (
+                <SelectItem key={y} value={String(y)}>
+                  {y}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
+
+      {filtersActive && (
+        <div>
+          <Button variant="ghost" size="sm" onClick={clear}>
+            Limpiar todos los filtros
+          </Button>
+        </div>
+      )}
 
       {/* Tabla */}
       <div className="rounded-md border bg-card">
@@ -270,8 +299,12 @@ export default function ProductosPage() {
                 <TableCell className="text-muted-foreground">
                   {p.brand?.name ?? '—'}
                 </TableCell>
-                <TableCell className="text-right tabular-nums">${p.cost}</TableCell>
-                <TableCell className="text-right tabular-nums">${p.price}</TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {formatCurrency(p.cost)}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {formatCurrency(p.price)}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -287,7 +320,7 @@ export default function ProductosPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              onClick={() => setFilter('page', String(Math.max(1, page - 1)))}
               disabled={page === 1}
             >
               Anterior
@@ -295,7 +328,7 @@ export default function ProductosPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              onClick={() => setFilter('page', String(Math.min(totalPages, page + 1)))}
               disabled={page >= totalPages}
             >
               Siguiente

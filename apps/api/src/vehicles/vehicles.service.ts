@@ -1,10 +1,13 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { rethrowFkAsConflict } from '../common/fk-error';
 import { VehicleMake, VehicleModel } from '../database/entities';
 import {
   CreateVehicleMakeDto,
   CreateVehicleModelDto,
+  ListVehicleMakesQueryDto,
+  ListVehicleModelsQueryDto,
   UpdateVehicleMakeDto,
   UpdateVehicleModelDto,
 } from './dto';
@@ -17,8 +20,18 @@ export class VehiclesService {
   ) {}
 
   // -------- makes --------
-  listMakes() {
-    return this.makesRepo.find({ order: { name: 'ASC' } });
+  async listMakes(query: ListVehicleMakesQueryDto = {}) {
+    const qb = this.makesRepo.createQueryBuilder('m').orderBy('m.name', 'ASC');
+    if (query.q) qb.andWhere('m.name LIKE :q', { q: `%${query.q}%` });
+
+    const paginated = query.page !== undefined || query.pageSize !== undefined;
+    if (!paginated) return qb.getMany();
+
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    qb.take(pageSize).skip((page - 1) * pageSize);
+    const [items, total] = await qb.getManyAndCount();
+    return { items, total, page, pageSize };
   }
 
   async createMake(dto: CreateVehicleMakeDto) {
@@ -42,17 +55,36 @@ export class VehiclesService {
   async removeMake(id: string) {
     const entity = await this.makesRepo.findOne({ where: { id } });
     if (!entity) throw new NotFoundException('Marca de vehículo no encontrada');
-    await this.makesRepo.remove(entity);
-    return { ok: true };
+    try {
+      await this.makesRepo.remove(entity);
+      return { ok: true };
+    } catch (err) {
+      rethrowFkAsConflict(
+        err,
+        'No se puede eliminar la marca de vehículo: hay modelos asociados. Eliminá primero los modelos.',
+      );
+    }
   }
 
   // -------- models --------
-  listModels(makeId?: string) {
-    return this.modelsRepo.find({
-      where: makeId ? { makeId } : {},
-      relations: { make: true },
-      order: { name: 'ASC' },
-    });
+  async listModels(query: ListVehicleModelsQueryDto = {}) {
+    const qb = this.modelsRepo
+      .createQueryBuilder('m')
+      .leftJoinAndSelect('m.make', 'make')
+      .orderBy('make.name', 'ASC')
+      .addOrderBy('m.name', 'ASC');
+    if (query.makeId) qb.andWhere('m.makeId = :makeId', { makeId: query.makeId });
+    if (query.q)
+      qb.andWhere('(m.name LIKE :q OR make.name LIKE :q)', { q: `%${query.q}%` });
+
+    const paginated = query.page !== undefined || query.pageSize !== undefined;
+    if (!paginated) return qb.getMany();
+
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    qb.take(pageSize).skip((page - 1) * pageSize);
+    const [items, total] = await qb.getManyAndCount();
+    return { items, total, page, pageSize };
   }
 
   async createModel(dto: CreateVehicleModelDto) {
@@ -81,7 +113,14 @@ export class VehiclesService {
   async removeModel(id: string) {
     const entity = await this.modelsRepo.findOne({ where: { id } });
     if (!entity) throw new NotFoundException('Modelo no encontrado');
-    await this.modelsRepo.remove(entity);
-    return { ok: true };
+    try {
+      await this.modelsRepo.remove(entity);
+      return { ok: true };
+    } catch (err) {
+      rethrowFkAsConflict(
+        err,
+        'No se puede eliminar el modelo: hay productos con compatibilidades asociadas. Eliminá primero esas compatibilidades.',
+      );
+    }
   }
 }

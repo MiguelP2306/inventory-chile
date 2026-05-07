@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -24,37 +24,65 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { apiErrorMessage } from '@/lib/catalog-api';
+import { useUrlFilters } from '@/lib/use-url-filters';
+import type { PaginatedResult } from '@inventory/shared';
 
 interface NamedItem {
   id: string;
   name: string;
 }
 
+interface ListPaginatedParams {
+  q?: string;
+  page?: number;
+  pageSize?: number;
+}
+
 interface Props {
   title: string;
   resourceLabel: string; // ej: "categoría", "marca"
   queryKey: string;
-  list: () => Promise<NamedItem[]>;
+  /** Listado paginado: recibe q/page/pageSize y devuelve PaginatedResult. */
+  listPaginated: (params: ListPaginatedParams) => Promise<PaginatedResult<NamedItem>>;
   create: (input: { name: string }) => Promise<NamedItem>;
   update: (id: string, input: { name: string }) => Promise<NamedItem>;
   remove: (id: string) => Promise<unknown>;
+  pageSize?: number;
 }
 
 export function SimpleNameList({
   title,
   resourceLabel,
   queryKey,
-  list,
+  listPaginated,
   create,
   update,
   remove,
+  pageSize = 20,
 }: Props) {
   const qc = useQueryClient();
+  const { values, setFilters, setFilter } = useUrlFilters({ q: '', page: '' });
+  const q = values.q ?? '';
+  const page = Number(values.page || '1');
+  const [debouncedQ, setDebouncedQ] = useState(q);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q.trim()), 250);
+    return () => clearTimeout(t);
+  }, [q]);
+
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<NamedItem | null>(null);
   const [name, setName] = useState('');
 
-  const query = useQuery({ queryKey: [queryKey], queryFn: list });
+  const query = useQuery({
+    queryKey: [queryKey, { q: debouncedQ, page }],
+    queryFn: () =>
+      listPaginated({ q: debouncedQ || undefined, page, pageSize }),
+  });
+
+  const total = query.data?.total ?? 0;
+  const items = query.data?.items ?? [];
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const createMut = useMutation({
     mutationFn: (n: string) => create({ name: n }),
@@ -121,6 +149,13 @@ export function SimpleNameList({
         </Button>
       </div>
 
+      <Input
+        placeholder="Buscar por nombre"
+        value={q}
+        onChange={(e) => setFilters({ q: e.target.value, page: null })}
+        className="max-w-md"
+      />
+
       <div className="rounded-md border bg-card">
         <Table>
           <TableHeader>
@@ -140,14 +175,14 @@ export function SimpleNameList({
                 ))}
               </>
             )}
-            {query.data && query.data.length === 0 && (
+            {!query.isLoading && items.length === 0 && (
               <TableRow>
                 <TableCell colSpan={2} className="text-center text-muted-foreground">
-                  Sin {resourceLabel}s todavía. Creá la primera con el botón.
+                  Sin resultados.
                 </TableCell>
               </TableRow>
             )}
-            {query.data?.map((item) => (
+            {items.map((item) => (
               <TableRow key={item.id}>
                 <TableCell>{item.name}</TableCell>
                 <TableCell className="text-right">
@@ -171,6 +206,32 @@ export function SimpleNameList({
           </TableBody>
         </Table>
       </div>
+
+      {total > 0 && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <span>
+            {total} {resourceLabel}{total === 1 ? '' : 's'} · página {page} de {totalPages}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setFilter('page', String(Math.max(1, page - 1)))}
+              disabled={page === 1}
+            >
+              Anterior
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setFilter('page', String(Math.min(totalPages, page + 1)))}
+              disabled={page >= totalPages}
+            >
+              Siguiente
+            </Button>
+          </div>
+        </div>
+      )}
 
       <Dialog open={open} onOpenChange={(v) => (v ? setOpen(true) : closeDialog())}>
         <DialogContent>

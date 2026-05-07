@@ -3,9 +3,15 @@
 import { useQuery } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import Link from 'next/link';
-import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -15,23 +21,43 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { listPurchases } from '@/lib/inventory-api';
+import { formatCurrency } from '@/lib/format';
+import { listPurchases, listSuppliers } from '@/lib/inventory-api';
+import { useUrlFilters } from '@/lib/use-url-filters';
+
+const ALL = '__all__';
+const PAGE_SIZE = 20;
 
 export default function ComprasPage() {
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [page, setPage] = useState(1);
+  const { values, setFilter, clear } = useUrlFilters({
+    supplier: '',
+    dateFrom: '',
+    dateTo: '',
+    page: '',
+  });
+  const supplierId = values.supplier || ALL;
+  const dateFrom = values.dateFrom ?? '';
+  const dateTo = values.dateTo ?? '';
+  const page = Number(values.page || '1');
+
+  const filtersActive = supplierId !== ALL || dateFrom !== '' || dateTo !== '';
+
+  const suppliers = useQuery({ queryKey: ['suppliers'], queryFn: () => listSuppliers() });
 
   const list = useQuery({
-    queryKey: ['purchases', { dateFrom, dateTo, page }],
+    queryKey: ['purchases', { supplierId, dateFrom, dateTo, page }],
     queryFn: () =>
       listPurchases({
+        supplierId: supplierId === ALL ? undefined : supplierId,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
         page,
-        pageSize: 20,
+        pageSize: PAGE_SIZE,
       }),
   });
+  const items = list.data?.items ?? [];
+  const total = list.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="space-y-6">
@@ -45,23 +71,47 @@ export default function ComprasPage() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <Select
+          value={supplierId}
+          onValueChange={(v) => {
+            setFilter('supplier', v === ALL ? null : v);
+            setFilter('page', null);
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Proveedor" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Todos los proveedores</SelectItem>
+            {suppliers.data?.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Input
           type="date"
           value={dateFrom}
           onChange={(e) => {
-            setDateFrom(e.target.value);
-            setPage(1);
+            setFilter('dateFrom', e.target.value || null);
+            setFilter('page', null);
           }}
         />
         <Input
           type="date"
           value={dateTo}
           onChange={(e) => {
-            setDateTo(e.target.value);
-            setPage(1);
+            setFilter('dateTo', e.target.value || null);
+            setFilter('page', null);
           }}
         />
+        {filtersActive && (
+          <Button variant="ghost" size="sm" onClick={clear}>
+            Limpiar filtros
+          </Button>
+        )}
       </div>
 
       <div className="rounded-md border bg-card">
@@ -86,14 +136,14 @@ export default function ComprasPage() {
                 ))}
               </>
             )}
-            {list.data && list.data.items.length === 0 && (
+            {!list.isLoading && items.length === 0 && (
               <TableRow>
                 <TableCell colSpan={4} className="text-center text-muted-foreground">
                   Sin compras registradas todavía.
                 </TableCell>
               </TableRow>
             )}
-            {list.data?.items.map((p) => (
+            {items.map((p) => (
               <TableRow key={p.id}>
                 <TableCell>
                   {new Date(p.date).toLocaleDateString('es-AR', { dateStyle: 'medium' })}
@@ -103,13 +153,39 @@ export default function ComprasPage() {
                   {p.notes ?? '—'}
                 </TableCell>
                 <TableCell className="text-right tabular-nums font-medium">
-                  ${p.total}
+                  {formatCurrency(p.total)}
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </div>
+
+      {total > 0 && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <span>
+            {total} compra{total === 1 ? '' : 's'} · página {page} de {totalPages}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setFilter('page', String(Math.max(1, page - 1)))}
+              disabled={page === 1}
+            >
+              Anterior
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setFilter('page', String(Math.min(totalPages, page + 1)))}
+              disabled={page >= totalPages}
+            >
+              Siguiente
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

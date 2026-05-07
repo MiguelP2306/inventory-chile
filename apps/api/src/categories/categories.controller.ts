@@ -7,17 +7,22 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { CategoriesService } from './categories.service';
-import { CreateCategoryDto, UpdateCategoryDto } from './dto';
+import {
+  CreateCategoryDto,
+  ListCategoriesQueryDto,
+  UpdateCategoryDto,
+} from './dto';
 
 @Controller('categories')
 export class CategoriesController {
   constructor(private readonly svc: CategoriesService) {}
 
   @Get()
-  list() {
-    return this.svc.list();
+  list(@Query() query: ListCategoriesQueryDto) {
+    return this.svc.list(query);
   }
 
   @Post()

@@ -1,7 +1,12 @@
 'use client';
 
 import { SimpleNameList } from '@/components/simple-name-list';
-import { createBrand, deleteBrand, listBrands, updateBrand } from '@/lib/catalog-api';
+import {
+  createBrand,
+  deleteBrand,
+  listBrandsPaginated,
+  updateBrand,
+} from '@/lib/catalog-api';
 
 export default function MarcasPage() {
   return (
@@ -9,7 +14,7 @@ export default function MarcasPage() {
       title="Marcas"
       resourceLabel="marca"
       queryKey="brands"
-      list={listBrands}
+      listPaginated={listBrandsPaginated}
       create={createBrand}
       update={updateBrand}
       remove={deleteBrand}

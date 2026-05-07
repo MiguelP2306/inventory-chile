@@ -16,6 +16,17 @@ export const listSuppliers = (q?: string) =>
     .get<SupplierDto[]>('/suppliers', { params: q ? { q } : {} })
     .then((r) => r.data);
 
+export interface ListSuppliersParams {
+  q?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export const listSuppliersPaginated = (params: ListSuppliersParams) =>
+  api
+    .get<PaginatedResult<SupplierDto>>('/suppliers', { params })
+    .then((r) => r.data);
+
 export const getSupplier = (id: string) =>
   api.get<SupplierDto>(`/suppliers/${id}`).then((r) => r.data);
 
@@ -46,6 +57,16 @@ export interface ListStockParams {
 
 export const listStock = (params: ListStockParams = {}) =>
   api.get<StockSummary[]>('/inventory/stock', { params }).then((r) => r.data);
+
+export interface ListStockPaginatedParams extends ListStockParams {
+  page?: number;
+  pageSize?: number;
+}
+
+export const listStockPaginated = (params: ListStockPaginatedParams) =>
+  api
+    .get<PaginatedResult<StockSummary>>('/inventory/stock', { params })
+    .then((r) => r.data);
 
 export interface ListMovementsParams {
   productId?: string;

@@ -1,5 +1,15 @@
 import { PartialType } from '@nestjs/mapped-types';
-import { IsEmail, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsEmail,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+} from 'class-validator';
 
 export class CreateSupplierDto {
   @IsString()
@@ -32,3 +42,22 @@ export class CreateSupplierDto {
 }
 
 export class UpdateSupplierDto extends PartialType(CreateSupplierDto) {}
+
+export class ListSuppliersQueryDto {
+  @IsOptional()
+  @IsString()
+  q?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  pageSize?: number;
+}

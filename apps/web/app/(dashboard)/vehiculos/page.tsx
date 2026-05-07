@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { SimpleNameList } from '@/components/simple-name-list';
 import { Button } from '@/components/ui/button';
@@ -39,10 +39,15 @@ import {
   deleteVehicleMake,
   deleteVehicleModel,
   listVehicleMakes,
-  listVehicleModels,
+  listVehicleMakesPaginated,
+  listVehicleModelsPaginated,
   updateVehicleMake,
   updateVehicleModel,
 } from '@/lib/catalog-api';
+import { useUrlFilters } from '@/lib/use-url-filters';
+
+const ALL = '__all__';
+const PAGE_SIZE = 20;
 
 export default function VehiculosPage() {
   return (
@@ -56,7 +61,7 @@ export default function VehiculosPage() {
           title="Marcas de vehículo"
           resourceLabel="marca"
           queryKey="vehicle-makes"
-          list={listVehicleMakes}
+          listPaginated={listVehicleMakesPaginated}
           create={createVehicleMake}
           update={updateVehicleMake}
           remove={deleteVehicleMake}
@@ -71,6 +76,21 @@ export default function VehiculosPage() {
 
 function ModelsList() {
   const qc = useQueryClient();
+  const { values, setFilters, setFilter } = useUrlFilters({
+    q: '',
+    make: '',
+    page: '',
+  });
+  const q = values.q ?? '';
+  const makeFilter = values.make || ALL;
+  const page = Number(values.page || '1');
+
+  const [debouncedQ, setDebouncedQ] = useState(q);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q.trim()), 250);
+    return () => clearTimeout(t);
+  }, [q]);
+
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<{ id: string; name: string; makeId: string } | null>(
     null,
@@ -79,7 +99,20 @@ function ModelsList() {
   const [makeId, setMakeId] = useState<string>('');
 
   const makes = useQuery({ queryKey: ['vehicle-makes'], queryFn: listVehicleMakes });
-  const models = useQuery({ queryKey: ['vehicle-models'], queryFn: () => listVehicleModels() });
+  const models = useQuery({
+    queryKey: ['vehicle-models', { q: debouncedQ, make: makeFilter, page }],
+    queryFn: () =>
+      listVehicleModelsPaginated({
+        q: debouncedQ || undefined,
+        makeId: makeFilter === ALL ? undefined : makeFilter,
+        page,
+        pageSize: PAGE_SIZE,
+      }),
+  });
+
+  const items = models.data?.items ?? [];
+  const total = models.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const createMut = useMutation({
     mutationFn: () => createVehicleModel({ makeId, name: name.trim() }),
@@ -155,6 +188,30 @@ function ModelsList() {
         </p>
       )}
 
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <Input
+          placeholder="Buscar por modelo o marca"
+          value={q}
+          onChange={(e) => setFilters({ q: e.target.value, page: null })}
+        />
+        <Select
+          value={makeFilter}
+          onValueChange={(v) => setFilters({ make: v === ALL ? null : v, page: null })}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Marca" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Todas las marcas</SelectItem>
+            {makes.data?.map((mk) => (
+              <SelectItem key={mk.id} value={mk.id}>
+                {mk.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       <div className="rounded-md border bg-card">
         <Table>
           <TableHeader>
@@ -176,14 +233,14 @@ function ModelsList() {
                 ))}
               </>
             )}
-            {models.data && models.data.length === 0 && (
+            {!models.isLoading && items.length === 0 && (
               <TableRow>
                 <TableCell colSpan={3} className="text-center text-muted-foreground">
-                  Sin modelos todavía.
+                  Sin resultados.
                 </TableCell>
               </TableRow>
             )}
-            {models.data?.map((m) => (
+            {items.map((m) => (
               <TableRow key={m.id}>
                 <TableCell>{m.make?.name ?? '—'}</TableCell>
                 <TableCell>{m.name}</TableCell>
@@ -213,6 +270,32 @@ function ModelsList() {
           </TableBody>
         </Table>
       </div>
+
+      {total > 0 && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <span>
+            {total} modelo{total === 1 ? '' : 's'} · página {page} de {totalPages}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setFilter('page', String(Math.max(1, page - 1)))}
+              disabled={page === 1}
+            >
+              Anterior
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setFilter('page', String(Math.min(totalPages, page + 1)))}
+              disabled={page >= totalPages}
+            >
+              Siguiente
+            </Button>
+          </div>
+        </div>
+      )}
 
       <Dialog open={open} onOpenChange={(v) => (v ? setOpen(true) : closeDialog())}>
         <DialogContent>

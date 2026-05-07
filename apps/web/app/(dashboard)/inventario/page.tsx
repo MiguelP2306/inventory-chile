@@ -23,38 +23,53 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { listStock } from '@/lib/inventory-api';
+import { listStockPaginated } from '@/lib/inventory-api';
+import { useUrlFilters } from '@/lib/use-url-filters';
 import type { StockStatus, StockSummary } from '@inventory/shared';
 
 const ALL = '__all__';
+const PAGE_SIZE = 50;
 
 export default function InventarioPage() {
-  const [q, setQ] = useState('');
-  const [debouncedQ, setDebouncedQ] = useState('');
-  const [status, setStatus] = useState<string>(ALL);
-  const [adjustTarget, setAdjustTarget] = useState<StockSummary | null>(null);
+  const { values, setFilters, setFilter } = useUrlFilters({
+    q: '',
+    status: '',
+    page: '',
+  });
+  const q = values.q ?? '';
+  const status = values.status || ALL;
+  const page = Number(values.page || '1');
 
+  const [debouncedQ, setDebouncedQ] = useState(q);
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q.trim()), 250);
     return () => clearTimeout(t);
   }, [q]);
 
+  const [adjustTarget, setAdjustTarget] = useState<StockSummary | null>(null);
+
   const stock = useQuery({
-    queryKey: ['stock', { q: debouncedQ, status }],
+    queryKey: ['stock', { q: debouncedQ, status, page }],
     queryFn: () =>
-      listStock({
+      listStockPaginated({
         q: debouncedQ || undefined,
         status: status === ALL ? undefined : (status as StockStatus),
+        page,
+        pageSize: PAGE_SIZE,
       }),
   });
 
-  const counts = stock.data
-    ? {
-        ok: stock.data.filter((s) => s.status === 'ok').length,
-        low: stock.data.filter((s) => s.status === 'low').length,
-        out: stock.data.filter((s) => s.status === 'out').length,
-      }
-    : { ok: 0, low: 0, out: 0 };
+  const items = stock.data?.items ?? [];
+  const total = stock.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  const counts = items.reduce(
+    (acc, s) => {
+      acc[s.status] += 1;
+      return acc;
+    },
+    { ok: 0, low: 0, out: 0 } as Record<StockStatus, number>,
+  );
 
   return (
     <div className="space-y-6">
@@ -71,10 +86,13 @@ export default function InventarioPage() {
         <Input
           placeholder="Buscar por SKU, número de parte, código de barras o nombre"
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onChange={(e) => setFilters({ q: e.target.value, page: null })}
           className="md:col-span-2"
         />
-        <Select value={status} onValueChange={setStatus}>
+        <Select
+          value={status}
+          onValueChange={(v) => setFilters({ status: v === ALL ? null : v, page: null })}
+        >
           <SelectTrigger>
             <SelectValue placeholder="Estado" />
           </SelectTrigger>
@@ -112,14 +130,14 @@ export default function InventarioPage() {
                 ))}
               </>
             )}
-            {stock.data && stock.data.length === 0 && (
+            {!stock.isLoading && items.length === 0 && (
               <TableRow>
                 <TableCell colSpan={7} className="text-center text-muted-foreground">
                   Sin productos.
                 </TableCell>
               </TableRow>
             )}
-            {stock.data?.map((row) => (
+            {items.map((row) => (
               <TableRow key={row.product.id}>
                 <TableCell className="font-mono text-xs">{row.product.sku}</TableCell>
                 <TableCell>{row.product.name}</TableCell>
@@ -150,6 +168,32 @@ export default function InventarioPage() {
           </TableBody>
         </Table>
       </div>
+
+      {total > 0 && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <span>
+            {total} producto{total === 1 ? '' : 's'} · página {page} de {totalPages}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setFilter('page', String(Math.max(1, page - 1)))}
+              disabled={page === 1}
+            >
+              Anterior
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setFilter('page', String(Math.min(totalPages, page + 1)))}
+              disabled={page >= totalPages}
+            >
+              Siguiente
+            </Button>
+          </div>
+        </div>
+      )}
 
       {adjustTarget && (
         <AdjustStockDialog

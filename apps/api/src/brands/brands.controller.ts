@@ -7,17 +7,18 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { BrandsService } from './brands.service';
-import { CreateBrandDto, UpdateBrandDto } from './dto';
+import { CreateBrandDto, ListBrandsQueryDto, UpdateBrandDto } from './dto';
 
 @Controller('brands')
 export class BrandsController {
   constructor(private readonly svc: BrandsService) {}
 
   @Get()
-  list() {
-    return this.svc.list();
+  list(@Query() query: ListBrandsQueryDto) {
+    return this.svc.list(query);
   }
 
   @Post()

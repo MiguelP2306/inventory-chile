@@ -12,6 +12,8 @@ import {
 import {
   CreateVehicleMakeDto,
   CreateVehicleModelDto,
+  ListVehicleMakesQueryDto,
+  ListVehicleModelsQueryDto,
   UpdateVehicleMakeDto,
   UpdateVehicleModelDto,
 } from './dto';
@@ -23,8 +25,8 @@ export class VehiclesController {
 
   // -------- makes --------
   @Get('makes')
-  listMakes() {
-    return this.svc.listMakes();
+  listMakes(@Query() query: ListVehicleMakesQueryDto) {
+    return this.svc.listMakes(query);
   }
 
   @Post('makes')
@@ -47,8 +49,8 @@ export class VehiclesController {
 
   // -------- models --------
   @Get('models')
-  listModels(@Query('makeId') makeId?: string) {
-    return this.svc.listModels(makeId);
+  listModels(@Query() query: ListVehicleModelsQueryDto) {
+    return this.svc.listModels(query);
   }
 
   @Post('models')

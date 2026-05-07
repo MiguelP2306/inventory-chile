@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import { rethrowFkAsConflict } from '../common/fk-error';
 import {
   Product,
   VehicleFitment,
@@ -110,14 +111,11 @@ export class ProductsService {
     try {
       await this.products.remove(product);
       return { ok: true };
-    } catch (err: unknown) {
-      const code = (err as { code?: string }).code;
-      if (code === 'ER_ROW_IS_REFERENCED_2' || code === 'ER_ROW_IS_REFERENCED') {
-        throw new ConflictException(
-          'No se puede eliminar: el producto tiene movimientos de inventario o ítems asociados. Desactívalo en su lugar.',
-        );
-      }
-      throw err;
+    } catch (err) {
+      rethrowFkAsConflict(
+        err,
+        'No se puede eliminar: el producto tiene movimientos de inventario o ítems asociados. Desactívalo en su lugar.',
+      );
     }
   }
 

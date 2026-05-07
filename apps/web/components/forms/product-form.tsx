@@ -4,10 +4,18 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -21,6 +29,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   apiErrorMessage,
   createProduct,
+  deleteProduct,
   listBrands,
   listCategories,
   listVehicleMakes,
@@ -31,12 +40,24 @@ import {
 import type { ProductDto } from '@inventory/shared';
 
 const NULL_OPTION = '__none__';
+const MIN_YEAR = 1980;
+const MAX_YEAR = new Date().getFullYear() + 1;
 
-const fitmentSchema = z.object({
-  modelId: z.string().uuid('Elegí un modelo'),
-  yearFrom: z.coerce.number().int().min(1900).max(2100).optional().nullable(),
-  yearTo: z.coerce.number().int().min(1900).max(2100).optional().nullable(),
-});
+const fitmentSchema = z
+  .object({
+    modelId: z.string().uuid('Elegí un modelo'),
+    yearFrom: z.coerce.number().int().min(1900).max(2100).optional().nullable(),
+    yearTo: z.coerce.number().int().min(1900).max(2100).optional().nullable(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.yearFrom != null && v.yearTo != null && v.yearFrom > v.yearTo) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: '"Desde" no puede ser mayor que "Hasta"',
+        path: ['yearFrom'],
+      });
+    }
+  });
 
 const schema = z
   .object({
@@ -55,13 +76,23 @@ const schema = z
     isActive: z.boolean().optional(),
     fitments: z.array(fitmentSchema).optional(),
   })
-  .refine(
-    (v) =>
-      !v.fitments?.some(
-        (f) => f.yearFrom != null && f.yearTo != null && f.yearFrom > f.yearTo,
-      ),
-    { message: 'En los fitments, "Desde" debe ser <= "Hasta"', path: ['fitments'] },
-  );
+  .superRefine((v, ctx) => {
+    if (!v.fitments) return;
+    // Detectar duplicados (mismo modelId con mismo rango de años).
+    const seen = new Map<string, number>();
+    v.fitments.forEach((f, idx) => {
+      const key = `${f.modelId}|${f.yearFrom ?? ''}|${f.yearTo ?? ''}`;
+      if (f.modelId && seen.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Esta compatibilidad ya está cargada (modelo y años repetidos).',
+          path: ['fitments', idx, 'modelId'],
+        });
+      } else if (f.modelId) {
+        seen.set(key, idx);
+      }
+    });
+  });
 
 type FormValues = z.infer<typeof schema>;
 
@@ -69,9 +100,15 @@ interface Props {
   product?: ProductDto;
 }
 
+const YEAR_OPTIONS = Array.from(
+  { length: MAX_YEAR - MIN_YEAR + 1 },
+  (_, i) => MAX_YEAR - i,
+);
+
 export function ProductForm({ product }: Props) {
   const router = useRouter();
   const qc = useQueryClient();
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const categories = useQuery({ queryKey: ['categories'], queryFn: listCategories });
   const brands = useQuery({ queryKey: ['brands'], queryFn: listBrands });
@@ -118,7 +155,20 @@ export function ProductForm({ product }: Props) {
     onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo guardar')),
   });
 
+  const removeMut = useMutation({
+    mutationFn: () => (product ? deleteProduct(product.id) : Promise.reject('no product')),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['products-by-vehicle'] });
+      toast.success('Producto eliminado');
+      router.push('/productos');
+      router.refresh();
+    },
+    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo eliminar')),
+  });
+
   function onSubmit(values: FormValues) {
+    if (mut.isPending) return;
     const input: ProductInput = {
       sku: values.sku,
       name: values.name,
@@ -143,6 +193,7 @@ export function ProductForm({ product }: Props) {
   }
 
   const errors = form.formState.errors;
+  const submitting = mut.isPending || form.formState.isSubmitting;
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
@@ -151,11 +202,28 @@ export function ProductForm({ product }: Props) {
           {product ? `Editar producto` : 'Nuevo producto'}
         </h1>
         <div className="flex gap-2">
-          <Button type="button" variant="outline" onClick={() => router.back()}>
+          {product && (
+            <Button
+              type="button"
+              variant="outline"
+              className="border-destructive/40 text-destructive hover:bg-destructive/10"
+              onClick={() => setConfirmDelete(true)}
+              disabled={submitting || removeMut.isPending}
+            >
+              <Trash2 className="h-4 w-4" />
+              Eliminar
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => router.back()}
+            disabled={submitting}
+          >
             Cancelar
           </Button>
-          <Button type="submit" disabled={mut.isPending}>
-            {mut.isPending ? 'Guardando...' : product ? 'Guardar' : 'Crear'}
+          <Button type="submit" disabled={submitting}>
+            {submitting ? 'Guardando...' : product ? 'Guardar' : 'Crear'}
           </Button>
         </div>
       </div>
@@ -254,10 +322,6 @@ export function ProductForm({ product }: Props) {
               <Input type="number" min={0} {...form.register('maxStock')} />
             </Field>
           </div>
-          <p className="text-sm text-muted-foreground">
-            El stock real se gestiona desde Inventario (Fase 3). Acá sólo definís el mínimo
-            para activar la alerta amarilla del semáforo.
-          </p>
         </TabsContent>
 
         {/* COMPATIBILIDAD */}
@@ -295,71 +359,139 @@ export function ProductForm({ product }: Props) {
           )}
 
           <div className="space-y-3">
-            {fitments.fields.map((field, idx) => (
-              <div key={field.id} className="grid grid-cols-12 items-end gap-2">
-                <div className="col-span-6">
-                  <Label className="text-xs">Vehículo</Label>
-                  <Controller
-                    control={form.control}
-                    name={`fitments.${idx}.modelId`}
-                    render={({ field: f }) => (
-                      <Select value={f.value} onValueChange={f.onChange}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Marca / modelo" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {models.data?.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.make?.name} {m.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  />
+            {fitments.fields.map((field, idx) => {
+              const rowErrors = errors.fitments?.[idx];
+              return (
+                <div key={field.id} className="space-y-1">
+                  <div className="grid grid-cols-12 items-end gap-2">
+                    <div className="col-span-12 md:col-span-6">
+                      <Label className="text-xs">Vehículo</Label>
+                      <Controller
+                        control={form.control}
+                        name={`fitments.${idx}.modelId`}
+                        render={({ field: f }) => (
+                          <Select value={f.value} onValueChange={f.onChange}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Marca / modelo" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {models.data?.map((m) => (
+                                <SelectItem key={m.id} value={m.id}>
+                                  {m.make?.name} {m.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      />
+                    </div>
+                    <div className="col-span-5 md:col-span-2">
+                      <Label className="text-xs">Desde</Label>
+                      <Controller
+                        control={form.control}
+                        name={`fitments.${idx}.yearFrom`}
+                        render={({ field: f }) => (
+                          <Select
+                            value={f.value != null ? String(f.value) : NULL_OPTION}
+                            onValueChange={(v) => f.onChange(v === NULL_OPTION ? null : Number(v))}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="—" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={NULL_OPTION}>—</SelectItem>
+                              {YEAR_OPTIONS.map((y) => (
+                                <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      />
+                    </div>
+                    <div className="col-span-5 md:col-span-2">
+                      <Label className="text-xs">Hasta</Label>
+                      <Controller
+                        control={form.control}
+                        name={`fitments.${idx}.yearTo`}
+                        render={({ field: f }) => (
+                          <Select
+                            value={f.value != null ? String(f.value) : NULL_OPTION}
+                            onValueChange={(v) => f.onChange(v === NULL_OPTION ? null : Number(v))}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="—" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={NULL_OPTION}>—</SelectItem>
+                              {YEAR_OPTIONS.map((y) => (
+                                <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      />
+                    </div>
+                    <div className="col-span-2 flex justify-end">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => fitments.remove(idx)}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
+                  {(rowErrors?.modelId?.message || rowErrors?.yearFrom?.message ||
+                    rowErrors?.yearTo?.message) && (
+                    <p className="text-xs text-destructive">
+                      {rowErrors?.modelId?.message ||
+                        rowErrors?.yearFrom?.message ||
+                        rowErrors?.yearTo?.message}
+                    </p>
+                  )}
                 </div>
-                <div className="col-span-2">
-                  <Label className="text-xs">Desde</Label>
-                  <Input
-                    type="number"
-                    min={1900}
-                    max={2100}
-                    placeholder="—"
-                    {...form.register(`fitments.${idx}.yearFrom`, {
-                      setValueAs: (v) => (v === '' || v == null ? null : Number(v)),
-                    })}
-                  />
-                </div>
-                <div className="col-span-2">
-                  <Label className="text-xs">Hasta</Label>
-                  <Input
-                    type="number"
-                    min={1900}
-                    max={2100}
-                    placeholder="—"
-                    {...form.register(`fitments.${idx}.yearTo`, {
-                      setValueAs: (v) => (v === '' || v == null ? null : Number(v)),
-                    })}
-                  />
-                </div>
-                <div className="col-span-2 flex justify-end">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => fitments.remove(idx)}
-                  >
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
-          {errors.fitments?.message && (
-            <p className="text-sm text-destructive">{errors.fitments.message}</p>
+          {errors.fitments?.root?.message && (
+            <p className="text-sm text-destructive">{errors.fitments.root.message}</p>
           )}
         </TabsContent>
       </Tabs>
+
+      <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>¿Eliminar producto?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Esta acción es permanente. El producto &ldquo;{product?.name}&rdquo; se eliminará del
+            catálogo.
+            Si tiene movimientos de inventario asociados, no podrá eliminarse y tendrás que
+            desactivarlo en su lugar.
+          </p>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setConfirmDelete(false)}
+              disabled={removeMut.isPending}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="border-destructive/40 text-destructive hover:bg-destructive/10"
+              onClick={() => removeMut.mutate()}
+              disabled={removeMut.isPending}
+            >
+              {removeMut.isPending ? 'Eliminando...' : 'Eliminar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </form>
   );
 }

@@ -169,6 +169,10 @@ export class InventoryService {
   /**
    * Listado de stock por producto activo. Si un producto nunca tuvo movimientos,
    * aparece con quantity=0 y status='out' (en lugar de no aparecer).
+   *
+   * El filtro `status` se aplica en memoria (depende de `qty` calculada al
+   * vuelo). La paginación se aplica DESPUÉS de filtrar por estado, así el total
+   * informado coincide con los items efectivamente devueltos.
    */
   async listStock(query: ListStockQueryDto) {
     const warehouseId = query.warehouseId ?? (await this.defaultWarehouseId());
@@ -193,7 +197,7 @@ export class InventoryService {
     qb.orderBy('p.name', 'ASC');
 
     const raw = await qb.getRawAndEntities();
-    const items = raw.entities.map((p, idx) => {
+    const all = raw.entities.map((p, idx) => {
       const qty = Number(raw.raw[idx]?.qty ?? 0);
       const status: 'ok' | 'low' | 'out' =
         qty <= 0 ? 'out' : qty <= p.minStock ? 'low' : 'ok';
@@ -218,7 +222,20 @@ export class InventoryService {
       };
     });
 
-    return query.status ? items.filter((i) => i.status === query.status) : items;
+    const filtered = query.status ? all.filter((i) => i.status === query.status) : all;
+
+    const paginated = query.page !== undefined || query.pageSize !== undefined;
+    if (!paginated) return filtered;
+
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 50;
+    const start = (page - 1) * pageSize;
+    return {
+      items: filtered.slice(start, start + pageSize),
+      total: filtered.length,
+      page,
+      pageSize,
+    };
   }
 
   private async defaultWarehouseId(): Promise<string> {

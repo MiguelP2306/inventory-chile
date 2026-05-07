@@ -11,9 +11,24 @@ import type {
 } from '@inventory/shared';
 import { api } from './api';
 
+// Listados sin params devuelven array completo (selectores). Si se pasan
+// `page` o `pageSize`, el backend cambia a `PaginatedResult` y exponemos
+// helpers `*Paginated` con tipo correcto.
+
+export interface ListPaginationParams {
+  q?: string;
+  page?: number;
+  pageSize?: number;
+}
+
 // ---------- Categories ----------
 export const listCategories = () =>
   api.get<CategoryDto[]>('/categories').then((r) => r.data);
+
+export const listCategoriesPaginated = (params: ListPaginationParams) =>
+  api
+    .get<PaginatedResult<CategoryDto>>('/categories', { params })
+    .then((r) => r.data);
 
 export const createCategory = (input: { name: string; parentId?: string | null }) =>
   api.post<CategoryDto>('/categories', input).then((r) => r.data);
@@ -26,6 +41,11 @@ export const deleteCategory = (id: string) =>
 
 // ---------- Brands ----------
 export const listBrands = () => api.get<BrandDto[]>('/brands').then((r) => r.data);
+
+export const listBrandsPaginated = (params: ListPaginationParams) =>
+  api
+    .get<PaginatedResult<BrandDto>>('/brands', { params })
+    .then((r) => r.data);
 
 export const createBrand = (input: { name: string }) =>
   api.post<BrandDto>('/brands', input).then((r) => r.data);
@@ -40,6 +60,11 @@ export const deleteBrand = (id: string) =>
 export const listVehicleMakes = () =>
   api.get<VehicleMakeDto[]>('/vehicles/makes').then((r) => r.data);
 
+export const listVehicleMakesPaginated = (params: ListPaginationParams) =>
+  api
+    .get<PaginatedResult<VehicleMakeDto>>('/vehicles/makes', { params })
+    .then((r) => r.data);
+
 export const createVehicleMake = (input: { name: string }) =>
   api.post<VehicleMakeDto>('/vehicles/makes', input).then((r) => r.data);
 
@@ -52,6 +77,13 @@ export const deleteVehicleMake = (id: string) =>
 export const listVehicleModels = (makeId?: string) =>
   api
     .get<VehicleModelDto[]>('/vehicles/models', { params: makeId ? { makeId } : {} })
+    .then((r) => r.data);
+
+export const listVehicleModelsPaginated = (
+  params: ListPaginationParams & { makeId?: string },
+) =>
+  api
+    .get<PaginatedResult<VehicleModelDto>>('/vehicles/models', { params })
     .then((r) => r.data);
 
 export const createVehicleModel = (input: { makeId: string; name: string }) =>

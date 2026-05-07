@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -27,11 +27,14 @@ import { apiErrorMessage } from '@/lib/catalog-api';
 import {
   createSupplier,
   deleteSupplier,
-  listSuppliers,
+  listSuppliersPaginated,
   updateSupplier,
   type SupplierInput,
 } from '@/lib/inventory-api';
+import { useUrlFilters } from '@/lib/use-url-filters';
 import type { SupplierDto } from '@inventory/shared';
+
+const PAGE_SIZE = 20;
 
 const empty: SupplierInput = {
   name: '',
@@ -44,11 +47,31 @@ const empty: SupplierInput = {
 
 export default function ProveedoresPage() {
   const qc = useQueryClient();
+  const { values, setFilters, setFilter } = useUrlFilters({ q: '', page: '' });
+  const q = values.q ?? '';
+  const page = Number(values.page || '1');
+  const [debouncedQ, setDebouncedQ] = useState(q);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q.trim()), 250);
+    return () => clearTimeout(t);
+  }, [q]);
+
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<SupplierDto | null>(null);
   const [form, setForm] = useState<SupplierInput>(empty);
 
-  const list = useQuery({ queryKey: ['suppliers'], queryFn: () => listSuppliers() });
+  const list = useQuery({
+    queryKey: ['suppliers', { q: debouncedQ, page }],
+    queryFn: () =>
+      listSuppliersPaginated({
+        q: debouncedQ || undefined,
+        page,
+        pageSize: PAGE_SIZE,
+      }),
+  });
+  const items = list.data?.items ?? [];
+  const total = list.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const createMut = useMutation({
     mutationFn: (input: SupplierInput) => createSupplier(toApi(input)),
@@ -120,6 +143,13 @@ export default function ProveedoresPage() {
         </Button>
       </div>
 
+      <Input
+        placeholder="Buscar por nombre, NIT/RUC, email o teléfono"
+        value={q}
+        onChange={(e) => setFilters({ q: e.target.value, page: null })}
+        className="max-w-md"
+      />
+
       <div className="rounded-md border bg-card">
         <Table>
           <TableHeader>
@@ -143,14 +173,14 @@ export default function ProveedoresPage() {
                 ))}
               </>
             )}
-            {list.data && list.data.length === 0 && (
+            {!list.isLoading && items.length === 0 && (
               <TableRow>
                 <TableCell colSpan={5} className="text-center text-muted-foreground">
-                  Sin proveedores todavía.
+                  Sin resultados.
                 </TableCell>
               </TableRow>
             )}
-            {list.data?.map((s) => (
+            {items.map((s) => (
               <TableRow key={s.id}>
                 <TableCell className="font-medium">{s.name}</TableCell>
                 <TableCell className="text-muted-foreground">{s.email ?? '—'}</TableCell>
@@ -177,6 +207,32 @@ export default function ProveedoresPage() {
           </TableBody>
         </Table>
       </div>
+
+      {total > 0 && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <span>
+            {total} proveedor{total === 1 ? '' : 'es'} · página {page} de {totalPages}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setFilter('page', String(Math.max(1, page - 1)))}
+              disabled={page === 1}
+            >
+              Anterior
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setFilter('page', String(Math.min(totalPages, page + 1)))}
+              disabled={page >= totalPages}
+            >
+              Siguiente
+            </Button>
+          </div>
+        </div>
+      )}
 
       <Dialog open={open} onOpenChange={(v) => (v ? setOpen(true) : close())}>
         <DialogContent>

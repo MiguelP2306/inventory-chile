@@ -9,7 +9,11 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { CreateSupplierDto, UpdateSupplierDto } from './dto';
+import {
+  CreateSupplierDto,
+  ListSuppliersQueryDto,
+  UpdateSupplierDto,
+} from './dto';
 import { SuppliersService } from './suppliers.service';
 
 @Controller('suppliers')
@@ -17,8 +21,8 @@ export class SuppliersController {
   constructor(private readonly svc: SuppliersService) {}
 
   @Get()
-  list(@Query('q') q?: string) {
-    return this.svc.list(q);
+  list(@Query() query: ListSuppliersQueryDto) {
+    return this.svc.list(query);
   }
 
   @Get(':id')

@@ -4,9 +4,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
+import { rethrowFkAsConflict } from '../common/fk-error';
 import { Supplier } from '../database/entities';
-import { CreateSupplierDto, UpdateSupplierDto } from './dto';
+import {
+  CreateSupplierDto,
+  ListSuppliersQueryDto,
+  UpdateSupplierDto,
+} from './dto';
 
 @Injectable()
 export class SuppliersService {
@@ -15,10 +20,23 @@ export class SuppliersService {
     private readonly repo: Repository<Supplier>,
   ) {}
 
-  list(q?: string) {
+  async list(query: ListSuppliersQueryDto = {}) {
     const qb = this.repo.createQueryBuilder('s').orderBy('s.name', 'ASC');
-    if (q) qb.andWhere('s.name LIKE :q', { q: `%${q}%` });
-    return qb.getMany();
+    if (query.q) {
+      qb.andWhere(
+        '(s.name LIKE :q OR s.taxId LIKE :q OR s.email LIKE :q OR s.phone LIKE :q)',
+        { q: `%${query.q}%` },
+      );
+    }
+
+    const paginated = query.page !== undefined || query.pageSize !== undefined;
+    if (!paginated) return qb.getMany();
+
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    qb.take(pageSize).skip((page - 1) * pageSize);
+    const [items, total] = await qb.getManyAndCount();
+    return { items, total, page, pageSize };
   }
 
   async getOne(id: string) {
@@ -31,6 +49,14 @@ export class SuppliersService {
     if (await this.repo.findOne({ where: { name: dto.name } })) {
       throw new ConflictException(`Ya existe un proveedor con nombre "${dto.name}"`);
     }
+    if (dto.taxId) {
+      const dup = await this.repo.findOne({ where: { taxId: dto.taxId } });
+      if (dup) {
+        throw new ConflictException(
+          `Ya existe un proveedor con NIT/RUC "${dto.taxId}" (${dup.name}).`,
+        );
+      }
+    }
     return this.repo.save(this.repo.create({ ...dto }));
   }
 
@@ -39,6 +65,16 @@ export class SuppliersService {
     if (dto.name && dto.name !== entity.name) {
       const dup = await this.repo.findOne({ where: { name: dto.name } });
       if (dup) throw new ConflictException(`Ya existe un proveedor con nombre "${dto.name}"`);
+    }
+    if (dto.taxId && dto.taxId !== entity.taxId) {
+      const dup = await this.repo.findOne({
+        where: { taxId: dto.taxId, id: Not(id) },
+      });
+      if (dup) {
+        throw new ConflictException(
+          `Ya existe un proveedor con NIT/RUC "${dto.taxId}" (${dup.name}).`,
+        );
+      }
     }
     Object.assign(entity, dto);
     return this.repo.save(entity);
@@ -49,14 +85,11 @@ export class SuppliersService {
     try {
       await this.repo.remove(entity);
       return { ok: true };
-    } catch (err: unknown) {
-      const code = (err as { code?: string }).code;
-      if (code === 'ER_ROW_IS_REFERENCED_2' || code === 'ER_ROW_IS_REFERENCED') {
-        throw new ConflictException(
-          'No se puede eliminar: el proveedor tiene compras o productos asociados.',
-        );
-      }
-      throw err;
+    } catch (err) {
+      rethrowFkAsConflict(
+        err,
+        'No se puede eliminar: el proveedor tiene compras o productos asociados.',
+      );
     }
   }
 }

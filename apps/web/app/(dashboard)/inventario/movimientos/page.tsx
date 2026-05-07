@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,10 +21,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { formatCurrency } from '@/lib/format';
 import { listMovements } from '@/lib/inventory-api';
+import { useUrlFilters } from '@/lib/use-url-filters';
 import type { MovementDto } from '@inventory/shared';
 
 const ALL = '__all__';
+const PAGE_SIZE = 50;
 
 const MOVEMENT_TYPES: Array<{ value: MovementDto['type']; label: string }> = [
   { value: 'PURCHASE_IN', label: 'Compra' },
@@ -35,10 +38,18 @@ const MOVEMENT_TYPES: Array<{ value: MovementDto['type']; label: string }> = [
 ];
 
 export default function MovimientosPage() {
-  const [type, setType] = useState<string>(ALL);
-  const [dateFrom, setDateFrom] = useState<string>('');
-  const [dateTo, setDateTo] = useState<string>('');
-  const [page, setPage] = useState(1);
+  const { values, setFilter, clear } = useUrlFilters({
+    type: '',
+    dateFrom: '',
+    dateTo: '',
+    page: '',
+  });
+  const type = values.type || ALL;
+  const dateFrom = values.dateFrom ?? '';
+  const dateTo = values.dateTo ?? '';
+  const page = Number(values.page || '1');
+
+  const filtersActive = type !== ALL || dateFrom !== '' || dateTo !== '';
 
   const movs = useQuery({
     queryKey: ['movements', { type, dateFrom, dateTo, page }],
@@ -48,25 +59,32 @@ export default function MovimientosPage() {
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
         page,
-        pageSize: 50,
+        pageSize: PAGE_SIZE,
       }),
   });
 
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil((movs.data?.total ?? 0) / 50)),
+    () => Math.max(1, Math.ceil((movs.data?.total ?? 0) / PAGE_SIZE)),
     [movs.data],
   );
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Movimientos de inventario</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Movimientos de inventario</h1>
+        {filtersActive && (
+          <Button variant="ghost" size="sm" onClick={clear}>
+            Limpiar filtros
+          </Button>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
         <Select
           value={type}
           onValueChange={(v) => {
-            setType(v);
-            setPage(1);
+            setFilter('type', v === ALL ? null : v);
+            setFilter('page', null);
           }}
         >
           <SelectTrigger>
@@ -85,8 +103,8 @@ export default function MovimientosPage() {
           type="date"
           value={dateFrom}
           onChange={(e) => {
-            setDateFrom(e.target.value);
-            setPage(1);
+            setFilter('dateFrom', e.target.value || null);
+            setFilter('page', null);
           }}
           placeholder="Desde"
         />
@@ -94,8 +112,8 @@ export default function MovimientosPage() {
           type="date"
           value={dateTo}
           onChange={(e) => {
-            setDateTo(e.target.value);
-            setPage(1);
+            setFilter('dateTo', e.target.value || null);
+            setFilter('page', null);
           }}
           placeholder="Hasta"
         />
@@ -163,7 +181,7 @@ export default function MovimientosPage() {
                   {m.qty}
                 </TableCell>
                 <TableCell className="text-right text-muted-foreground tabular-nums">
-                  {m.unitCost ? `$${m.unitCost}` : '—'}
+                  {m.unitCost ? formatCurrency(m.unitCost) : '—'}
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">
                   {m.reference ?? '—'}
@@ -187,7 +205,7 @@ export default function MovimientosPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              onClick={() => setFilter('page', String(Math.max(1, page - 1)))}
               disabled={page === 1}
             >
               Anterior
@@ -195,7 +213,7 @@ export default function MovimientosPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              onClick={() => setFilter('page', String(Math.min(totalPages, page + 1)))}
               disabled={page >= totalPages}
             >
               Siguiente
