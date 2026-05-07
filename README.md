@@ -14,17 +14,55 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 | 1 | Base de datos (21 entidades, migración inicial, seeds) + auth JWT con cookies httpOnly | ✅ |
 | 2 | Catálogo de productos + compatibilidad vehicular + búsqueda global Cmd+K | ✅ |
 | 3 | Inventario (compras, ajustes, movimientos, stock con semáforo) + Suppliers básico | ✅ |
-| 4 | Clientes y proveedores (detalle con tabs) | ⏳ siguiente |
-| 5 | Caja y gastos | pendiente |
-| 6 | Cotizaciones + envío WhatsApp/email | pendiente |
-| 7 | Ventas con caja integrada | pendiente |
-| 8 | Reportes + exportación CSV/PDF | pendiente |
+| — | **Refinamientos transversales** (post Fase 3): formato monetario, paginación universal, filtros en URL, FK errors claros, eliminar producto, unicidad RUT, validaciones extra | ✅ |
+| 4 | Clientes y proveedores (RUT chileno + dirección desglosada + detalle con tabs) | ⏳ siguiente |
+| 4B | Catálogo extendido: códigos múltiples, foto del producto, ORIGINAL/ALTERNATIVO | pendiente |
+| 5 | Caja, gastos, IVA, comisiones por tarjeta + factura adjunta en compras | pendiente |
+| 6 | Cotizaciones + modal venta/cotización + impresión 80mm/carta + WhatsApp/email | pendiente |
+| 7 | Ventas con caja integrada (selector de bodega + comisión tarjeta + impresión) | pendiente |
+| 7.5 | Multi-bodega + transferencias (flujo Mercado Libre Full manual) | pendiente |
+| 7.6 | Devoluciones + Garantías | pendiente |
+| 7.7 | Guía de despacho con número correlativo | pendiente |
+| 8 | Reportes + proyección de stock + lista de productos críticos (CSV/Excel) | pendiente |
 | 9 | Dashboard (KPIs + alertas + gráficos) | pendiente |
 | 10 | Carga masiva Excel | pendiente |
-| 11 | Códigos de barras + etiquetas | pendiente |
+| 11 | Códigos de barras + etiquetas + refinamiento de plantillas | pendiente |
 | 12 | Deploy (Railway + Vercel + Resend) | pendiente |
 | 13 | Integración HubSpot (alcance a confirmar) | pendiente |
 | 14 | Manual + video + soporte post-entrega | pendiente |
+
+---
+
+## Refinamientos transversales aplicados (post Fase 3)
+
+Bloque de mejoras hechas en respuesta a las primeras observaciones del cliente sobre los módulos ya entregados. **No** introduce schema nuevo; son utilidades, validaciones y patrones reutilizables que las fases siguientes deben respetar.
+
+### Backend (`apps/api`)
+
+| Cambio | Dónde | Notas |
+| --- | --- | --- |
+| Helper FK → 409 | [`apps/api/src/common/fk-error.ts`](apps/api/src/common/fk-error.ts) | `rethrowFkAsConflict(err, msg)` mapea `ER_ROW_IS_REFERENCED_2` a `ConflictException`. Aplicado en categorías, marcas, vehículos, productos, proveedores. Ya no se devuelve 500 al borrar entidades referenciadas. |
+| Paginación opcional | Categorías, marcas, marcas/modelos de vehículo, proveedores, inventario | Cuando llegan `page`/`pageSize` devuelve `PaginatedResult`; sin esos params devuelve array completo (compat con selectores). |
+| Búsqueda libre `q` | Mismos módulos | Búsqueda case-insensitive vía `LIKE %q%` sobre los campos relevantes. |
+| Unicidad de NIT/RUC | [`apps/api/src/suppliers/suppliers.service.ts`](apps/api/src/suppliers/suppliers.service.ts) | Validada en `create` y `update`. El índice DB único se agrega en Fase 4 (en la misma migración que aplica a `customers.taxId`). |
+
+### Frontend (`apps/web`)
+
+| Cambio | Dónde | Notas |
+| --- | --- | --- |
+| Formato monetario | [`apps/web/lib/format.ts`](apps/web/lib/format.ts) | `formatCurrency(value)` con `Intl.NumberFormat`. Corrige `$100000.00` → `$100.000,00`. Listo para repuntar a `es-CL`/CLP cuando se confirme el país. |
+| Filtros sincronizados con URL | [`apps/web/lib/use-url-filters.ts`](apps/web/lib/use-url-filters.ts) | Hook `useUrlFilters({ q: '', page: '', ... })` que lee/escribe `?key=val` con `router.replace`. Permite compartir links con estado y que la página recargada respete los filtros. |
+| Productos: UX | [`apps/web/components/forms/product-form.tsx`](apps/web/components/forms/product-form.tsx) + [`apps/web/app/(dashboard)/productos/page.tsx`](apps/web/app/(dashboard)/productos/page.tsx) | Removido mensaje obsoleto de stock mínimo. Selector de **año** del filtro vehículo y de los rangos en compatibilidades pasados a `Select` (1980 → año actual + 1). Validación zod de duplicados de fitments y rango de años inline por fila. Botón Guardar bloqueado durante `isPending`/`isSubmitting`. **Botón Eliminar producto** con confirm modal en la edición. |
+| Listados con paginación + URL | Productos, categorías, marcas, vehículos, inventario, movimientos, proveedores, compras | Todas las pantallas siguen el mismo patrón (filtros + paginación + URL). |
+| Movimientos: limpiar filtros | [`apps/web/app/(dashboard)/inventario/movimientos/page.tsx`](apps/web/app/(dashboard)/inventario/movimientos/page.tsx) | Botón "Limpiar filtros" cuando hay filtros aplicados. |
+
+### Patrones a reusar en fases siguientes
+
+- Toda nueva pantalla de listado debe usar `useUrlFilters`.
+- Todo nuevo `remove()` que pueda violar FK debe envolverse con `rethrowFkAsConflict`.
+- Toda visualización de monto debe pasar por `formatCurrency`.
+- Todo nuevo listado que pueda crecer debe paginar.
+- Toda nueva lista paginada en backend debe respetar la convención: `page`/`pageSize` opcionales — sin ellos el endpoint devuelve array completo para alimentar selectores.
 
 ---
 
@@ -697,30 +735,32 @@ Visible en todas las pantallas dentro de `(dashboard)/`:
 
 | Ruta | Archivo | Para qué sirve |
 | --- | --- | --- |
-| `/productos` | [`app/(dashboard)/productos/page.tsx`](apps/web/app/(dashboard)/productos/page.tsx) | Lista paginada de productos (20/página). Filtros: búsqueda libre por SKU/partNumber/barcode/nombre (debounce 250 ms), categoría, marca. Sección dedicada **"Buscar por vehículo compatible"** (marca → modelo → año) que cambia la query de `/products` por `/products/by-vehicle`. Click en una fila navega a la edición. |
+| `/productos` | [`app/(dashboard)/productos/page.tsx`](apps/web/app/(dashboard)/productos/page.tsx) | Lista paginada (20/página) **con filtros sincronizados a la URL**. Filtros: búsqueda libre por SKU/partNumber/barcode/nombre (debounce 250 ms), categoría, marca. Sección dedicada **"Buscar por vehículo compatible"** (marca → modelo → **año como `Select`** 1980→actual+1) que cambia la query de `/products` por `/products/by-vehicle`. Costo y precio formateados con `formatCurrency`. Click en una fila navega a la edición. Botón "Limpiar todos los filtros" cuando hay filtros activos. |
 | `/productos/nuevo` | [`app/(dashboard)/productos/nuevo/page.tsx`](apps/web/app/(dashboard)/productos/nuevo/page.tsx) | Form de creación. Renderiza el `<ProductForm>` sin valores iniciales. |
-| `/productos/[id]` | [`app/(dashboard)/productos/[id]/page.tsx`](apps/web/app/(dashboard)/productos/[id]/page.tsx) | Form de edición. Server Component que llama `GET /products/:id` y rehidrata el `<ProductForm>` con todos los campos + fitments. Si el id no existe, `notFound()`. |
-| `/categorias` | [`app/(dashboard)/categorias/page.tsx`](apps/web/app/(dashboard)/categorias/page.tsx) | CRUD simple de categorías de producto (`Motor`, `Frenos`, etc. — las del seed). Usa el componente reutilizable `<SimpleNameList>` con tabla + dialog para crear/editar. |
-| `/marcas` | [`app/(dashboard)/marcas/page.tsx`](apps/web/app/(dashboard)/marcas/page.tsx) | CRUD de marcas de **repuestos** (NGK, Bosch, etc.). Mismo patrón que categorías. |
-| `/vehiculos` | [`app/(dashboard)/vehiculos/page.tsx`](apps/web/app/(dashboard)/vehiculos/page.tsx) | Pestañas internas. **Marcas:** CRUD de `VehicleMake` (Toyota, Ford). **Modelos:** CRUD de `VehicleModel` con selector de marca obligatorio. La unicidad es `(makeId, name)`. Estos datos alimentan la sub-form de Compatibilidad de productos y el filtro "buscar por vehículo". |
+| `/productos/[id]` | [`app/(dashboard)/productos/[id]/page.tsx`](apps/web/app/(dashboard)/productos/[id]/page.tsx) | Form de edición. Server Component que llama `GET /products/:id` y rehidrata el `<ProductForm>` con todos los campos + fitments. Si el id no existe, `notFound()`. **Botón "Eliminar"** con confirm modal — devuelve un mensaje claro si el producto tiene movimientos asociados (en lugar de 500). |
+| `/categorias` | [`app/(dashboard)/categorias/page.tsx`](apps/web/app/(dashboard)/categorias/page.tsx) | CRUD simple de categorías de producto (`Motor`, `Frenos`, etc. — las del seed). Usa el componente reutilizable `<SimpleNameList>` con búsqueda + paginación + dialog para crear/editar. Filtros en URL. Borrar una categoría con productos asociados muestra mensaje claro (no 500). |
+| `/marcas` | [`app/(dashboard)/marcas/page.tsx`](apps/web/app/(dashboard)/marcas/page.tsx) | CRUD de marcas de **repuestos** (NGK, Bosch, etc.). Mismo patrón que categorías (búsqueda + paginación + URL + manejo FK). |
+| `/vehiculos` | [`app/(dashboard)/vehiculos/page.tsx`](apps/web/app/(dashboard)/vehiculos/page.tsx) | Pestañas internas. **Marcas:** CRUD de `VehicleMake` (Toyota, Ford) vía `<SimpleNameList>` (paginación + búsqueda + URL). **Modelos:** CRUD de `VehicleModel` con búsqueda + filtro por marca + paginación + URL. La unicidad es `(makeId, name)`. Estos datos alimentan la sub-form de Compatibilidad de productos y el filtro "buscar por vehículo". |
 
 #### Componente `<ProductForm>` (3 tabs)
 
 Vive en [`components/forms/product-form.tsx`](apps/web/components/forms/product-form.tsx) y lo usan tanto `nuevo` como `[id]`:
 
 - **Datos:** SKU (único), partNumber, barcode, nombre, descripción, categoría, marca, ubicación física, activo/inactivo.
-- **Precios y stock:** costo, precio de venta, stock mínimo (umbral del semáforo amarillo), stock máximo opcional. Recordatorio: el stock real lo gestiona Inventario, acá sólo se define el `minStock` que activa la alerta.
-- **Compatibilidad:** filas dinámicas (`useFieldArray` de RHF). Cada fila tiene selector de modelo de vehículo + año desde + año hasta. Validación: `desde <= hasta`. La estrategia del backend es replace — se reenvían **todas** las filas en cada save.
+- **Precios y stock:** costo, precio de venta, stock mínimo (umbral del semáforo amarillo), stock máximo opcional.
+- **Compatibilidad:** filas dinámicas (`useFieldArray` de RHF). Cada fila tiene selector de modelo de vehículo + **`Select` de año desde** + **`Select` de año hasta** (rango 1980 → año actual + 1). Validación zod: `desde <= hasta` con error inline por fila + detección de **duplicados** (mismo modelo + mismo rango → error inline). La estrategia del backend es replace — se reenvían **todas** las filas en cada save.
+
+> **Próximas extensiones del form (Fase 4B):** sub-form de códigos múltiples (interno/universal/fabricante/compatible/alternativo), upload de foto del producto, selector ORIGINAL/ALTERNATIVO.
 
 ### Operación
 
 | Ruta | Archivo | Para qué sirve |
 | --- | --- | --- |
-| `/inventario` | [`app/(dashboard)/inventario/page.tsx`](apps/web/app/(dashboard)/inventario/page.tsx) | Vista de **stock por producto** con badges del semáforo (`OK` verde / `Bajo stock` amarillo / `Sin stock` rojo). Arriba muestra el conteo por estado. Filtros: búsqueda libre + estado. Cada fila tiene un botón ⚙️ que abre `<AdjustStockDialog>` para corregir cantidades. |
-| `/inventario/movimientos` | [`app/(dashboard)/inventario/movimientos/page.tsx`](apps/web/app/(dashboard)/inventario/movimientos/page.tsx) | Historial paginado (50/página) de **todos** los `InventoryMovement`. Filtros: tipo (compra/venta/ajuste/devoluciones), rango de fechas. La columna "Cantidad" se colorea: rojo si negativa, verde si positiva. Muestra fecha local del usuario, badge del tipo, producto (con SKU), costo unitario si aplica, origen (`PurchaseEntry`, `Adjustment`, etc.) y email del usuario que hizo el movimiento. |
-| `/compras` | [`app/(dashboard)/compras/page.tsx`](apps/web/app/(dashboard)/compras/page.tsx) | Lista de entradas de mercadería (`PurchaseEntry`). Filtros por rango de fechas. Muestra fecha, proveedor, notas y total. |
-| `/compras/nuevo` | [`app/(dashboard)/compras/nuevo/page.tsx`](apps/web/app/(dashboard)/compras/nuevo/page.tsx) | Form de **registrar una entrada**. Selector de proveedor + fecha + notas + tabla dinámica de items. El botón "Agregar producto" abre el `<ProductPicker>` (búsqueda + click). Por cada fila se editan cantidad y costo unitario; subtotal y total se calculan en vivo. Al guardar se dispara el flujo transaccional del backend (`PurchaseEntry` + items + `applyMovement(PURCHASE_IN)` por item). |
-| `/proveedores` | [`app/(dashboard)/proveedores/page.tsx`](apps/web/app/(dashboard)/proveedores/page.tsx) | CRUD de proveedores con dialog completo (nombre, taxId, email, teléfono, dirección, notas). Implementado en Fase 3 porque las compras lo requieren — el detalle con tab *Historial de compras* llega en **Fase 4**. |
+| `/inventario` | [`app/(dashboard)/inventario/page.tsx`](apps/web/app/(dashboard)/inventario/page.tsx) | Vista de **stock por producto** con badges del semáforo (`OK` verde / `Bajo stock` amarillo / `Sin stock` rojo). Arriba muestra el conteo por estado. Filtros (búsqueda libre + estado) + paginación (50/página) sincronizados con la URL. Cada fila tiene un botón ⚙️ que abre `<AdjustStockDialog>` para corregir cantidades. |
+| `/inventario/movimientos` | [`app/(dashboard)/inventario/movimientos/page.tsx`](apps/web/app/(dashboard)/inventario/movimientos/page.tsx) | Historial paginado (50/página) de **todos** los `InventoryMovement`. Filtros (tipo, rango de fechas) en URL + botón **"Limpiar filtros"**. La columna "Cantidad" se colorea: rojo si negativa, verde si positiva. Costo unitario formateado con `formatCurrency`. Muestra fecha local del usuario, badge del tipo, producto (con SKU), origen (`PurchaseEntry`, `Adjustment`, etc.) y email del usuario que hizo el movimiento. |
+| `/compras` | [`app/(dashboard)/compras/page.tsx`](apps/web/app/(dashboard)/compras/page.tsx) | Lista paginada de entradas de mercadería (`PurchaseEntry`). Filtros (proveedor + rango de fechas) en URL + botón "Limpiar filtros". Total formateado con `formatCurrency`. |
+| `/compras/nuevo` | [`app/(dashboard)/compras/nuevo/page.tsx`](apps/web/app/(dashboard)/compras/nuevo/page.tsx) | Form de **registrar una entrada**. Selector de proveedor + fecha + notas + tabla dinámica de items. El botón "Agregar producto" abre el `<ProductPicker>` (búsqueda + click). Por cada fila se editan cantidad y costo unitario; subtotal y total se calculan en vivo. Al guardar se dispara el flujo transaccional del backend (`PurchaseEntry` + items + `applyMovement(PURCHASE_IN)` por item). En Fase 5 se agrega adjuntar **factura** (upload). |
+| `/proveedores` | [`app/(dashboard)/proveedores/page.tsx`](apps/web/app/(dashboard)/proveedores/page.tsx) | CRUD de proveedores con dialog completo (nombre, taxId, email, teléfono, dirección, notas). Búsqueda por nombre/NIT/email/teléfono + paginación, todo en URL. Validación de **unicidad de NIT/RUC** en backend. Implementado en Fase 3 porque las compras lo requieren — el detalle con tab *Historial de compras* llega en **Fase 4**. |
 
 ### Componentes reutilizables del frontend
 
@@ -741,8 +781,10 @@ Vive en [`components/forms/product-form.tsx`](apps/web/components/forms/product-
 | --- | --- |
 | [`lib/api.ts`](apps/web/lib/api.ts) | Cliente axios browser-side, `withCredentials: true`, interceptor de refresh en 401. |
 | [`lib/server-api.ts`](apps/web/lib/server-api.ts) | `serverFetch()` para Server Components — forwarda las cookies entrantes al backend. Sin refresh (el layout protegido se encarga del redirect). |
-| [`lib/catalog-api.ts`](apps/web/lib/catalog-api.ts) | Wrappers tipados de `/categories`, `/brands`, `/vehicles`, `/products` + helper `apiErrorMessage()`. |
-| [`lib/inventory-api.ts`](apps/web/lib/inventory-api.ts) | Wrappers tipados de `/suppliers`, `/inventory/*`, `/purchases`. |
+| [`lib/catalog-api.ts`](apps/web/lib/catalog-api.ts) | Wrappers tipados de `/categories`, `/brands`, `/vehicles`, `/products` (incluye variantes `*Paginated`) + helper `apiErrorMessage()`. |
+| [`lib/inventory-api.ts`](apps/web/lib/inventory-api.ts) | Wrappers tipados de `/suppliers`, `/inventory/*`, `/purchases` (incluye variantes `*Paginated`). |
+| [`lib/format.ts`](apps/web/lib/format.ts) | `formatCurrency(value)` y `formatNumber(value)` con `Intl.NumberFormat`. **Toda visualización de monto debe pasar por acá.** |
+| [`lib/use-url-filters.ts`](apps/web/lib/use-url-filters.ts) | Hook `useUrlFilters({ q: '', page: '', ... })` que sincroniza filtros con la URL (`router.replace`). Returns `{ values, setFilter, setFilters, clear }`. **Toda nueva pantalla de listado lo usa.** |
 | [`lib/utils.ts`](apps/web/lib/utils.ts) | `cn()` — merge de clases Tailwind con `clsx + twMerge`. |
 
 ---
@@ -896,11 +938,42 @@ Si el admin ya existe, **el seed no lo recrea** — borralo manualmente primero 
 
 ---
 
+## Decisiones pendientes con el cliente
+
+> Cada decisión bloquea o influye una migración o un flujo concreto. Se trabaja con la **asunción** indicada hasta confirmar.
+
+| # | Pregunta | Fase impactada | Asunción actual |
+| --- | --- | --- | --- |
+| 1 | ¿Separar `customers.address` en calle / número / comuna o dejar texto libre? | 4 | Separar (formato chileno con comuna). |
+| 2 | "Mismo producto con mismo código" — ¿permitir duplicados de SKU? ¿códigos compartidos entre productos? ¿fusionar? | 4B | `sku` se mantiene único; tabla `product_codes` permite que productos distintos compartan un mismo código universal. |
+| 3 | Comisión por tarjeta: ¿% fijo, por método (débito vs crédito), por venta? | 5 / 7 | `cardCommissionRate` único en `CompanySettings` para todas las ventas con `paymentMethod=CARD`. |
+| 4 | Tasa de IVA: ¿fija 19% (Chile) o configurable? | 5 | Configurable, default `0.19`. |
+| 5 | Mercado Libre: ¿integración real con API ML o registro manual? | 7.5 | Manual. |
+| 6 | Almacenamiento de archivos: ¿disco local, S3, Cloudinary? | 4B / 5 | Disco local en `apps/api/uploads/`. |
+| 7 | Guía de despacho: ¿requiere numeración propia y entidad? ¿requisitos legales SII? | 7.7 | Entidad `DispatchNote` con número correlativo. Sin emisión SII todavía. |
+| 8 | Impresión 80mm: ¿impresora térmica POS o vista web? | 6 / 7 / 7.7 | HTML con `@page` 80mm. |
+| 9 | Validación de RUT chileno: ¿formato + dígito verificador estricto, o solo formato? | 4 | Formato + dígito verificador. |
+| 10 | Cotización por WhatsApp: ¿"el número" es del cliente o el correlativo de la cot? | 6 | Correlativo asignado al guardar; el botón pre-arma el mensaje al teléfono del cliente. |
+
+---
+
 ## Próximas fases
 
 Cada fase es un PR independiente con verificación end-to-end al cierre. Ver [PLAN.md](PLAN.md#plan-de-implementación-por-fases) para el detalle.
 
-**Fase 4 (siguiente):** Clientes y proveedores con detalle (tabs *Datos / Cotizaciones / Ventas* para clientes, *Datos / Compras* para proveedores), validación de teléfono internacional (clave para WhatsApp en Fase 6), notas internas, historial.
+**Fase 4 (siguiente):** Clientes y proveedores con detalle (tabs *Datos / Cotizaciones / Ventas* para clientes, *Datos / Compras* para proveedores). Campos del cliente: **RUT/ID, nombre, correo, dirección (calle, número, comuna), teléfono**. Migración que desglosa `customers.address` y agrega índice único en `taxId` para clientes y proveedores. Validación de teléfono internacional (clave para WhatsApp en Fase 6) y dígito verificador de RUT chileno.
+
+**Fase 4B:** Catálogo extendido — tabla `product_codes` (interno, universal, fabricante, compatibles, alternativos), foto del producto (upload con `multer`), distinción ORIGINAL/ALTERNATIVO.
+
+**Fase 5:** Caja, gastos, IVA y comisiones — categorías predefinidas (IVA Compra, IVA Venta, Comisión Tarjeta), campos `subtotal`/`taxAmount`/`commissionAmount` en ventas y compras, auto-registro de comisión al cobrar con tarjeta, factura adjunta en compras.
+
+**Fase 6:** Cotizaciones + modal "venta o cotización" + impresión 80mm/carta + WhatsApp/email.
+
+**Fase 7:** Ventas con caja integrada, selector de bodega, comisión tarjeta automática, impresión 80mm/carta.
+
+**Fases 7.5 / 7.6 / 7.7:** Multi-bodega + transferencias (flujo Mercado Libre Full); Devoluciones (suman stock) y Garantías (no afectan stock); Guía de despacho con número correlativo.
+
+**Fase 8:** Reportes + **Proyección de stock** con lista de productos críticos exportable a CSV/Excel (importante por el lead time de 2-3 meses de las importaciones del cliente).
 
 ---
 
