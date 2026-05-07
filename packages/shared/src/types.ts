@@ -33,6 +33,17 @@ export interface VehicleFitmentDto {
   model?: VehicleModelDto;
 }
 
+export interface ProductImageDto {
+  id: string;
+  productId: string;
+  url: string;
+  isCover: boolean;
+  position: number;
+  createdAt: string;
+}
+
+export type ProductKindDto = 'ORIGINAL' | 'ALTERNATIVE';
+
 export interface ProductDto {
   id: string;
   sku: string;
@@ -49,6 +60,13 @@ export interface ProductDto {
   maxStock: number | null;
   location: string | null;
   isActive: boolean;
+  // Fase 4B
+  universalCode: string | null;
+  productKind: ProductKindDto;
+  images?: ProductImageDto[];
+  compatibleCodes?: string[];
+  coverUrl?: string | null;
+  // Relaciones
   category?: CategoryDto | null;
   brand?: BrandDto | null;
   fitments?: VehicleFitmentDto[];

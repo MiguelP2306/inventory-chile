@@ -51,3 +51,21 @@ export const UserRole = {
   ADMIN: 'ADMIN',
 } as const;
 export type UserRole = (typeof UserRole)[keyof typeof UserRole];
+
+// Producto: original o alternativo (Fase 4B). El cliente lo usa para
+// distinguir repuestos OEM vs equivalentes/alternativos del mercado.
+export const ProductKind = {
+  ORIGINAL: 'ORIGINAL',
+  ALTERNATIVE: 'ALTERNATIVE',
+} as const;
+export type ProductKind = (typeof ProductKind)[keyof typeof ProductKind];
+
+// Tipos de código adicional en `product_codes` (Fase 4B).
+// Por ahora solo se usa COMPATIBLE — el universal vive en `products.universalCode`
+// como columna directa. Dejamos el enum para que sea fácil sumar tipos sin
+// cambiar el schema.
+export const ProductCodeKind = {
+  COMPATIBLE: 'COMPATIBLE',
+} as const;
+export type ProductCodeKind =
+  (typeof ProductCodeKind)[keyof typeof ProductCodeKind];

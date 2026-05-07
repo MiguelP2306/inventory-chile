@@ -2,12 +2,13 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, Upload } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
+import { ProductImageGallery } from '@/components/product-image-gallery';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -35,13 +36,18 @@ import {
   listVehicleMakes,
   listVehicleModels,
   updateProduct,
+  uploadProductImage,
   type ProductInput,
 } from '@/lib/catalog-api';
-import type { ProductDto } from '@inventory/shared';
+import { cn } from '@/lib/utils';
+import type { ProductDto, ProductKindDto } from '@inventory/shared';
 
 const NULL_OPTION = '__none__';
 const MIN_YEAR = 1980;
 const MAX_YEAR = new Date().getFullYear() + 1;
+
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB — espejo del backend
+const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 const fitmentSchema = z
   .object({
@@ -59,12 +65,18 @@ const fitmentSchema = z
     }
   });
 
+const compatibleCodeSchema = z.object({
+  code: z.string().min(1, 'Código vacío').max(80, 'Máximo 80 caracteres'),
+});
+
 const schema = z
   .object({
     sku: z.string().min(1, 'SKU obligatorio').max(60),
     name: z.string().min(1, 'Nombre obligatorio').max(200),
     partNumber: z.string().max(80).optional().or(z.literal('')),
     barcode: z.string().max(80).optional().or(z.literal('')),
+    universalCode: z.string().max(80).optional().or(z.literal('')),
+    productKind: z.enum(['ORIGINAL', 'ALTERNATIVE']),
     description: z.string().optional().or(z.literal('')),
     categoryId: z.string().optional(),
     brandId: z.string().optional(),
@@ -75,23 +87,38 @@ const schema = z
     location: z.string().max(120).optional().or(z.literal('')),
     isActive: z.boolean().optional(),
     fitments: z.array(fitmentSchema).optional(),
+    compatibleCodes: z.array(compatibleCodeSchema).optional(),
   })
   .superRefine((v, ctx) => {
-    if (!v.fitments) return;
-    // Detectar duplicados (mismo modelId con mismo rango de años).
-    const seen = new Map<string, number>();
-    v.fitments.forEach((f, idx) => {
-      const key = `${f.modelId}|${f.yearFrom ?? ''}|${f.yearTo ?? ''}`;
-      if (f.modelId && seen.has(key)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Esta compatibilidad ya está cargada (modelo y años repetidos).',
-          path: ['fitments', idx, 'modelId'],
-        });
-      } else if (f.modelId) {
-        seen.set(key, idx);
-      }
-    });
+    if (v.fitments) {
+      const seen = new Map<string, number>();
+      v.fitments.forEach((f, idx) => {
+        const key = `${f.modelId}|${f.yearFrom ?? ''}|${f.yearTo ?? ''}`;
+        if (f.modelId && seen.has(key)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Esta compatibilidad ya está cargada (modelo y años repetidos).',
+            path: ['fitments', idx, 'modelId'],
+          });
+        } else if (f.modelId) {
+          seen.set(key, idx);
+        }
+      });
+    }
+    if (v.compatibleCodes) {
+      const seen = new Set<string>();
+      v.compatibleCodes.forEach((c, idx) => {
+        const code = c.code.trim();
+        if (code && seen.has(code)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Código duplicado en la lista.',
+            path: ['compatibleCodes', idx, 'code'],
+          });
+        }
+        seen.add(code);
+      });
+    }
   });
 
 type FormValues = z.infer<typeof schema>;
@@ -109,12 +136,12 @@ export function ProductForm({ product }: Props) {
   const router = useRouter();
   const qc = useQueryClient();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Solo se usa en modo "nuevo": archivos cargados antes de que exista el productId.
+  const [pendingImages, setPendingImages] = useState<File[]>([]);
 
   const categories = useQuery({ queryKey: ['categories'], queryFn: listCategories });
   const brands = useQuery({ queryKey: ['brands'], queryFn: listBrands });
   const makes = useQuery({ queryKey: ['vehicle-makes'], queryFn: listVehicleMakes });
-  // Cargamos TODOS los modelos para poder mostrarlos sin filtrar por marca,
-  // ya que cada fitment puede ser de una marca distinta.
   const models = useQuery({ queryKey: ['vehicle-models'], queryFn: () => listVehicleModels() });
 
   const form = useForm<FormValues>({
@@ -124,6 +151,8 @@ export function ProductForm({ product }: Props) {
       name: product?.name ?? '',
       partNumber: product?.partNumber ?? '',
       barcode: product?.barcode ?? '',
+      universalCode: product?.universalCode ?? '',
+      productKind: (product?.productKind as ProductKindDto) ?? 'ORIGINAL',
       description: product?.description ?? '',
       categoryId: product?.categoryId ?? NULL_OPTION,
       brandId: product?.brandId ?? NULL_OPTION,
@@ -138,17 +167,43 @@ export function ProductForm({ product }: Props) {
         yearFrom: f.yearFrom ?? null,
         yearTo: f.yearTo ?? null,
       })) ?? [],
+      compatibleCodes:
+        product?.compatibleCodes?.map((code) => ({ code })) ?? [],
     },
   });
   const fitments = useFieldArray({ control: form.control, name: 'fitments' });
+  const codes = useFieldArray({ control: form.control, name: 'compatibleCodes' });
 
   const mut = useMutation({
     mutationFn: (input: ProductInput) =>
       product ? updateProduct(product.id, input) : createProduct(input),
-    onSuccess: (saved) => {
+    onSuccess: async (saved) => {
       qc.invalidateQueries({ queryKey: ['products'] });
       qc.invalidateQueries({ queryKey: ['products-by-vehicle'] });
-      toast.success(product ? 'Producto actualizado' : 'Producto creado');
+
+      // Si veníamos de "crear" con imágenes pendientes, subirlas en serie.
+      if (!product && pendingImages.length > 0) {
+        let failed = 0;
+        for (const file of pendingImages) {
+          try {
+            await uploadProductImage(saved.id, file);
+          } catch {
+            failed += 1;
+          }
+        }
+        if (failed > 0) {
+          toast.error(
+            `Producto creado, pero ${failed} imagen${failed === 1 ? '' : 'es'} no se pudo subir. Reintentá desde el detalle.`,
+          );
+        } else {
+          toast.success(
+            `Producto creado con ${pendingImages.length} imagen${pendingImages.length === 1 ? '' : 'es'}`,
+          );
+        }
+      } else {
+        toast.success(product ? 'Producto actualizado' : 'Producto creado');
+      }
+
       router.push(`/productos/${saved.id}`);
       router.refresh();
     },
@@ -174,6 +229,8 @@ export function ProductForm({ product }: Props) {
       name: values.name,
       partNumber: values.partNumber || null,
       barcode: values.barcode || null,
+      universalCode: values.universalCode || null,
+      productKind: values.productKind,
       description: values.description || null,
       categoryId: values.categoryId === NULL_OPTION ? null : values.categoryId ?? null,
       brandId: values.brandId === NULL_OPTION ? null : values.brandId ?? null,
@@ -188,6 +245,9 @@ export function ProductForm({ product }: Props) {
         yearFrom: f.yearFrom ?? null,
         yearTo: f.yearTo ?? null,
       })),
+      compatibleCodes: values.compatibleCodes
+        ?.map((c) => c.code.trim())
+        .filter(Boolean),
     };
     mut.mutate(input);
   }
@@ -232,7 +292,15 @@ export function ProductForm({ product }: Props) {
         <TabsList>
           <TabsTrigger value="datos">Datos</TabsTrigger>
           <TabsTrigger value="precios">Precios y stock</TabsTrigger>
-          <TabsTrigger value="compat">Compatibilidad ({fitments.fields.length})</TabsTrigger>
+          <TabsTrigger value="compat">
+            Compatibilidad ({fitments.fields.length})
+          </TabsTrigger>
+          <TabsTrigger value="codigos">
+            Códigos ({codes.fields.length})
+          </TabsTrigger>
+          <TabsTrigger value="imagenes">
+            Imágenes ({product ? (product.images?.length ?? 0) : pendingImages.length})
+          </TabsTrigger>
         </TabsList>
 
         {/* DATOS */}
@@ -249,6 +317,29 @@ export function ProductForm({ product }: Props) {
             </Field>
             <Field label="Código de barras" error={errors.barcode?.message}>
               <Input {...form.register('barcode')} placeholder="ej: 7891234567890" />
+            </Field>
+            <Field label="Código universal" error={errors.universalCode?.message}>
+              <Input
+                {...form.register('universalCode')}
+                placeholder="ej: 7891234567890"
+              />
+            </Field>
+            <Field label="Tipo (origen)" error={errors.productKind?.message}>
+              <Controller
+                control={form.control}
+                name="productKind"
+                render={({ field }) => (
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ORIGINAL">Original</SelectItem>
+                      <SelectItem value="ALTERNATIVE">Alternativo</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+              />
             </Field>
             <Field label="Categoría">
               <Controller
@@ -458,6 +549,75 @@ export function ProductForm({ product }: Props) {
             <p className="text-sm text-destructive">{errors.fitments.root.message}</p>
           )}
         </TabsContent>
+
+        {/* CÓDIGOS COMPATIBLES */}
+        <TabsContent value="codigos" className="space-y-4 rounded-md border bg-card p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-medium">Códigos compatibles</h3>
+              <p className="text-sm text-muted-foreground">
+                Códigos de productos equivalentes o intercambiables. Aparecen en la búsqueda
+                — un cliente que escribe uno de estos códigos encuentra el producto.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => codes.append({ code: '' })}
+            >
+              <Plus className="h-4 w-4" />
+              Agregar
+            </Button>
+          </div>
+
+          {codes.fields.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              Sin códigos compatibles. Agregá uno con el botón de arriba.
+            </p>
+          )}
+
+          <div className="space-y-2">
+            {codes.fields.map((field, idx) => {
+              const rowErrors = errors.compatibleCodes?.[idx];
+              return (
+                <div key={field.id} className="flex items-start gap-2">
+                  <div className="flex-1">
+                    <Input
+                      {...form.register(`compatibleCodes.${idx}.code`)}
+                      placeholder="Código compatible"
+                    />
+                    {rowErrors?.code?.message && (
+                      <p className="mt-1 text-xs text-destructive">
+                        {rowErrors.code.message}
+                      </p>
+                    )}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => codes.remove(idx)}
+                  >
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </TabsContent>
+
+        {/* IMÁGENES */}
+        <TabsContent value="imagenes" className="rounded-md border bg-card p-6">
+          {product ? (
+            <ProductImageGallery productId={product.id} />
+          ) : (
+            <PendingImagesUploader
+              files={pendingImages}
+              onChange={setPendingImages}
+            />
+          )}
+        </TabsContent>
       </Tabs>
 
       <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
@@ -467,9 +627,8 @@ export function ProductForm({ product }: Props) {
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
             Esta acción es permanente. El producto &ldquo;{product?.name}&rdquo; se eliminará del
-            catálogo.
-            Si tiene movimientos de inventario asociados, no podrá eliminarse y tendrás que
-            desactivarlo en su lugar.
+            catálogo. Si tiene movimientos de inventario asociados, no podrá eliminarse y tendrás
+            que desactivarlo en su lugar.
           </p>
           <DialogFooter>
             <Button
@@ -493,6 +652,123 @@ export function ProductForm({ product }: Props) {
         </DialogContent>
       </Dialog>
     </form>
+  );
+}
+
+/**
+ * Uploader local para modo "nuevo" — guarda los `File` en memoria hasta que
+ * el producto se crea, momento en el cual se suben uno a uno via
+ * `uploadProductImage(productId, file)`.
+ */
+function PendingImagesUploader({
+  files,
+  onChange,
+}: {
+  files: File[];
+  onChange: (next: File[]) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  function addFiles(list: FileList | null) {
+    if (!list) return;
+    const next = [...files];
+    Array.from(list).forEach((f) => {
+      if (!ACCEPTED_IMAGE_TYPES.includes(f.type)) {
+        toast.error(`"${f.name}": formato no permitido. JPG, PNG o WEBP únicamente.`);
+        return;
+      }
+      if (f.size > MAX_IMAGE_BYTES) {
+        toast.error(`"${f.name}": pesa más de 10 MB.`);
+        return;
+      }
+      next.push(f);
+    });
+    onChange(next);
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        Las imágenes se subirán automáticamente después de crear el producto. La primera se
+        marca como portada.
+      </p>
+      <div
+        className={cn(
+          'rounded-md border-2 border-dashed p-6 text-center transition-colors',
+          dragOver ? 'border-primary bg-accent/40' : 'border-muted-foreground/30',
+        )}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          addFiles(e.dataTransfer.files);
+        }}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          className="hidden"
+          multiple
+          onChange={(e) => {
+            addFiles(e.target.files);
+            if (inputRef.current) inputRef.current.value = '';
+          }}
+        />
+        <Upload className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">Arrastrá imágenes acá o</p>
+        <Button
+          type="button"
+          variant="outline"
+          className="mt-2"
+          onClick={() => inputRef.current?.click()}
+        >
+          Elegir archivos
+        </Button>
+        <p className="mt-2 text-xs text-muted-foreground">
+          JPG, PNG o WEBP · máximo 10 MB por archivo
+        </p>
+      </div>
+
+      {files.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+          {files.map((f, idx) => (
+            <div
+              key={`${f.name}-${idx}`}
+              className="relative overflow-hidden rounded-md border bg-muted/20"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={URL.createObjectURL(f)}
+                alt=""
+                className="aspect-square w-full object-cover"
+              />
+              {idx === 0 && (
+                <div className="absolute left-2 top-2 rounded bg-amber-500/90 px-2 py-0.5 text-[11px] font-semibold text-white">
+                  Portada
+                </div>
+              )}
+              <div className="absolute inset-x-0 bottom-0 flex justify-end p-2">
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="secondary"
+                  className="h-8 w-8 text-destructive"
+                  onClick={() => onChange(files.filter((_, i) => i !== idx))}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -1,8 +1,11 @@
+import { ProductKind } from '@inventory/shared';
 import { PartialType } from '@nestjs/mapped-types';
 import { Type } from 'class-transformer';
 import {
+  ArrayUnique,
   IsArray,
   IsBoolean,
+  IsEnum,
   IsInt,
   IsNumberString,
   IsOptional,
@@ -96,11 +99,32 @@ export class CreateProductDto {
   @IsBoolean()
   isActive?: boolean;
 
+  // Código universal (Fase 4B). Único por producto, opcional. NO único entre
+  // productos — distintos productos pueden compartir el mismo universal.
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  universalCode?: string | null;
+
+  // ORIGINAL u ALTERNATIVE. Default ORIGINAL en backend.
+  @IsOptional()
+  @IsEnum(ProductKind)
+  productKind?: ProductKind;
+
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => FitmentInputDto)
   fitments?: FitmentInputDto[];
+
+  // Lista completa de códigos compatibles. Se aplica con estrategia "replace":
+  // se borran los del producto y se reinsertan estos.
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  @MaxLength(80, { each: true })
+  compatibleCodes?: string[];
 }
 
 // Todos los campos opcionales para PATCH parcial.
@@ -118,6 +142,10 @@ export class ListProductsQueryDto {
   @IsOptional()
   @IsUUID()
   brandId?: string;
+
+  @IsOptional()
+  @IsEnum(ProductKind)
+  productKind?: ProductKind;
 
   @IsOptional()
   @Type(() => Number)
@@ -161,4 +189,12 @@ export class QuickSearchQueryDto {
   @Min(1)
   @Max(50)
   limit?: number;
+
+  // Por default trae todos los productos (atajo de navegación de la barra
+  // superior). Cotizaciones/ventas le pasan `activeOnly=true` para no incluir
+  // productos desactivados en su selector.
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  activeOnly?: boolean;
 }

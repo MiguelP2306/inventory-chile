@@ -7,6 +7,8 @@ export { Customer } from './customer.entity';
 export { ExpenseCategory } from './expense-category.entity';
 export { InventoryMovement } from './inventory-movement.entity';
 export { Product } from './product.entity';
+export { ProductCode } from './product-code.entity';
+export { ProductImage } from './product-image.entity';
 export { PurchaseEntry } from './purchase-entry.entity';
 export { PurchaseEntryItem } from './purchase-entry-item.entity';
 export { Quotation } from './quotation.entity';

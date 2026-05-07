@@ -318,26 +318,37 @@ inventory-management/
 
 > **No** se seedea cliente "Consumidor final" (decisión del cliente; el RUT obligatorio aplica también para ventas mostrador).
 
-### Fase 4B — Catálogo extendido (productos con códigos múltiples + foto + tipo)
+### Fase 4B — Catálogo extendido (códigos múltiples + galería + tipo) ✅
 
-> Estos campos surgen del segundo bloque de requerimientos del cliente: necesita registrar múltiples códigos por producto (la marca cambia el código a veces, hay códigos universales y compatibles), foto del producto, y distinguir originales de alternativos.
+> Surge del segundo bloque de requerimientos del cliente: registrar el código universal del producto + códigos compatibles, galería de fotos, y distinguir originales vs alternativos.
 
-1. **Migración** que agrega:
-  - `products.imageUrl` (varchar 500, nullable).
-  - `products.productKind` (enum `ORIGINAL | ALTERNATIVE`, default `ORIGINAL`).
-  - `products.universalCode` (varchar 80, nullable, index) — código universal directo (decisión a confirmar: campo único vs. tabla múltiple).
-  - Tabla `product_codes` (productId FK, code varchar 80, kind enum, isPrimary, índice `(productId, kind)`).
-2. **Backend uploads:** módulo `uploads` con `multer`, storage local `apps/api/uploads/products/`, endpoint `POST /uploads/product-image` que devuelve `{ url }`. Servir como estáticos vía `ServeStaticModule`.
-3. **API:** `POST /products/:id/codes`, `PATCH /products/:id/codes/:codeId`, `DELETE /products/:id/codes/:codeId`. Validar unicidad `(code, kind)` global cuando `kind=UNIVERSAL` o `MANUFACTURER`.
-4. **UI del formulario de producto:**
-  - Sub-form de códigos (lista dinámica con tipo + código + isPrimary).
-  - Widget de upload de foto con preview.
-  - Selector ORIGINAL/ALTERNATIVO.
-5. **UI listado de productos:** miniatura de la foto, badge ORIGINAL/ALTERNATIVO, búsqueda extendida que también busca por `code` en `product_codes`.
-6. **Decisión pendiente:** "mismo producto con mismo código" — el cliente menciona esto sin contexto suficiente. Confirmar si:
-  - (a) quiere permitir duplicados de SKU (cambiar el constraint),
-  - (b) quiere que distintos productos compartan un mismo `code` en `product_codes` (ej. dos refacciones equivalentes con el mismo universal), o
-  - (c) quiere "fusionar" productos con mismo código en uno solo.
+1. **Migración** [`1778122896484-ProductCatalogExtended.ts`](apps/api/src/database/migrations/1778122896484-ProductCatalogExtended.ts) que:
+  - Agrega `products.universalCode` (varchar 80, nullable, indexado pero **NO único** — productos equivalentes pueden compartir universal).
+  - Agrega `products.productKind` (enum `ORIGINAL | ALTERNATIVE`, NOT NULL, default `ORIGINAL`).
+  - Crea tabla `product_images` (id, productId FK CASCADE, url, isCover, position, createdAt) — galería ordenada con flag de portada.
+  - Crea tabla `product_codes` (id, productId FK CASCADE, code varchar 80, kind enum) — por ahora solo `kind=COMPATIBLE`. El enum queda extensible sin cambiar schema.
+2. **No** agrega columna `products.imageUrl`: la portada se calcula on-the-fly desde `product_images.isCover = TRUE`. Evita duplicar el dato.
+3. **Módulo uploads** ([apps/api/src/uploads/upload-config.ts](apps/api/src/uploads/upload-config.ts)) con `multer` + `ServeStaticModule`. Storage local en `apps/api/uploads/products/`. Servidor estático bajo `/api/uploads/*` (mismo prefix que la API). Validaciones: whitelist MIME (`image/jpeg`, `image/png`, `image/webp`), tamaño máximo 10 MB, renombrado automático a `<uuid>.<ext>` para evitar path traversal. Convenciones transversales en [README → Subida de archivos](README.md#subida-de-archivos-uploads).
+4. **Endpoints nuevos**:
+  - `GET /api/products/:id/images` — listar imágenes del producto.
+  - `POST /api/products/:id/images` (multipart, campo `file`) — subir una imagen. La primera del producto se marca cover automáticamente.
+  - `PATCH /api/products/:id/images/:imageId/cover` — marcar como portada (desmarca las demás en una transacción).
+  - `DELETE /api/products/:id/images/:imageId` — borra registro **y** archivo físico. Si era cover, promueve la siguiente imagen.
+  - `PUT /api/products/:id/codes` — reemplaza la lista completa de códigos compatibles (estrategia replace, mismo patrón que fitments).
+5. **`ProductsService` extendido**:
+  - `getOne()` devuelve también `images`, `compatibleCodes`, `coverUrl`.
+  - `list()` y `quickSearch()` adjuntan `coverUrl` por batch (sin N+1) y soportan filtro `productKind`.
+  - **Búsqueda libre extendida**: ahora matchea contra `sku`, `partNumber`, `barcode`, `name`, `universalCode` y `product_codes.code` (subquery EXISTS).
+  - `remove()` borra archivos físicos del disco después de que la transacción de borrado del producto se commitea.
+6. **Frontend**:
+  - `ProductDto` ampliado: `universalCode`, `productKind`, `images`, `compatibleCodes`, `coverUrl`.
+  - `lib/catalog-api.ts`: helpers `uploadProductImage`, `setProductImageCover`, `deleteProductImage`, `replaceProductCompatibleCodes`, `publicImageUrl()`.
+  - `<ProductImageGallery>` ([apps/web/components/product-image-gallery.tsx](apps/web/components/product-image-gallery.tsx)) con drag-drop, preview, marcar portada, eliminar.
+  - `<ProductForm>` con 5 tabs: *Datos / Precios y stock / Compatibilidad / **Códigos** / **Imágenes***. Incluye campos `universalCode` y `productKind` en *Datos*. En modo "nuevo" usa `<PendingImagesUploader>` que acumula los `File` en memoria; al hacer "Crear" sigue el [patrón "crear → subir asociado"](README.md#patrón-crear--subir-asociado).
+  - Lista de productos: columna nueva con miniatura **40×40** de la cover, filtro ORIGINAL/ALTERNATIVO en URL, badge de tipo en cada fila.
+7. **`.gitignore`**: `apps/api/uploads/` ignorado (con `.gitkeep` para preservar el dir).
+
+> **Decisiones del wizard** (todas confirmadas): galería de fotos, solo `COMPATIBLE` en `product_codes`, `universalCode` como columna directa, default `ORIGINAL`, JPG/PNG/WEBP, 10 MB máximo, sin límite de cantidad, tab nueva "Códigos", patrón "crear → subir", miniatura 40×40, filtro de tipo, búsqueda extendida.
 
 ### Fase 5 — Caja, gastos, IVA y comisiones
 

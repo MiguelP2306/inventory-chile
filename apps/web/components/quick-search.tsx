@@ -92,7 +92,14 @@ export function QuickSearch() {
                 >
                   <div className="flex w-full items-center justify-between">
                     <div>
-                      <div className="font-medium">{p.name}</div>
+                      <div className="flex items-center gap-2 font-medium">
+                        {p.name}
+                        {!p.isActive && (
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
+                            Inactivo
+                          </span>
+                        )}
+                      </div>
                       <div className="text-xs text-muted-foreground">
                         {p.sku}
                         {p.brand?.name ? ` · ${p.brand.name}` : ''}

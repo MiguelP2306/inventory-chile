@@ -40,3 +40,9 @@ Thumbs.db
 
 # run.sh artifacts
 .run
+
+# Archivos subidos por usuarios (Fase 4B en adelante).
+# Servidos por la API como estáticos en `/api/uploads/*`.
+# El directorio existe en runtime; su contenido NO se commitea.
+apps/api/uploads
+!apps/api/uploads/.gitkeep

@@ -16,7 +16,7 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 | 3 | Inventario (compras, ajustes, movimientos, stock con semáforo) + Suppliers básico | ✅ |
 | — | **Refinamientos transversales** (post Fase 3): formato monetario, paginación universal, filtros en URL, FK errors claros, eliminar producto, unicidad RUT, validaciones extra | ✅ |
 | 4 | Clientes y proveedores (RUT chileno + catálogo de comunas + detalle de proveedor con tabs Datos+Compras) | ✅ |
-| 4B | Catálogo extendido: códigos múltiples, foto del producto, ORIGINAL/ALTERNATIVO | pendiente |
+| 4B | Catálogo extendido: código universal + códigos compatibles + galería de fotos + ORIGINAL/ALTERNATIVO + uploads infrastructure | ✅ |
 | 5 | Caja, gastos, IVA, comisiones por tarjeta + factura adjunta en compras | pendiente |
 | 6 | Cotizaciones + modal venta/cotización + impresión 80mm/carta + WhatsApp/email | pendiente |
 | 7 | Ventas con caja integrada (selector de bodega + comisión tarjeta + impresión) | pendiente |
@@ -65,6 +65,46 @@ Bloque de mejoras hechas en respuesta a las primeras observaciones del cliente s
 - Toda nueva lista paginada en backend debe respetar la convención: `page`/`pageSize` opcionales — sin ellos el endpoint devuelve array completo para alimentar selectores.
 - Todo campo RUT (cliente o proveedor) debe usar el decorador `@IsValidRut()` y normalizarse vía `normalizeRut()` antes de persistir.
 - Todo campo de teléfono debe usar `@IsValidPhone()` y normalizarse a E.164 vía `normalizePhone()`.
+
+---
+
+## Subida de archivos (uploads)
+
+Convenciones transversales para archivos subidos por usuarios — aplican a Fase 4B (foto de producto), Fase 5 (factura de compra), 7.7 (guía de despacho con adjuntos), etc.
+
+### Storage
+
+- **Backend stack**: `@nestjs/platform-express` + `multer` con storage local. Sin S3 / Cloudinary durante el MVP — la migración a almacenamiento remoto queda como evolución cuando se despliegue.
+- **Ubicación física**: `apps/api/uploads/<recurso>/` (ej: `apps/api/uploads/products/`, `apps/api/uploads/purchases/`). El directorio `apps/api/uploads/` está **en `.gitignore`** — no se commitea contenido de usuarios.
+- **Servido como estáticos**: `ServeStaticModule` expone `apps/api/uploads/` como `/uploads/*` en la API. Las URLs absolutas que devuelven los endpoints son `${PUBLIC_API_URL}/uploads/<recurso>/<archivo>`.
+- **Naming**: cada archivo se renombra al guardar a `<uuid>.<ext>` para evitar path traversal y colisiones. El nombre original del cliente se descarta.
+
+### Validaciones obligatorias en cada endpoint que recibe archivos
+
+| Validación | Motivo |
+| --- | --- |
+| **Whitelist de MIME types** (no blacklist) | Lista explícita de tipos aceptados según el recurso. Ej. fotos de producto: `image/jpeg`, `image/png`, `image/webp`. **SVG bloqueado** por XSS (puede embeber JS). |
+| **Tamaño máximo por archivo** | Configurable por recurso. Default actual: imágenes 10 MB, facturas/PDFs (futuro) 20 MB. |
+| **Magic bytes / sniff** | Verificar el contenido real del archivo, no solo la extensión ni el `Content-Type` (que el cliente puede falsificar). |
+| **Sanitización del nombre** | Renombrar a `<uuid>.<ext>` antes de persistir. Nunca usar el nombre original del cliente como path. |
+| **Borrado físico al eliminar registro** | Si un endpoint borra el registro lógico (ej. `DELETE /products/:id/images/:imageId`), también debe borrar el archivo del disco para no acumular huérfanos. |
+
+### Patrón "crear → subir asociado"
+
+Cuando el archivo pertenece a una entidad nueva (ej. crear producto + subir fotos en `/productos/nuevo`), el flujo correcto en frontend es:
+
+1. `POST /products` con los campos sin archivos → recibe el `productId`.
+2. Para cada archivo cargado en el form: `POST /products/:id/images` con el id devuelto.
+3. Si el step 1 falla, ningún archivo se subió (no hay huérfanos en disco).
+4. Si algún step 2 falla, el producto queda creado y se muestra un toast con cuál archivo falló para reintento manual desde el detalle.
+
+**No usar staging temporal** (subir archivos antes de crear el registro y luego asociar). Genera huérfanos cuando el create falla y obliga a un job de limpieza.
+
+### Patrón "replace" para listas relacionadas
+
+Para sub-forms con muchas filas (fitments de producto, códigos compatibles, ítems de compra), el endpoint que persiste la entidad padre **reemplaza la lista entera** en cada save. El cliente envía todas las filas, el backend hace `delete + insert` dentro de una transacción. Es más predecible que `diff` por id y simplifica el frontend (nada de "esta fila tiene id, esta no").
+
+Aplica a: `VehicleFitment` (Fase 2 ✅), `ProductCode.compatible` (Fase 4B), `SaleItem`/`QuotationItem`/`PurchaseEntryItem` cuando se permita editar.
 
 ---
 
@@ -170,6 +210,72 @@ El `<CustomerForm>` usa **react-hook-form + zod** con las mismas reglas que el b
 ./run.sh db:seed       # carga las 346 comunas (idempotente)
 ./run.sh dev
 ```
+
+---
+
+## Fase 4B — Catálogo extendido (productos con códigos múltiples + galería + tipo)
+
+Lo nuevo de Fase 4B sobre el módulo Productos. Las convenciones generales de uploads están en la sección [Subida de archivos](#subida-de-archivos-uploads); acá se documenta lo específico de productos.
+
+### Modelo extendido de Product
+
+```
+Product (...campos previos...,
+         universalCode? [varchar 80, indexed, NO único],
+         productKind [enum ORIGINAL | ALTERNATIVE, NOT NULL, default ORIGINAL])
+
+ProductImage  (id, productId FK CASCADE, url, isCover, position, createdAt)
+   -- galería ordenada con flag de portada
+ProductCode   (id, productId FK CASCADE, code, kind enum)
+   -- por ahora solo kind=COMPATIBLE; el enum es extensible
+```
+
+**Reglas:**
+- `universalCode` es **único por producto pero NO único entre productos**. Dos productos equivalentes pueden compartir el mismo universal y la búsqueda devuelve ambos.
+- La **portada** se calcula on-the-fly desde `product_images.isCover = TRUE`. NO hay columna `products.imageUrl` redundante.
+- Si se borra la imagen marcada como cover y quedan otras, la siguiente (por `position`) se promueve automáticamente a cover.
+- Los **códigos compatibles** se reemplazan por completo en cada save (estrategia replace, igual que fitments).
+
+### Endpoints nuevos
+
+| Método | Ruta | Para qué sirve |
+| --- | --- | --- |
+| `GET` | `/api/products/:id/images` | Listar imágenes del producto. |
+| `POST` | `/api/products/:id/images` | Subir una imagen (multipart, campo `file`). La primera del producto se marca cover automáticamente. |
+| `PATCH` | `/api/products/:id/images/:imageId/cover` | Marcar como portada (desmarca las demás en transacción). |
+| `DELETE` | `/api/products/:id/images/:imageId` | Borra el registro **y** el archivo físico. |
+| `PUT` | `/api/products/:id/codes` | Reemplaza la lista completa de códigos compatibles. Body: `{ codes: string[] }`. |
+
+Los endpoints de productos existentes (`/api/products`, `/api/products/:id`, `quick-search`, `by-vehicle`) ahora también:
+- Devuelven `coverUrl` en cada item (calculada en batch sin N+1).
+- En el detalle (`getOne`) devuelven `images` y `compatibleCodes`.
+- Aceptan filtro `productKind` y la búsqueda libre matchea contra `universalCode` y `product_codes.code`.
+
+### `<ProductForm>` con 5 tabs
+
+| Tab | Contenido |
+| --- | --- |
+| Datos | SKU, nombre, partNumber, barcode, **universalCode**, **tipo (ORIGINAL/ALTERNATIVE)**, categoría, marca, ubicación, activo, descripción. |
+| Precios y stock | Costo, precio, stock min/max. |
+| Compatibilidad | Sub-form de fitments vehiculares (Fase 2). |
+| **Códigos** (Fase 4B) | Sub-form dinámico de códigos compatibles. Validación zod detecta duplicados con error inline. |
+| **Imágenes** (Fase 4B) | En modo "editar" usa `<ProductImageGallery>` (sube directo al backend). En modo "nuevo" usa `<PendingImagesUploader>` que acumula los `File` en memoria — al hacer "Crear" se ejecuta el patrón "crear → subir asociado". |
+
+### Lista `/productos`
+
+- Columna nueva con miniatura **40×40** redondeada de la cover (cae a placeholder gris si el producto no tiene imágenes).
+- Columna nueva "Tipo" con badge de color (verde=Original, azul=Alternativo).
+- Filtro nuevo en URL: `?kind=ORIGINAL` o `?kind=ALTERNATIVE`. El selector de filtro vive arriba junto a Categoría/Marca.
+- Búsqueda libre extendida: ahora matchea `sku`, `partNumber`, `barcode`, `name`, `universalCode` y `product_codes.code` (subquery `EXISTS`).
+
+### Cómo seedear / migrar después de pull
+
+```bash
+./run.sh db:migrate    # aplica la migración de Fase 4B
+./run.sh dev           # el directorio apps/api/uploads/ se crea solo
+```
+
+> Si subiste imágenes en local y querés empezar de cero, podés borrar `apps/api/uploads/products/*` (los registros en `product_images` quedan apuntando a archivos inexistentes — ejecutá `./run.sh db:reset` si querés limpiar todo).
 
 ---
 
@@ -1087,9 +1193,7 @@ Si el admin ya existe, **el seed no lo recrea** — borralo manualmente primero 
 
 Cada fase es un PR independiente con verificación end-to-end al cierre. Ver [PLAN.md](PLAN.md#plan-de-implementación-por-fases) para el detalle.
 
-**Fase 4B (siguiente):** Catálogo extendido — tabla `product_codes` (interno, universal, fabricante, compatibles, alternativos), foto del producto (upload con `multer`), distinción ORIGINAL/ALTERNATIVO.
-
-**Fase 5:** Caja, gastos, IVA y comisiones — categorías predefinidas (IVA Compra, IVA Venta, Comisión Tarjeta), campos `subtotal`/`taxAmount`/`commissionAmount` en ventas y compras, auto-registro de comisión al cobrar con tarjeta, factura adjunta en compras.
+**Fase 5 (siguiente):** Caja, gastos, IVA y comisiones — categorías predefinidas (IVA Compra, IVA Venta, Comisión Tarjeta), campos `subtotal`/`taxAmount`/`commissionAmount` en ventas y compras, auto-registro de comisión al cobrar con tarjeta, **factura adjunta en compras** (reusará el módulo `uploads` de Fase 4B).
 
 **Fase 6:** Cotizaciones + modal "venta o cotización" + impresión 80mm/carta + WhatsApp/email.
 

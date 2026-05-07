@@ -30,9 +30,10 @@ import {
   listVehicleMakes,
   listVehicleModels,
   productsByVehicle,
+  publicImageUrl,
 } from '@/lib/catalog-api';
 import { useUrlFilters } from '@/lib/use-url-filters';
-import type { ProductDto } from '@inventory/shared';
+import type { ProductDto, ProductKindDto } from '@inventory/shared';
 
 const ALL = '__all__';
 const PAGE_SIZE = 20;
@@ -47,6 +48,7 @@ const filterDefaults = {
   q: '',
   category: '',
   brand: '',
+  kind: '',
   vmake: '',
   vmodel: '',
   vyear: '',
@@ -59,6 +61,7 @@ export default function ProductosPage() {
   const q = values.q ?? '';
   const categoryId = values.category || ALL;
   const brandId = values.brand || ALL;
+  const productKind = (values.kind || ALL) as 'ORIGINAL' | 'ALTERNATIVE' | typeof ALL;
   const vehMakeId = values.vmake || ALL;
   const vehModelId = values.vmodel || ALL;
   const vehYear = values.vyear ?? '';
@@ -75,6 +78,7 @@ export default function ProductosPage() {
     debouncedQ !== '' ||
     categoryId !== ALL ||
     brandId !== ALL ||
+    productKind !== ALL ||
     vehicleSearchActive;
 
   const categories = useQuery({ queryKey: ['categories'], queryFn: listCategories });
@@ -87,12 +91,14 @@ export default function ProductosPage() {
   });
 
   const list = useQuery({
-    queryKey: ['products', { q: debouncedQ, categoryId, brandId, page }],
+    queryKey: ['products', { q: debouncedQ, categoryId, brandId, productKind, page }],
     queryFn: () =>
       listProducts({
         q: debouncedQ || undefined,
         categoryId: categoryId === ALL ? undefined : categoryId,
         brandId: brandId === ALL ? undefined : brandId,
+        productKind:
+          productKind === ALL ? undefined : (productKind as ProductKindDto),
         page,
         pageSize: PAGE_SIZE,
       }),
@@ -132,9 +138,9 @@ export default function ProductosPage() {
       </div>
 
       {/* Filtros principales */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
         <Input
-          placeholder="Buscar por SKU, número de parte, código de barras o nombre"
+          placeholder="Buscar por SKU, código universal, compatible, nombre..."
           value={q}
           onChange={(e) => setFilters({ q: e.target.value, page: null })}
         />
@@ -168,6 +174,19 @@ export default function ProductosPage() {
                 {b.name}
               </SelectItem>
             ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={productKind}
+          onValueChange={(v) => setFilters({ kind: v === ALL ? null : v, page: null })}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Tipo" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Todos los tipos</SelectItem>
+            <SelectItem value="ORIGINAL">Originales</SelectItem>
+            <SelectItem value="ALTERNATIVE">Alternativos</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -254,10 +273,12 @@ export default function ProductosPage() {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-[60px]" />
               <TableHead>SKU</TableHead>
               <TableHead>Nombre</TableHead>
               <TableHead>Categoría</TableHead>
               <TableHead>Marca</TableHead>
+              <TableHead>Tipo</TableHead>
               <TableHead className="text-right">Costo</TableHead>
               <TableHead className="text-right">Precio</TableHead>
             </TableRow>
@@ -267,7 +288,7 @@ export default function ProductosPage() {
               <>
                 {Array.from({ length: 5 }).map((_, i) => (
                   <TableRow key={i}>
-                    <TableCell colSpan={6}>
+                    <TableCell colSpan={8}>
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
                   </TableRow>
@@ -276,37 +297,65 @@ export default function ProductosPage() {
             )}
             {!list.isLoading && !byVehicle.isLoading && items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                <TableCell colSpan={8} className="text-center text-muted-foreground">
                   Sin resultados.
                 </TableCell>
               </TableRow>
             )}
-            {items.map((p) => (
-              <TableRow key={p.id} className="cursor-pointer">
-                <TableCell className="font-mono text-xs">
-                  <Link href={`/productos/${p.id}`} className="hover:underline">
-                    {p.sku}
-                  </Link>
-                </TableCell>
-                <TableCell>
-                  <Link href={`/productos/${p.id}`} className="hover:underline">
-                    {p.name}
-                  </Link>
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {p.category?.name ?? '—'}
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {p.brand?.name ?? '—'}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {formatCurrency(p.cost)}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {formatCurrency(p.price)}
-                </TableCell>
-              </TableRow>
-            ))}
+            {items.map((p) => {
+              const cover = publicImageUrl(p.coverUrl ?? null);
+              return (
+                <TableRow key={p.id} className="cursor-pointer">
+                  <TableCell>
+                    <Link href={`/productos/${p.id}`}>
+                      {cover ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={cover}
+                          alt=""
+                          className="h-10 w-10 rounded object-cover"
+                        />
+                      ) : (
+                        <div className="h-10 w-10 rounded bg-muted" />
+                      )}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    <Link href={`/productos/${p.id}`} className="hover:underline">
+                      {p.sku}
+                    </Link>
+                  </TableCell>
+                  <TableCell>
+                    <Link href={`/productos/${p.id}`} className="hover:underline">
+                      {p.name}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {p.category?.name ?? '—'}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {p.brand?.name ?? '—'}
+                  </TableCell>
+                  <TableCell>
+                    <span
+                      className={
+                        p.productKind === 'ORIGINAL'
+                          ? 'rounded bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300'
+                          : 'rounded bg-blue-500/15 px-2 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-300'
+                      }
+                    >
+                      {p.productKind === 'ORIGINAL' ? 'Original' : 'Alternativo'}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {formatCurrency(p.cost)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {formatCurrency(p.price)}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>

@@ -6,6 +6,8 @@ import type {
   CategoryDto,
   PaginatedResult,
   ProductDto,
+  ProductImageDto,
+  ProductKindDto,
   VehicleMakeDto,
   VehicleModelDto,
 } from '@inventory/shared';
@@ -102,6 +104,7 @@ export interface ListProductsParams {
   q?: string;
   categoryId?: string;
   brandId?: string;
+  productKind?: ProductKindDto;
   page?: number;
   pageSize?: number;
 }
@@ -135,7 +138,11 @@ export interface ProductInput {
   maxStock?: number | null;
   location?: string | null;
   isActive?: boolean;
+  // Fase 4B
+  universalCode?: string | null;
+  productKind?: ProductKindDto;
   fitments?: FitmentInput[];
+  compatibleCodes?: string[];
 }
 
 export const createProduct = (input: ProductInput) =>
@@ -146,6 +153,51 @@ export const updateProduct = (id: string, input: Partial<ProductInput>) =>
 
 export const deleteProduct = (id: string) =>
   api.delete(`/products/${id}`).then((r) => r.data);
+
+// ---------- Product images (Fase 4B) ----------
+
+export const listProductImages = (productId: string) =>
+  api.get<ProductImageDto[]>(`/products/${productId}/images`).then((r) => r.data);
+
+export const uploadProductImage = (productId: string, file: File) => {
+  const fd = new FormData();
+  fd.append('file', file);
+  return api
+    .post<ProductImageDto>(`/products/${productId}/images`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    .then((r) => r.data);
+};
+
+export const setProductImageCover = (productId: string, imageId: string) =>
+  api
+    .patch<ProductImageDto>(`/products/${productId}/images/${imageId}/cover`)
+    .then((r) => r.data);
+
+export const deleteProductImage = (productId: string, imageId: string) =>
+  api.delete(`/products/${productId}/images/${imageId}`).then((r) => r.data);
+
+// ---------- Product compatible codes (Fase 4B) ----------
+
+export const replaceProductCompatibleCodes = (productId: string, codes: string[]) =>
+  api
+    .put<ProductDto>(`/products/${productId}/codes`, { codes })
+    .then((r) => r.data);
+
+// ---------- Helpers de imágenes ----------
+
+/**
+ * Compone la URL absoluta para mostrar una imagen subida. El backend devuelve
+ * `image.url` como path relativo (`/uploads/products/<file>`) y el static
+ * server está montado bajo `/api/uploads`. `NEXT_PUBLIC_API_URL` ya termina
+ * en `/api`, así que concatenar directo da la URL completa.
+ */
+export function publicImageUrl(relativeUrl: string | null | undefined): string | null {
+  if (!relativeUrl) return null;
+  if (/^https?:\/\//.test(relativeUrl)) return relativeUrl;
+  const apiUrl = (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/$/, '');
+  return `${apiUrl}${relativeUrl}`;
+}
 
 export const productsByVehicle = (params: { makeId?: string; modelId?: string; year?: number }) =>
   api
