@@ -72,9 +72,9 @@ export function QuickSearch() {
           {mac ? '⌘' : 'Ctrl'} K
         </kbd>
       </button>
-      <CommandDialog open={open} onOpenChange={setOpen}>
+      <CommandDialog open={open} onOpenChange={setOpen} shouldFilter={false}>
         <CommandInput
-          placeholder="SKU, nombre, código de barras…"
+          placeholder="SKU, código universal, compatible, nombre…"
           value={query}
           onValueChange={setQuery}
         />
