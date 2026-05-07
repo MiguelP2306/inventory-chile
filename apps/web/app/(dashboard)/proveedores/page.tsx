@@ -1,7 +1,8 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { ExternalLink, Pencil, Plus, Trash2 } from 'lucide-react';
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -182,13 +183,22 @@ export default function ProveedoresPage() {
             )}
             {items.map((s) => (
               <TableRow key={s.id}>
-                <TableCell className="font-medium">{s.name}</TableCell>
+                <TableCell className="font-medium">
+                  <Link href={`/proveedores/${s.id}`} className="hover:underline">
+                    {s.name}
+                  </Link>
+                </TableCell>
                 <TableCell className="text-muted-foreground">{s.email ?? '—'}</TableCell>
                 <TableCell className="text-muted-foreground">{s.phone ?? '—'}</TableCell>
                 <TableCell className="text-muted-foreground">{s.taxId ?? '—'}</TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="icon" onClick={() => startEdit(s)}>
+                    <Button variant="ghost" size="icon" asChild title="Ver detalle">
+                      <Link href={`/proveedores/${s.id}`}>
+                        <ExternalLink className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                    <Button variant="ghost" size="icon" onClick={() => startEdit(s)} title="Edición rápida">
                       <Pencil className="h-4 w-4" />
                     </Button>
                     <Button

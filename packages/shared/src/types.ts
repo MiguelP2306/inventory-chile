@@ -110,6 +110,27 @@ export interface SupplierDto {
   notes: string | null;
 }
 
+// ---------- Customers ----------
+
+export interface CommuneDto {
+  id: string;
+  name: string;
+  region: string;
+}
+
+export interface CustomerDto {
+  id: string;
+  name: string;
+  taxId: string;
+  email: string | null;
+  phone: string | null;
+  addressStreet: string | null;
+  addressNumber: string | null;
+  communeId: string | null;
+  commune?: CommuneDto | null;
+  internalNotes: string | null;
+}
+
 // ---------- Purchases ----------
 
 export interface PurchaseEntryItemDto {

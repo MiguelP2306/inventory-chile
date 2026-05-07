@@ -4,6 +4,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
 import { BrandsModule } from './brands/brands.module';
 import { CategoriesModule } from './categories/categories.module';
+import { CommunesModule } from './communes/communes.module';
+import { CustomersModule } from './customers/customers.module';
 import { dataSourceOptions } from './database/data-source';
 import { HealthController } from './health.controller';
 import { InventoryModule } from './inventory/inventory.module';
@@ -25,6 +27,8 @@ import { VehiclesModule } from './vehicles/vehicles.module';
     VehiclesModule,
     ProductsModule,
     SuppliersModule,
+    CustomersModule,
+    CommunesModule,
     InventoryModule,
     PurchasesModule,
   ],

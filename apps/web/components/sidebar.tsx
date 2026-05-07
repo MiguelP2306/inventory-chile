@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   Package,
   Tag,
+  Users,
   Warehouse,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -59,6 +60,12 @@ const SECTIONS: NavSection[] = [
         label: 'Proveedores',
         icon: Factory,
         matchPrefix: ['/proveedores'],
+      },
+      {
+        href: '/clientes',
+        label: 'Clientes',
+        icon: Users,
+        matchPrefix: ['/clientes'],
       },
     ],
   },

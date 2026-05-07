@@ -1,6 +1,7 @@
 import { PartialType } from '@nestjs/mapped-types';
 import { Type } from 'class-transformer';
 import {
+  IsDateString,
   IsEmail,
   IsInt,
   IsOptional,
@@ -10,6 +11,8 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { IsValidPhone } from '../common/validators/phone';
+import { IsValidRut } from '../common/validators/rut';
 
 export class CreateSupplierDto {
   @IsString()
@@ -17,9 +20,13 @@ export class CreateSupplierDto {
   @MaxLength(180)
   name!: string;
 
+  // Mismas reglas que clientes: formato + dígito verificador.
+  // Sigue siendo opcional (proveedores extranjeros pueden no tener RUT chileno —
+  // pero si se completa, debe ser un RUT válido).
   @IsOptional()
   @IsString()
   @MaxLength(60)
+  @IsValidRut()
   taxId?: string | null;
 
   @IsOptional()
@@ -29,6 +36,7 @@ export class CreateSupplierDto {
   @IsOptional()
   @IsString()
   @MaxLength(30)
+  @IsValidPhone()
   phone?: string | null;
 
   @IsOptional()
@@ -47,6 +55,29 @@ export class ListSuppliersQueryDto {
   @IsOptional()
   @IsString()
   q?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  pageSize?: number;
+}
+
+export class ListSupplierPurchasesQueryDto {
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
 
   @IsOptional()
   @Type(() => Number)

@@ -3,9 +3,12 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  JoinColumn,
+  ManyToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { Commune } from './commune.entity';
 
 @Entity('customers')
 export class Customer {
@@ -16,17 +19,32 @@ export class Customer {
   @Column({ type: 'varchar', length: 180 })
   name!: string;
 
-  @Column({ type: 'varchar', length: 60, nullable: true })
-  taxId!: string | null;
+  // RUT obligatorio y único. Se persiste normalizado: `12345678-9` sin puntos.
+  @Index('idx_customers_taxid', { unique: true })
+  @Column({ type: 'varchar', length: 60 })
+  taxId!: string;
 
   @Column({ type: 'varchar', length: 180, nullable: true })
   email!: string | null;
 
+  // Persistido en formato E.164 (+56912345678).
   @Column({ type: 'varchar', length: 30, nullable: true })
   phone!: string | null;
 
-  @Column({ type: 'varchar', length: 255, nullable: true })
-  address!: string | null;
+  // Dirección desglosada (formato Chile). Las 3 partes son opcionales.
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  addressStreet!: string | null;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  addressNumber!: string | null;
+
+  @ManyToOne(() => Commune, { onDelete: 'RESTRICT', nullable: true })
+  @JoinColumn({ name: 'communeId' })
+  commune?: Commune | null;
+
+  @Index('idx_customers_commune')
+  @Column({ type: 'char', length: 36, nullable: true })
+  communeId!: string | null;
 
   @Column({ type: 'text', nullable: true })
   internalNotes!: string | null;

@@ -1,0 +1,151 @@
+'use client';
+
+import { useQuery } from '@tanstack/react-query';
+import { Plus } from 'lucide-react';
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { listCustomersPaginated } from '@/lib/customers-api';
+import { useUrlFilters } from '@/lib/use-url-filters';
+import { formatPhonePretty } from '@/lib/validators/phone';
+import { formatRutPretty } from '@/lib/validators/rut';
+
+const PAGE_SIZE = 20;
+
+export default function ClientesPage() {
+  const { values, setFilters, setFilter } = useUrlFilters({ q: '', page: '' });
+  const q = values.q ?? '';
+  const page = Number(values.page || '1');
+
+  const [debouncedQ, setDebouncedQ] = useState(q);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q.trim()), 250);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  const list = useQuery({
+    queryKey: ['customers', { q: debouncedQ, page }],
+    queryFn: () =>
+      listCustomersPaginated({
+        q: debouncedQ || undefined,
+        page,
+        pageSize: PAGE_SIZE,
+      }),
+  });
+
+  const items = list.data?.items ?? [];
+  const total = list.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Clientes</h1>
+        <Button asChild>
+          <Link href="/clientes/nuevo">
+            <Plus className="h-4 w-4" />
+            Nuevo cliente
+          </Link>
+        </Button>
+      </div>
+
+      <Input
+        placeholder="Buscar por nombre, RUT, email o teléfono"
+        value={q}
+        onChange={(e) => setFilters({ q: e.target.value, page: null })}
+        className="max-w-md"
+      />
+
+      <div className="rounded-md border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Nombre</TableHead>
+              <TableHead>RUT</TableHead>
+              <TableHead>Email</TableHead>
+              <TableHead>Teléfono</TableHead>
+              <TableHead>Comuna</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {list.isLoading && (
+              <>
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <TableRow key={i}>
+                    <TableCell colSpan={5}>
+                      <Skeleton className="h-4 w-full" />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </>
+            )}
+            {!list.isLoading && items.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
+                  Sin resultados.
+                </TableCell>
+              </TableRow>
+            )}
+            {items.map((c) => (
+              <TableRow key={c.id} className="cursor-pointer">
+                <TableCell className="font-medium">
+                  <Link href={`/clientes/${c.id}`} className="hover:underline">
+                    {c.name}
+                  </Link>
+                </TableCell>
+                <TableCell className="font-mono text-xs">
+                  {formatRutPretty(c.taxId)}
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {c.email ?? '—'}
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {c.phone ? formatPhonePretty(c.phone) : '—'}
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {c.commune?.name ?? '—'}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      {total > 0 && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <span>
+            {total} cliente{total === 1 ? '' : 's'} · página {page} de {totalPages}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setFilter('page', String(Math.max(1, page - 1)))}
+              disabled={page === 1}
+            >
+              Anterior
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setFilter('page', String(Math.min(totalPages, page + 1)))}
+              disabled={page >= totalPages}
+            >
+              Siguiente
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

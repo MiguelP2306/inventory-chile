@@ -1,0 +1,299 @@
+'use client';
+
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Trash2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+import { Controller, useForm } from 'react-hook-form';
+import { toast } from 'sonner';
+import { z } from 'zod';
+import { CommuneSelect } from '@/components/commune-select';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  apiErrorMessage,
+} from '@/lib/catalog-api';
+import {
+  createCustomer,
+  deleteCustomer,
+  updateCustomer,
+  type CustomerInput,
+} from '@/lib/customers-api';
+import { isValidPhone, normalizePhone } from '@/lib/validators/phone';
+import { isValidRut, normalizeRut } from '@/lib/validators/rut';
+import type { CustomerDto } from '@inventory/shared';
+
+const schema = z.object({
+  name: z.string().min(1, 'Nombre obligatorio').max(180),
+  taxId: z
+    .string()
+    .min(1, 'RUT obligatorio')
+    .refine((v) => isValidRut(v), 'RUT inválido (formato 12345678-9)'),
+  email: z
+    .string()
+    .email('Email inválido')
+    .or(z.literal(''))
+    .optional()
+    .nullable(),
+  phone: z
+    .string()
+    .optional()
+    .nullable()
+    .refine(
+      (v) => !v || v.trim() === '' || isValidPhone(v),
+      'Teléfono inválido (ej: +56 9 1234 5678)',
+    ),
+  addressStreet: z.string().max(200).optional().or(z.literal('')),
+  addressNumber: z.string().max(20).optional().or(z.literal('')),
+  communeId: z.string().uuid().optional().nullable(),
+  internalNotes: z.string().optional().or(z.literal('')),
+});
+
+type FormValues = z.infer<typeof schema>;
+
+interface Props {
+  customer?: CustomerDto;
+}
+
+export function CustomerForm({ customer }: Props) {
+  const router = useRouter();
+  const qc = useQueryClient();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const form = useForm<FormValues>({
+    resolver: zodResolver(schema),
+    defaultValues: {
+      name: customer?.name ?? '',
+      taxId: customer?.taxId ?? '',
+      email: customer?.email ?? '',
+      phone: customer?.phone ?? '',
+      addressStreet: customer?.addressStreet ?? '',
+      addressNumber: customer?.addressNumber ?? '',
+      communeId: customer?.communeId ?? null,
+      internalNotes: customer?.internalNotes ?? '',
+    },
+  });
+
+  const mut = useMutation({
+    mutationFn: (input: CustomerInput) =>
+      customer ? updateCustomer(customer.id, input) : createCustomer(input),
+    onSuccess: (saved) => {
+      qc.invalidateQueries({ queryKey: ['customers'] });
+      toast.success(customer ? 'Cliente actualizado' : 'Cliente creado');
+      router.push(`/clientes/${saved.id}`);
+      router.refresh();
+    },
+    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo guardar')),
+  });
+
+  const removeMut = useMutation({
+    mutationFn: () =>
+      customer ? deleteCustomer(customer.id) : Promise.reject('no customer'),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['customers'] });
+      toast.success('Cliente eliminado');
+      router.push('/clientes');
+      router.refresh();
+    },
+    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo eliminar')),
+  });
+
+  function onSubmit(values: FormValues) {
+    if (mut.isPending) return;
+    const input: CustomerInput = {
+      name: values.name.trim(),
+      taxId: normalizeRut(values.taxId),
+      email: values.email?.trim() || null,
+      phone: values.phone?.trim() ? normalizePhone(values.phone) : null,
+      addressStreet: values.addressStreet?.trim() || null,
+      addressNumber: values.addressNumber?.trim() || null,
+      communeId: values.communeId || null,
+      internalNotes: values.internalNotes?.trim() || null,
+    };
+    mut.mutate(input);
+  }
+
+  const errors = form.formState.errors;
+  const submitting = mut.isPending || form.formState.isSubmitting;
+
+  return (
+    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">
+          {customer ? 'Editar cliente' : 'Nuevo cliente'}
+        </h1>
+        <div className="flex gap-2">
+          {customer && (
+            <Button
+              type="button"
+              variant="outline"
+              className="border-destructive/40 text-destructive hover:bg-destructive/10"
+              onClick={() => setConfirmDelete(true)}
+              disabled={submitting || removeMut.isPending}
+            >
+              <Trash2 className="h-4 w-4" />
+              Eliminar
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => router.back()}
+            disabled={submitting}
+          >
+            Cancelar
+          </Button>
+          <Button type="submit" disabled={submitting}>
+            {submitting ? 'Guardando...' : customer ? 'Guardar' : 'Crear'}
+          </Button>
+        </div>
+      </div>
+
+      <div className="space-y-4 rounded-md border bg-card p-6">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <Field label="Nombre o razón social" error={errors.name?.message}>
+            <Input
+              {...form.register('name')}
+              autoFocus
+              placeholder="ej: Juan Pérez / Distribuidora ABC"
+            />
+          </Field>
+          <Field label="RUT" error={errors.taxId?.message}>
+            <Input
+              {...form.register('taxId')}
+              placeholder="12.345.678-9"
+              onBlur={(e) => {
+                const v = e.target.value.trim();
+                if (!v) return;
+                form.setValue('taxId', normalizeRut(v), {
+                  shouldValidate: true,
+                });
+              }}
+            />
+          </Field>
+          <Field label="Correo (opcional)" error={errors.email?.message}>
+            <Input
+              type="email"
+              {...form.register('email')}
+              placeholder="cliente@correo.cl"
+            />
+          </Field>
+          <Field label="Teléfono (opcional)" error={errors.phone?.message}>
+            <Input
+              {...form.register('phone')}
+              placeholder="+56 9 1234 5678"
+              onBlur={(e) => {
+                const v = e.target.value.trim();
+                if (!v) return;
+                if (isValidPhone(v)) {
+                  form.setValue('phone', normalizePhone(v), {
+                    shouldValidate: true,
+                  });
+                }
+              }}
+            />
+          </Field>
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">Dirección (opcional)</Label>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
+            <div className="md:col-span-5">
+              <Input
+                {...form.register('addressStreet')}
+                placeholder="Calle"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <Input
+                {...form.register('addressNumber')}
+                placeholder="Número"
+              />
+            </div>
+            <div className="md:col-span-5">
+              <Controller
+                control={form.control}
+                name="communeId"
+                render={({ field }) => (
+                  <CommuneSelect
+                    value={field.value ?? null}
+                    onChange={(id) => field.onChange(id)}
+                    initialCommune={customer?.commune ?? null}
+                  />
+                )}
+              />
+            </div>
+          </div>
+        </div>
+
+        <Field label="Notas internas">
+          <textarea
+            {...form.register('internalNotes')}
+            rows={3}
+            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            placeholder="Texto libre solo visible para el equipo (no se imprime en cotizaciones ni ventas)."
+          />
+        </Field>
+      </div>
+
+      <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>¿Eliminar cliente?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Esta acción es permanente. El cliente &ldquo;{customer?.name}&rdquo; se eliminará.
+            Si tiene cotizaciones o ventas asociadas (cuando esos módulos existan), no podrá
+            eliminarse.
+          </p>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setConfirmDelete(false)}
+              disabled={removeMut.isPending}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="border-destructive/40 text-destructive hover:bg-destructive/10"
+              onClick={() => removeMut.mutate()}
+              disabled={removeMut.isPending}
+            >
+              {removeMut.isPending ? 'Eliminando...' : 'Eliminar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </form>
+  );
+}
+
+function Field({
+  label,
+  error,
+  children,
+}: {
+  label: string;
+  error?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      {children}
+      {error && <p className="text-sm text-destructive">{error}</p>}
+    </div>
+  );
+}

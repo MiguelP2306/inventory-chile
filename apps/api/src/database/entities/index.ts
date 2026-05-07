@@ -1,6 +1,7 @@
 export { Brand } from './brand.entity';
 export { CashTransaction } from './cash-transaction.entity';
 export { Category } from './category.entity';
+export { Commune } from './commune.entity';
 export { CompanySettings } from './company-settings.entity';
 export { Customer } from './customer.entity';
 export { ExpenseCategory } from './expense-category.entity';

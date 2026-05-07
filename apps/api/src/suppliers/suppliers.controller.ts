@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import {
   CreateSupplierDto,
+  ListSupplierPurchasesQueryDto,
   ListSuppliersQueryDto,
   UpdateSupplierDto,
 } from './dto';
@@ -28,6 +29,14 @@ export class SuppliersController {
   @Get(':id')
   getOne(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.svc.getOne(id);
+  }
+
+  @Get(':id/purchases')
+  listPurchases(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Query() query: ListSupplierPurchasesQueryDto,
+  ) {
+    return this.svc.listPurchases(id, query);
   }
 
   @Post()

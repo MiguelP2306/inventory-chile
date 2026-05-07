@@ -15,7 +15,7 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 | 2 | Catálogo de productos + compatibilidad vehicular + búsqueda global Cmd+K | ✅ |
 | 3 | Inventario (compras, ajustes, movimientos, stock con semáforo) + Suppliers básico | ✅ |
 | — | **Refinamientos transversales** (post Fase 3): formato monetario, paginación universal, filtros en URL, FK errors claros, eliminar producto, unicidad RUT, validaciones extra | ✅ |
-| 4 | Clientes y proveedores (RUT chileno + dirección desglosada + detalle con tabs) | ⏳ siguiente |
+| 4 | Clientes y proveedores (RUT chileno + catálogo de comunas + detalle de proveedor con tabs Datos+Compras) | ✅ |
 | 4B | Catálogo extendido: códigos múltiples, foto del producto, ORIGINAL/ALTERNATIVO | pendiente |
 | 5 | Caja, gastos, IVA, comisiones por tarjeta + factura adjunta en compras | pendiente |
 | 6 | Cotizaciones + modal venta/cotización + impresión 80mm/carta + WhatsApp/email | pendiente |
@@ -63,6 +63,113 @@ Bloque de mejoras hechas en respuesta a las primeras observaciones del cliente s
 - Toda visualización de monto debe pasar por `formatCurrency`.
 - Todo nuevo listado que pueda crecer debe paginar.
 - Toda nueva lista paginada en backend debe respetar la convención: `page`/`pageSize` opcionales — sin ellos el endpoint devuelve array completo para alimentar selectores.
+- Todo campo RUT (cliente o proveedor) debe usar el decorador `@IsValidRut()` y normalizarse vía `normalizeRut()` antes de persistir.
+- Todo campo de teléfono debe usar `@IsValidPhone()` y normalizarse a E.164 vía `normalizePhone()`.
+
+---
+
+## Fase 4 — Clientes y proveedores
+
+Bloque de cosas nuevas introducidas con la Fase 4. Lo que sigue es lo importante para futuras fases.
+
+### Validadores compartidos (RUT y teléfono)
+
+Hay validadores **espejo** entre backend y frontend. **Mantenelos sincronizados** — si cambia el algoritmo de un lado, cambiá el otro.
+
+| Concepto | Backend | Frontend |
+| --- | --- | --- |
+| RUT chileno (formato + DV módulo 11 + normalización) | [`apps/api/src/common/validators/rut.ts`](apps/api/src/common/validators/rut.ts) — exporta `isValidRut`, `normalizeRut`, decorador `@IsValidRut()` | [`apps/web/lib/validators/rut.ts`](apps/web/lib/validators/rut.ts) — exporta `isValidRut`, `normalizeRut`, `formatRutPretty` |
+| Teléfono (libphonenumber-js, E.164, country default Chile) | [`apps/api/src/common/validators/phone.ts`](apps/api/src/common/validators/phone.ts) — exporta `isValidPhone`, `normalizePhone`, decorador `@IsValidPhone()` | [`apps/web/lib/validators/phone.ts`](apps/web/lib/validators/phone.ts) — exporta `isValidPhone`, `normalizePhone`, `formatPhonePretty` |
+
+**Convenciones de almacenamiento:**
+- RUT se persiste en formato canónico: `12345678-9` (sin puntos, K mayúscula). El usuario puede ingresarlo con puntos; el `onBlur` del form normaliza, y el service valida la normalización antes de guardar.
+- Teléfono se persiste en E.164: `+56912345678`. Si el usuario tipea sin prefijo, se asume Chile.
+
+### Catálogo de comunas
+
+Las **346 comunas chilenas** se cargan vía seed idempotente desde [`apps/api/src/database/seeds/data/communes-cl.json`](apps/api/src/database/seeds/data/communes-cl.json). Si el catálogo cambia (ej. nueva comuna), agregá la entrada al JSON y corré `./run.sh db:seed` — solo inserta las que falten, no duplica.
+
+Endpoints (read-only):
+- `GET /api/communes` → lista todas, ordenadas por región y luego por nombre.
+- `GET /api/communes?region=Región%20Metropolitana...` → filtro por región.
+- `GET /api/communes/:id` → una comuna.
+
+UI: el componente reusable [`<CommuneSelect>`](apps/web/components/commune-select.tsx) muestra un combobox con búsqueda (basado en `CommandDialog` de cmdk) que carga el catálogo lazy y lo cachea por 1 hora.
+
+### Modelo de Customer
+
+```
+Customer (id, name, taxId [unique, NOT NULL],
+          email?, phone? [E.164],
+          addressStreet?, addressNumber?, communeId? FK→communes,
+          internalNotes?, createdAt, updatedAt)
+```
+
+**Reglas:**
+- `taxId` (RUT) es **obligatorio y único** a nivel DB. Validado con módulo 11.
+- Las 3 partes de la dirección son **opcionales**. La comuna se elige del catálogo (FK con `ON DELETE RESTRICT`).
+- `internalNotes` solo se ven dentro del sistema — **no aparecen en cotizaciones/ventas/PDFs**.
+
+### Endpoints nuevos
+
+| Método | Ruta | Para qué sirve |
+| --- | --- | --- |
+| `GET` | `/api/customers` | Listado paginado opcional con búsqueda libre por nombre/RUT/email/teléfono. |
+| `GET` | `/api/customers/:id` | Cliente con `commune` joineada. |
+| `POST` | `/api/customers` | Crear (RUT obligatorio + valida + normaliza). |
+| `PATCH` | `/api/customers/:id` | Editar (mismas validaciones). |
+| `DELETE` | `/api/customers/:id` | Eliminar (FK error → 409 con mensaje claro cuando se agreguen cotizaciones/ventas en Fase 6/7). |
+| `GET` | `/api/communes` | Catálogo de comunas (read-only). |
+| `GET` | `/api/suppliers/:id/purchases` | Historial paginado de compras del proveedor (filtros opcionales `dateFrom`/`dateTo`). |
+
+### Migración aplicada
+
+[`1778120737933-CustomersAndCommunes.ts`](apps/api/src/database/migrations/1778120737933-CustomersAndCommunes.ts) hace, en orden:
+
+1. Crea tabla `communes` con índice único `(name, region)`.
+2. Agrega `customers.addressStreet`, `addressNumber`, `communeId`.
+3. **Copia** `customers.address` → `customers.addressStreet`, después **dropea** la columna vieja.
+4. Verifica que no haya clientes con `taxId NULL` o duplicado **antes** de subir a `NOT NULL` y agregar el índice único. Si hay datos inválidos, **aborta con un mensaje claro** (no rompe la DB).
+5. Verifica que no haya proveedores con `taxId` duplicado **antes** de agregar `idx_suppliers_taxid` único.
+6. Agrega FK `customers.communeId` → `communes.id` con `ON DELETE RESTRICT`.
+
+> Si la migración aborta por el paso 4 o 5, corregí los datos manualmente con SQL (la query útil viene en el mensaje de error) y volvé a ejecutar.
+
+### Pantallas
+
+| Ruta | Descripción |
+| --- | --- |
+| `/clientes` | Listado paginado con búsqueda libre + URL filters. Muestra RUT formateado con puntos (`12.345.678-9`) y teléfono internacional (`+56 9 1234 5678`). |
+| `/clientes/nuevo` | Form de creación con `<CustomerForm>`. |
+| `/clientes/[id]` | Edición + botón **Eliminar** con confirm modal. Vista plana de Datos (las tabs de Cotizaciones/Ventas llegan en Fase 6/7). |
+| `/proveedores/[id]` | Detalle del proveedor con tabs **Datos** y **Compras** (lista paginada de `PurchaseEntry` filtrada por `supplierId`). El listado `/proveedores` mantiene el dialog de edición rápida + un nuevo link "Ver detalle" que va al detalle. |
+
+### Sidebar
+
+Se agrega "Clientes" en sección **Operación** (junto a Proveedores).
+
+### Validaciones del frontend
+
+El `<CustomerForm>` usa **react-hook-form + zod** con las mismas reglas que el backend:
+- RUT: zod `refine(isValidRut)`. Al perder foco se normaliza en el campo (`onBlur` → `setValue(normalizeRut(v))`).
+- Teléfono: zod `refine(isValidPhone || vacío)`. Al perder foco se normaliza si es válido.
+- Email: zod `email()` opcional.
+- Comuna: `<CommuneSelect>` con búsqueda y agrupación por región.
+
+### Decisiones de diseño que se eligieron
+
+- **No** se seedea cliente "Consumidor final": el cliente confirmó RUT obligatorio para todos.
+- El detalle de cliente NO tiene tabs todavía (vista plana). Las tabs Cotizaciones/Ventas llegan en Fase 6/7 cuando esos módulos existan.
+- Detalle de proveedor SÍ tiene tabs porque ya hay datos de compras para mostrar.
+- El `<SupplierDetail>` usa formato `es-CL` para fechas (Fase 4 ya está orientada a Chile).
+
+### Cómo seedear / migrar después de pull
+
+```bash
+./run.sh db:migrate    # aplica la migración de Fase 4
+./run.sh db:seed       # carga las 346 comunas (idempotente)
+./run.sh dev
+```
 
 ---
 
@@ -70,6 +177,7 @@ Bloque de mejoras hechas en respuesta a las primeras observaciones del cliente s
 
 - **Frontend** ([apps/web](apps/web/)): Next.js 15 (App Router) + TypeScript + TailwindCSS + shadcn/ui + TanStack Query + React Hook Form + Zod
 - **Backend** ([apps/api](apps/api/)): NestJS 10 + TypeScript + TypeORM 0.3 + MySQL 8 + Passport JWT + bcrypt
+- **Validación de teléfono** (Fase 4+): `libphonenumber-js` con país default Chile, formato canónico E.164.
 - **Compartido** ([packages/shared](packages/shared/)): enums y tipos consumidos por ambas apps
 - **Gestor de paquetes:** pnpm (workspaces) — fijado a `9.12.0` vía `packageManager` en el `package.json` raíz
 
@@ -255,6 +363,10 @@ El seed es **idempotente** — corré `./run.sh db:seed` cuantas veces quieras, 
 ### Categorías de gasto
 
 `Arriendo`, `Transporte`, `Publicidad`, `Servicios`, `Sueldos`, `Otros`
+
+### Comunas chilenas (Fase 4)
+
+346 comunas seedeadas desde [`apps/api/src/database/seeds/data/communes-cl.json`](apps/api/src/database/seeds/data/communes-cl.json), agrupadas por región. Insertadas en chunks de 100 la primera vez; en re-seeds solo agrega las que falten (idempotente).
 
 ### CompanySettings
 
@@ -783,8 +895,11 @@ Vive en [`components/forms/product-form.tsx`](apps/web/components/forms/product-
 | [`lib/server-api.ts`](apps/web/lib/server-api.ts) | `serverFetch()` para Server Components — forwarda las cookies entrantes al backend. Sin refresh (el layout protegido se encarga del redirect). |
 | [`lib/catalog-api.ts`](apps/web/lib/catalog-api.ts) | Wrappers tipados de `/categories`, `/brands`, `/vehicles`, `/products` (incluye variantes `*Paginated`) + helper `apiErrorMessage()`. |
 | [`lib/inventory-api.ts`](apps/web/lib/inventory-api.ts) | Wrappers tipados de `/suppliers`, `/inventory/*`, `/purchases` (incluye variantes `*Paginated`). |
+| [`lib/customers-api.ts`](apps/web/lib/customers-api.ts) | Wrappers tipados de `/customers`, `/communes` y `/suppliers/:id/purchases` (Fase 4). |
 | [`lib/format.ts`](apps/web/lib/format.ts) | `formatCurrency(value)` y `formatNumber(value)` con `Intl.NumberFormat`. **Toda visualización de monto debe pasar por acá.** |
 | [`lib/use-url-filters.ts`](apps/web/lib/use-url-filters.ts) | Hook `useUrlFilters({ q: '', page: '', ... })` que sincroniza filtros con la URL (`router.replace`). Returns `{ values, setFilter, setFilters, clear }`. **Toda nueva pantalla de listado lo usa.** |
+| [`lib/validators/rut.ts`](apps/web/lib/validators/rut.ts) | Validador RUT chileno (formato + DV módulo 11) + normalización + formateo con puntos. Espejo del backend. |
+| [`lib/validators/phone.ts`](apps/web/lib/validators/phone.ts) | Validador de teléfono (libphonenumber-js) + normalización a E.164 + formateo internacional. Espejo del backend. |
 | [`lib/utils.ts`](apps/web/lib/utils.ts) | `cn()` — merge de clases Tailwind con `clsx + twMerge`. |
 
 ---
@@ -940,20 +1055,31 @@ Si el admin ya existe, **el seed no lo recrea** — borralo manualmente primero 
 
 ## Decisiones pendientes con el cliente
 
-> Cada decisión bloquea o influye una migración o un flujo concreto. Se trabaja con la **asunción** indicada hasta confirmar.
+> Las que están como ✅ ya fueron confirmadas y aplicadas. Las pendientes se trabajan con la **asunción** indicada.
 
-| # | Pregunta | Fase impactada | Asunción actual |
+| # | Pregunta | Fase | Estado |
 | --- | --- | --- | --- |
-| 1 | ¿Separar `customers.address` en calle / número / comuna o dejar texto libre? | 4 | Separar (formato chileno con comuna). |
-| 2 | "Mismo producto con mismo código" — ¿permitir duplicados de SKU? ¿códigos compartidos entre productos? ¿fusionar? | 4B | `sku` se mantiene único; tabla `product_codes` permite que productos distintos compartan un mismo código universal. |
-| 3 | Comisión por tarjeta: ¿% fijo, por método (débito vs crédito), por venta? | 5 / 7 | `cardCommissionRate` único en `CompanySettings` para todas las ventas con `paymentMethod=CARD`. |
-| 4 | Tasa de IVA: ¿fija 19% (Chile) o configurable? | 5 | Configurable, default `0.19`. |
-| 5 | Mercado Libre: ¿integración real con API ML o registro manual? | 7.5 | Manual. |
-| 6 | Almacenamiento de archivos: ¿disco local, S3, Cloudinary? | 4B / 5 | Disco local en `apps/api/uploads/`. |
-| 7 | Guía de despacho: ¿requiere numeración propia y entidad? ¿requisitos legales SII? | 7.7 | Entidad `DispatchNote` con número correlativo. Sin emisión SII todavía. |
-| 8 | Impresión 80mm: ¿impresora térmica POS o vista web? | 6 / 7 / 7.7 | HTML con `@page` 80mm. |
-| 9 | Validación de RUT chileno: ¿formato + dígito verificador estricto, o solo formato? | 4 | Formato + dígito verificador. |
-| 10 | Cotización por WhatsApp: ¿"el número" es del cliente o el correlativo de la cot? | 6 | Correlativo asignado al guardar; el botón pre-arma el mensaje al teléfono del cliente. |
+| 1 | ¿Separar `customers.address` en calle/número/comuna o dejar texto libre? | 4 | ✅ Separar — las 3 opcionales |
+| 2 | "Mismo producto con mismo código" — ¿permitir duplicados de SKU? ¿códigos compartidos? | 4B | Pendiente. Asunción: `sku` único, `product_codes` permite código compartido entre productos. |
+| 3 | Comisión por tarjeta: ¿% fijo, por método, por venta? | 5 / 7 | Pendiente. Asunción: `cardCommissionRate` único en `CompanySettings`. |
+| 4 | Tasa de IVA: ¿fija 19% o configurable? | 5 | Pendiente. Asunción: configurable, default `0.19`. |
+| 5 | Mercado Libre: ¿integración real con API ML o registro manual? | 7.5 | Pendiente. Asunción: manual. |
+| 6 | Almacenamiento de archivos: ¿disco local, S3, Cloudinary? | 4B / 5 | Pendiente. Asunción: disco local en `apps/api/uploads/`. |
+| 7 | Guía de despacho: ¿numeración propia? ¿requisitos SII? | 7.7 | Pendiente. Asunción: entidad `DispatchNote`, sin emisión SII. |
+| 8 | Impresión 80mm: ¿impresora térmica POS o vista web? | 6 / 7 / 7.7 | Pendiente. Asunción: HTML con `@page` 80mm. |
+| 9 | Validación de RUT chileno: formato vs formato + DV | 4 | ✅ Formato + dígito verificador + normalización |
+| 10 | Cotización por WhatsApp: ¿"el número" del cliente o correlativo? | 6 | Pendiente. Asunción: correlativo + mensaje al teléfono del cliente. |
+| 11 | Validación de teléfono | 4 | ✅ `libphonenumber-js` + E.164, default Chile |
+| 12 | Comuna: texto libre vs catálogo | 4 | ✅ Catálogo de 346 comunas (FK) |
+| 13 | Email del cliente: obligatorio / único | 4 | ✅ Opcional, puede repetirse |
+| 14 | RUT cliente: obligatorio | 4 | ✅ Obligatorio + único (índice DB) |
+| 15 | Cliente "Consumidor final" seedeado | 4 | ✅ No se seedea |
+| 16 | Validación de RUT en proveedores | 4 | ✅ Mismas reglas que clientes |
+| 17 | Unicidad de NIT/RUC en proveedores a nivel DB | 4 | ✅ Índice único en DB |
+| 18 | Tabs del detalle de cliente | 4 | ✅ Solo Datos por ahora |
+| 19 | Detalle proveedor con historial de compras | 4 | ✅ Tabs Datos + Compras |
+| 20 | Sidebar: ubicación de Clientes | 4 | ✅ Sección "Operación" |
+| 21 | Notas internas de cliente — visibilidad | 4 | ✅ Solo dentro del sistema |
 
 ---
 
@@ -961,9 +1087,7 @@ Si el admin ya existe, **el seed no lo recrea** — borralo manualmente primero 
 
 Cada fase es un PR independiente con verificación end-to-end al cierre. Ver [PLAN.md](PLAN.md#plan-de-implementación-por-fases) para el detalle.
 
-**Fase 4 (siguiente):** Clientes y proveedores con detalle (tabs *Datos / Cotizaciones / Ventas* para clientes, *Datos / Compras* para proveedores). Campos del cliente: **RUT/ID, nombre, correo, dirección (calle, número, comuna), teléfono**. Migración que desglosa `customers.address` y agrega índice único en `taxId` para clientes y proveedores. Validación de teléfono internacional (clave para WhatsApp en Fase 6) y dígito verificador de RUT chileno.
-
-**Fase 4B:** Catálogo extendido — tabla `product_codes` (interno, universal, fabricante, compatibles, alternativos), foto del producto (upload con `multer`), distinción ORIGINAL/ALTERNATIVO.
+**Fase 4B (siguiente):** Catálogo extendido — tabla `product_codes` (interno, universal, fabricante, compatibles, alternativos), foto del producto (upload con `multer`), distinción ORIGINAL/ALTERNATIVO.
 
 **Fase 5:** Caja, gastos, IVA y comisiones — categorías predefinidas (IVA Compra, IVA Venta, Comisión Tarjeta), campos `subtotal`/`taxAmount`/`commissionAmount` en ventas y compras, auto-registro de comisión al cobrar con tarjeta, factura adjunta en compras.
 
