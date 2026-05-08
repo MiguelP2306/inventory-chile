@@ -279,6 +279,143 @@ Los endpoints de productos existentes (`/api/products`, `/api/products/:id`, `qu
 
 ---
 
+## Fase 5 — Caja, gastos, IVA y comisiones
+
+Bloque que cierra el ciclo financiero del MVP. La caja es la **fuente de verdad** del flujo de dinero del negocio: cada compra registrada inserta un egreso, cada gasto manual también, y (cuando llegue Fase 7) cada venta inserta un ingreso. Los reportes de IVA se derivan de las columnas `subtotal`/`taxAmount` de compras y ventas.
+
+### Decisiones de negocio acordadas
+
+| Tema | Decisión |
+| --- | --- |
+| Tasa de IVA | Configurable desde **Configuración → Impuestos**. Default `0.1900` (Chile 19%). Columna `company_settings.taxRate` (`decimal(5,4)`). |
+| Comisión tarjeta | Tasa única configurable. Default `0.0250` (2.5%). Columna `company_settings.cardCommissionRate` (`decimal(5,4)`). PaymentMethod **no se desdobla** en débito/crédito. |
+| Precios y costos | Son **brutos** (incluyen IVA). Al confirmar compra/venta, el sistema descompone en `subtotal_neto` y `taxAmount`. |
+| Métodos de pago | `CASH | TRANSFER | CARD` para ventas Y gastos manuales (mismo enum). |
+| Categorías de gasto | CRUD completo con flag `isSystem`. Las categorías de sistema (`IVA Compra`, `IVA Venta`, `Comisión Tarjeta`) no se pueden borrar ni renombrar. |
+| Numeración de gastos | Correlativo `GAS-AAAA-NNNNN` generado atómicamente vía tabla `counters` con `SELECT … FOR UPDATE`. |
+| Edición de gastos | Libre dentro del **mes actual**. Si el gasto es de un mes anterior, solo se puede **anular** (genera transacción compensatoria, no borra). |
+| Cancelación de compras | **Postergada a Fase 7** (junto con cancelación de ventas). En Fase 5 las compras siguen siendo inmutables. |
+| IVA en compras | Auto-calculado desde el total bruto. Override opcional cuando la factura del proveedor tenga un redondeo distinto. |
+| Adjuntos | PDF + JPG/PNG/WEBP, máx 10 MB. Mismo límite que las imágenes de producto. |
+| Saldo apertura | **No** hay pantalla dedicada. Si el cliente quiere registrar saldo inicial, lo hace como un movimiento manual con categoría "Otros". |
+
+### Modelo de datos nuevo
+
+```text
+ExpenseCategory (id, name [unique], isSystem)
+   -- isSystem=true para "IVA Compra", "IVA Venta", "Comisión Tarjeta"
+
+Expense (id, number [unique, GAS-AAAA-NNNNN], date, categoryId,
+         amount, paymentMethod, description, receiptUrl?,
+         cashTxId,                          -- 1:1 con la transacción de caja generada
+         voidedAt?, voidedById?, voidCashTxId?,
+         userId, createdAt, updatedAt)
+
+Counter (kind PK, year PK, lastNumber)
+   -- Generación atómica de correlativos. kind="EXPENSE" en Fase 5;
+   -- futuras fases reusan con kind="QUOTATION", "SALE", "DISPATCH".
+
+CashTransaction (preexistente, ahora poblado activamente)
+   -- type: INCOME | EXPENSE
+   -- source: SALE | PURCHASE | MANUAL
+   -- isVoided + transacción compensatoria al anular un gasto
+
+CompanySettings (ampliada)
+   + taxRate            decimal(5,4) default 0.1900
+   + cardCommissionRate decimal(5,4) default 0.0250
+
+PurchaseEntry (ampliada)
+   + subtotal    decimal(15,2)  -- neto, sin IVA
+   + taxAmount   decimal(15,2)  -- IVA descompuesto
+   + invoiceUrl  varchar(500)?  -- factura adjunta
+
+Sale (ampliada — los campos se llenan en Fase 7)
+   + subtotal           decimal(15,2)
+   + taxAmount          decimal(15,2)
+   + commissionAmount   decimal(15,2)
+```
+
+### Reglas críticas de integridad
+
+- **CashTransaction es la fuente de verdad de la caja**. Cada operación que afecta caja escribe acá: compras (`source=PURCHASE`), gastos manuales (`source=MANUAL`) y, en Fase 7, ventas (`source=SALE`).
+- **Toda mutación de caja pasa por `CashboxService.recordTransaction(input, manager?)`**. El `manager?` opcional permite ejecutar dentro de la transacción del caller (caso típico: compras y gastos crean su transacción dentro de su propia atómica).
+- **Anular ≠ borrar**. `CashboxService.voidTransaction(id, userId, manager?)` marca la transacción original como `isVoided=true` y crea una **compensatoria** del tipo opuesto por el mismo monto. Los reportes excluyen `isVoided=true` por defecto pero las compensaciones SÍ cuentan (porque son su contrapartida).
+- **El IVA se registra en la compra/venta, no en la caja**. La columna `purchase_entries.taxAmount` es la única fuente para el reporte de IVA crédito; la `cash_transactions.amount` siempre es el TOTAL bruto.
+- **Comisión tarjeta** (Fase 7): cuando una venta se confirma con `paymentMethod=CARD`, en la **misma transacción** se registran dos entradas en caja:
+  - `INCOME` por el total de la venta.
+  - `EXPENSE` por `commissionAmount = total * cardCommissionRate`, con `expenseCategoryId = (Comisión Tarjeta)` y `source=SALE`.
+- **Edición de gasto**: si el gasto pertenece al mes actual, el endpoint `PATCH /expenses/:id` actualiza el registro Y la transacción de caja vinculada (`cashTxId`) en una transacción atómica. Si pertenece a un mes anterior, devuelve 409 — el operador debe anular y crear uno nuevo.
+- **Numeración correlativa**: el `CountersService.nextNumber(kind, year, manager?)` toma un row lock pesimista sobre `(kind, year)` para evitar saltos en concurrencia.
+
+### Migración aplicada
+
+[`1778230000000-CashboxAndTaxes.ts`](apps/api/src/database/migrations/1778230000000-CashboxAndTaxes.ts) hace, en orden:
+
+1. Agrega `expense_categories.isSystem` (BOOL DEFAULT 0).
+2. Agrega `company_settings.taxRate` y `cardCommissionRate` (con defaults Chile).
+3. Agrega `purchase_entries.subtotal`, `taxAmount`, `invoiceUrl`.
+4. Agrega `sales.subtotal`, `taxAmount`, `commissionAmount` (todos default 0; se poblarán en Fase 7).
+5. Crea las tablas `expenses` y `counters`.
+6. **Inserta las categorías de sistema** (`IVA Compra`, `IVA Venta`, `Comisión Tarjeta`) si no existen, y marca `isSystem=1`. Las categorías base preexistentes (Arriendo, Transporte, etc.) quedan con `isSystem=0`.
+7. **Backfill de IVA** en `purchase_entries`: para las compras pre-Fase 5 con `subtotal=0` y `taxAmount=0`, se calcula `subtotal = total/1.19` y `taxAmount = total - subtotal`. Asume tasa 19% Chile (las compras anteriores no tenían tasa configurable, así que esta es la única razonable).
+8. **Backfill de cash_transactions**: para cada `purchase_entry` que no tenga aún una `cash_transaction(source=PURCHASE, sourceId=<purchase.id>)`, se inserta una con la `date` original de la compra. **Idempotente**: la `WHERE NOT EXISTS` evita duplicar al re-ejecutar.
+
+> El `down()` de la migración borra **todas** las `cash_transactions` con `source=PURCHASE` (no podemos distinguir backfill de "reales"). En producción esto es destructivo — no usar `down` salvo en dev.
+
+### Endpoints nuevos
+
+| Método | Ruta | Para qué sirve |
+| --- | --- | --- |
+| `GET` | `/api/cashbox/transactions` | Libro de caja paginado con filtros (`type`, `source`, `paymentMethod`, `expenseCategoryId`, `dateFrom/To`, `q`, `includeVoided`). |
+| `GET` | `/api/cashbox/balance` | Saldo actual: total + por método (CASH / TRANSFER / CARD) + ingresos / egresos acumulados. |
+| `GET` | `/api/expenses` | Listado paginado con mismos filtros + `voided`. |
+| `GET` | `/api/expenses/:id` | Detalle. |
+| `POST` | `/api/expenses` | Crear gasto + transacción de caja en transacción atómica. Asigna `number = GAS-AAAA-NNNNN`. |
+| `PATCH` | `/api/expenses/:id` | Editar — solo del mes actual. Reescribe la `cash_transaction` vinculada en la misma transacción. |
+| `POST` | `/api/expenses/:id/void` | Anular: marca `voidedAt` + `cashbox.voidTransaction()` (compensación). |
+| `GET/POST/PATCH/DELETE` | `/api/expense-categories` | CRUD. `update`/`remove` rechazan categorías con `isSystem=true`. |
+| `GET` | `/api/settings/company` | Configuración (singleton). |
+| `PATCH` | `/api/settings/company` | Actualizar — valida `0 ≤ taxRate, cardCommissionRate ≤ 1`. |
+| `POST` | `/api/uploads/purchase-invoice` (multipart `file`) | Sube factura de compra. Devuelve `{url, filename, ...}`. |
+| `POST` | `/api/uploads/expense-receipt` (multipart `file`) | Sube comprobante de gasto. |
+
+Endpoints existentes ampliados:
+
+- `POST /api/purchases`: ahora acepta `invoiceUrl` y `taxAmountOverride`. Calcula `subtotal/taxAmount` desde `companySettings.taxRate` (con override) e inserta `cash_transaction(EXPENSE, source=PURCHASE)` por el total bruto en la misma transacción atómica.
+- `GET /api/purchases`: el DTO devuelve `subtotal`, `taxAmount`, `invoiceUrl` además del `total`.
+
+### Pantallas
+
+| Ruta | Descripción |
+| --- | --- |
+| [`/configuracion`](apps/web/app/(dashboard)/configuracion/page.tsx) | Form simple para editar `taxRate` y `cardCommissionRate`. Las tasas se editan como porcentaje "humano" (19, 2.5) y se persisten como decimal (0.1900, 0.0250). Link a la pantalla de categorías. |
+| [`/configuracion/categorias-gasto`](apps/web/app/(dashboard)/configuracion/categorias-gasto/page.tsx) | CRUD de `ExpenseCategory`. Las categorías de sistema muestran un badge "sistema" y no tienen botones de editar/eliminar. |
+| [`/gastos`](apps/web/app/(dashboard)/gastos/page.tsx) | Listado de gastos con filtros (categoría, método, fecha, búsqueda libre, incluir anulados). Botón "Nuevo gasto" → `<ExpenseFormDialog>`. Cada fila: editar (si es del mes actual) y anular (cualquier mes). El comprobante adjunto aparece como ícono clickeable. |
+| [`/caja`](apps/web/app/(dashboard)/caja/page.tsx) | **Libro de caja**. 4 cards arriba con saldos (total + por método). Filtros: tipo, origen (SALE/PURCHASE/MANUAL), método, categoría, fecha desde/hasta, incluir anuladas. Tabla de movimientos con badges de color (verde ingreso / rojo egreso). Totales del período visible al pie. |
+| [`/compras/nuevo`](apps/web/app/(dashboard)/compras/nuevo/page.tsx) (extendido) | Widget de subida de **factura adjunta** (PDF/imagen). Panel inferior con descomposición de IVA: Total bruto + IVA editable + Subtotal neto + Total. Si el operador edita el IVA, el subtotal neto se recalcula. |
+| [`/compras`](apps/web/app/(dashboard)/compras/page.tsx) (extendido) | Tabla con columnas adicionales `Subtotal`, `IVA`, y `Factura` (ícono clickeable si está adjunta). |
+
+### Patrones reutilizables (para fases siguientes)
+
+- **`CashboxService.recordTransaction(input, manager?)`** — única entrada para mutar caja. Llamar siempre desde dentro de la transacción del caller cuando haya cambios cruzados (ej. ventas en Fase 7: `applyMovement` + `recordTransaction(INCOME)` + `recordTransaction(EXPENSE comisión)` en el mismo `dataSource.transaction(...)`).
+- **`CashboxService.voidTransaction(id, userId, manager?)`** — para anular ventas/compras en Fase 7 reusando el mismo patrón de compensación.
+- **`CountersService.nextNumber(kind, year, manager?)`** — para generar correlativos atómicos. Reutilizable en Fase 6 (`COT-AAAA-NNNNN`), Fase 7 (`VEN-AAAA-NNNNN`), Fase 7.7 (`DESP-AAAA-NNNNN`).
+- **Uploads transversales** — `POST /api/uploads/purchase-invoice` y `POST /api/uploads/expense-receipt`. Mismo whitelist (PDF + JPG/PNG/WEBP), mismo límite (10 MB), mismo handler genérico (`UploadsController`). Para nuevos tipos de adjunto, agregar un `<NEW>_SUBDIR` constante y un endpoint nuevo.
+- **Pattern para anular**: `entity.voidedAt + entity.voidCashTxId` + `cash_transaction.isVoided` + transacción compensatoria. Replicable para ventas en Fase 7.
+
+### Verificación end-to-end
+
+1. **Configuración**: `/configuracion` carga las tasas actuales como porcentajes. Editar IVA a 21 (sin coma) → guardar → recargar → debería mantenerse 21%. Volver a 19.
+2. **Categorías de gasto**: `/configuracion/categorias-gasto` muestra IVA Compra / IVA Venta / Comisión Tarjeta con badge "sistema" sin botones de acción. Crear "Mantenimiento Local" → aparece editable. Intentar borrar la categoría "Comisión Tarjeta" devuelve 409.
+3. **Gasto manual**: `/gastos` → Nuevo gasto → cargar Arriendo $800.000 efectivo, fecha hoy, descripción "Arriendo local mayo", subir un PDF como comprobante → Crear. El gasto aparece con número `GAS-2026-00001`. Saldo de caja en `/caja` baja $800.000 en columna Efectivo.
+4. **Editar gasto del mes**: editar el gasto creado → cambiar monto a $850.000 → guardar. Saldo de caja se ajusta a $-850.000.
+5. **Anular gasto**: anular el gasto → aparece como Anulado (línea tachada). En `/caja` con "Incluir anuladas" se ven dos transacciones: la original tachada (-$850.000) y la compensación (+$850.000). Saldo final: $0.
+6. **Compra con IVA**: `/compras/nuevo` → Nueva entrada con 1 producto a $11.900 bruto. El panel muestra Total bruto $11.900, IVA $1.900 (auto), Subtotal neto $10.000. Subir factura PDF. Confirmar. La compra aparece en `/compras` con icono de factura. En `/caja` aparece un egreso (TRANSFER, source=Compra) por $11.900.
+7. **Override de IVA**: en /compras/nuevo editar el campo IVA a $1.901 → subtotal neto se ajusta automáticamente a $9.999 → confirmar → la compra guardada respeta esos valores.
+8. **Saldo de caja**: `/caja` arriba muestra el saldo total y por método. Filtrar por origen=Manual → solo gastos manuales. Filtrar fecha = hoy → cuadra con la actividad del día.
+
+---
+
 ## Stack
 
 - **Frontend** ([apps/web](apps/web/)): Next.js 15 (App Router) + TypeScript + TailwindCSS + shadcn/ui + TanStack Query + React Hook Form + Zod
@@ -1186,6 +1323,16 @@ Si el admin ya existe, **el seed no lo recrea** — borralo manualmente primero 
 | 19 | Detalle proveedor con historial de compras | 4 | ✅ Tabs Datos + Compras |
 | 20 | Sidebar: ubicación de Clientes | 4 | ✅ Sección "Operación" |
 | 21 | Notas internas de cliente — visibilidad | 4 | ✅ Solo dentro del sistema |
+| 22 | Precios netos vs brutos | 5 | ✅ Brutos (incluyen IVA), descompuesto al confirmar |
+| 23 | Métodos de pago en gastos manuales | 5 | ✅ Mismos 3 que ventas (CASH/TRANSFER/CARD) |
+| 24 | Cancelación de compras | 5/7 | ✅ Postergada a Fase 7 con cancelación de ventas |
+| 25 | Categorías de gasto editables o fijas | 5 | ✅ CRUD + flag `isSystem` para protegidas |
+| 26 | Numeración de gastos manuales | 5 | ✅ `GAS-AAAA-NNNNN` correlativo atómico |
+| 27 | Formatos aceptados en facturas/comprobantes | 5 | ✅ PDF + JPG/PNG/WEBP, máx 10 MB |
+| 28 | Saldo apertura de caja | 5 | ✅ Sin pantalla; saldo inicial como movimiento manual |
+| 29 | Edición de gastos | 5 | ✅ Libre en mes actual; anular con compensación si es anterior |
+| 30 | Backfill de compras existentes en caja | 5 | ✅ Automático e idempotente en la migración |
+| 31 | IVA en compras (calc auto u override) | 5 | ✅ Auto-calculado, override opcional |
 
 ---
 
@@ -1193,9 +1340,9 @@ Si el admin ya existe, **el seed no lo recrea** — borralo manualmente primero 
 
 Cada fase es un PR independiente con verificación end-to-end al cierre. Ver [PLAN.md](PLAN.md#plan-de-implementación-por-fases) para el detalle.
 
-**Fase 5 (siguiente):** Caja, gastos, IVA y comisiones — categorías predefinidas (IVA Compra, IVA Venta, Comisión Tarjeta), campos `subtotal`/`taxAmount`/`commissionAmount` en ventas y compras, auto-registro de comisión al cobrar con tarjeta, **factura adjunta en compras** (reusará el módulo `uploads` de Fase 4B).
+**Fase 5:** ✅ Caja, gastos, IVA y comisiones — ver sección "Fase 5" arriba.
 
-**Fase 6:** Cotizaciones + modal "venta o cotización" + impresión 80mm/carta + WhatsApp/email.
+**Fase 6 (siguiente):** Cotizaciones + modal "venta o cotización" + impresión 80mm/carta + WhatsApp/email. Reusa `CountersService` con `kind=QUOTATION` para correlativos `COT-AAAA-NNNNN`.
 
 **Fase 7:** Ventas con caja integrada, selector de bodega, comisión tarjeta automática, impresión 80mm/carta.
 

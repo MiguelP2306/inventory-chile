@@ -4,16 +4,21 @@ import { ServeStaticModule } from '@nestjs/serve-static';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
 import { BrandsModule } from './brands/brands.module';
+import { CashboxModule } from './cashbox/cashbox.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CommunesModule } from './communes/communes.module';
 import { CustomersModule } from './customers/customers.module';
 import { dataSourceOptions } from './database/data-source';
+import { ExpenseCategoriesModule } from './expense-categories/expense-categories.module';
+import { ExpensesModule } from './expenses/expenses.module';
 import { HealthController } from './health.controller';
 import { InventoryModule } from './inventory/inventory.module';
 import { ProductsModule } from './products/products.module';
 import { PurchasesModule } from './purchases/purchases.module';
+import { SettingsModule } from './settings/settings.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { UPLOADS_ROOT } from './uploads/upload-config';
+import { UploadsModule } from './uploads/uploads.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 
 @Module({
@@ -41,6 +46,11 @@ import { VehiclesModule } from './vehicles/vehicles.module';
     CommunesModule,
     InventoryModule,
     PurchasesModule,
+    UploadsModule,
+    ExpenseCategoriesModule,
+    ExpensesModule,
+    CashboxModule,
+    SettingsModule,
   ],
   controllers: [HealthController],
   providers: [],

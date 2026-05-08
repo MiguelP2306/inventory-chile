@@ -81,3 +81,60 @@ export function productImageFileFilter(
 export function publicUploadUrl(subdir: string, filename: string): string {
   return `/uploads/${subdir}/${filename}`;
 }
+
+// ---------- Documentos: facturas de compra + comprobantes de gasto ----------
+
+export const PURCHASE_INVOICES_SUBDIR = 'purchase-invoices';
+export const EXPENSE_RECEIPTS_SUBDIR = 'expense-receipts';
+export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024; // 10 MB
+export const ACCEPTED_DOCUMENT_MIMES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
+export const ACCEPTED_DOCUMENT_EXTS = new Set([
+  '.pdf',
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.webp',
+]);
+
+function makeStorage(subdir: string) {
+  return diskStorage({
+    destination: (_req, _file, cb) => {
+      const dir = join(UPLOADS_ROOT, subdir);
+      ensureDir(dir);
+      cb(null, dir);
+    },
+    filename: (_req, file, cb) => {
+      const ext = extname(file.originalname).toLowerCase();
+      cb(null, `${randomUUID()}${ext}`);
+    },
+  });
+}
+
+export const purchaseInvoiceStorage = makeStorage(PURCHASE_INVOICES_SUBDIR);
+export const expenseReceiptStorage = makeStorage(EXPENSE_RECEIPTS_SUBDIR);
+
+export function documentFileFilter(
+  _req: Request,
+  file: Express.Multer.File,
+  cb: (err: Error | null, accept: boolean) => void,
+) {
+  const ext = extname(file.originalname).toLowerCase();
+  if (
+    !ACCEPTED_DOCUMENT_MIMES.has(file.mimetype) ||
+    !ACCEPTED_DOCUMENT_EXTS.has(ext)
+  ) {
+    cb(
+      new BadRequestException(
+        'Formato no permitido. Subí PDF, JPG, PNG o WEBP.',
+      ),
+      false,
+    );
+    return;
+  }
+  cb(null, true);
+}

@@ -38,6 +38,16 @@ export class CompanySettings {
   @Column({ type: 'int', default: 15 })
   defaultValidityDays!: number;
 
+  // Tasa de IVA aplicada a ventas y compras. Default 19% Chile.
+  // Almacenamos como decimal(5,4) para soportar tasas con hasta 4 decimales.
+  @Column({ type: 'decimal', precision: 5, scale: 4, default: 0.19 })
+  taxRate!: string;
+
+  // Comisión que el agregador de tarjeta cobra al comerciante. Se descuenta
+  // automáticamente como egreso de caja al confirmar una venta con CARD.
+  @Column({ type: 'decimal', precision: 5, scale: 4, default: 0.025 })
+  cardCommissionRate!: string;
+
   @UpdateDateColumn({ type: 'datetime', precision: 6 })
   updatedAt!: Date;
 }

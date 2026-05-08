@@ -36,8 +36,22 @@ export class Sale {
   @Column({ type: 'datetime', precision: 6 })
   date!: Date;
 
+  // Total bruto (con IVA). Coincide con la suma de items y es lo que paga el cliente.
   @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
   total!: string;
+
+  // Subtotal neto (sin IVA). Calculado al confirmar la venta.
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  subtotal!: string;
+
+  // IVA descompuesto. total - subtotal.
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  taxAmount!: string;
+
+  // Comisión de tarjeta (solo se calcula cuando paymentMethod=CARD).
+  // Egreso automático en la misma transacción de la venta.
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  commissionAmount!: string;
 
   @Column({ type: 'enum', enum: PaymentMethod })
   paymentMethod!: PaymentMethod;

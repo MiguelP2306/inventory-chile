@@ -7,8 +7,11 @@ import {
   Factory,
   LayoutDashboard,
   Package,
+  Receipt,
+  Settings,
   Tag,
   Users,
+  Wallet,
   Warehouse,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -66,6 +69,24 @@ const SECTIONS: NavSection[] = [
         label: 'Clientes',
         icon: Users,
         matchPrefix: ['/clientes'],
+      },
+    ],
+  },
+  {
+    label: 'Caja',
+    items: [
+      { href: '/caja', label: 'Libro de caja', icon: Wallet, matchPrefix: ['/caja'] },
+      { href: '/gastos', label: 'Gastos', icon: Receipt, matchPrefix: ['/gastos'] },
+    ],
+  },
+  {
+    label: 'Configuración',
+    items: [
+      {
+        href: '/configuracion',
+        label: 'Configuración',
+        icon: Settings,
+        matchPrefix: ['/configuracion'],
       },
     ],
   },

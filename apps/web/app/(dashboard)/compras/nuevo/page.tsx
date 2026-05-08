@@ -1,9 +1,9 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Trash2 } from 'lucide-react';
+import { Paperclip, Trash2, Upload, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { ProductPicker } from '@/components/product-picker';
 import { Button } from '@/components/ui/button';
@@ -24,7 +24,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  getCompanySettings,
+  publicDocumentUrl,
+  uploadPurchaseInvoice,
+} from '@/lib/cashbox-api';
 import { apiErrorMessage } from '@/lib/catalog-api';
+import { formatCurrency } from '@/lib/format';
 import {
   createPurchase,
   listSuppliers,
@@ -39,6 +45,14 @@ interface ItemRow {
   unitCost: string;
 }
 
+const ACCEPTED_DOC_MIMES = [
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+];
+const MAX_DOC_BYTES = 10 * 1024 * 1024;
+
 export default function NuevaCompraPage() {
   const router = useRouter();
   const qc = useQueryClient();
@@ -46,19 +60,38 @@ export default function NuevaCompraPage() {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<ItemRow[]>([]);
+  const [invoiceUrl, setInvoiceUrl] = useState<string | null>(null);
+  const [uploadingInvoice, setUploadingInvoice] = useState(false);
+  // El IVA puede sobreescribirse para coincidir con la factura real del
+  // proveedor. Mientras `taxOverride` sea null, el subtotal/IVA se
+  // recalculan automáticamente desde el total bruto.
+  const [taxOverride, setTaxOverride] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   const suppliers = useQuery({ queryKey: ['suppliers'], queryFn: () => listSuppliers() });
+  const settings = useQuery({
+    queryKey: ['settings', 'company'],
+    queryFn: getCompanySettings,
+  });
+  const taxRate = Number(settings.data?.taxRate ?? '0.19');
 
-  const total = useMemo(
+  const totalBruto = useMemo(
     () =>
-      items
-        .reduce((acc, it) => acc + (Number(it.unitCost) || 0) * (it.qty || 0), 0)
-        .toFixed(2),
+      items.reduce(
+        (acc, it) => acc + (Number(it.unitCost) || 0) * (it.qty || 0),
+        0,
+      ),
     [items],
   );
 
+  const autoTax = totalBruto - totalBruto / (1 + taxRate);
+  const taxAmount = taxOverride !== null ? Number(taxOverride) : autoTax;
+  const subtotalNeto = totalBruto - taxAmount;
+
   const valid =
-    !!supplierId && items.length > 0 && items.every((i) => i.qty > 0 && Number(i.unitCost) >= 0);
+    !!supplierId &&
+    items.length > 0 &&
+    items.every((i) => i.qty > 0 && Number(i.unitCost) >= 0);
 
   const mut = useMutation({
     mutationFn: (input: PurchaseInput) => createPurchase(input),
@@ -66,6 +99,8 @@ export default function NuevaCompraPage() {
       qc.invalidateQueries({ queryKey: ['purchases'] });
       qc.invalidateQueries({ queryKey: ['stock'] });
       qc.invalidateQueries({ queryKey: ['movements'] });
+      qc.invalidateQueries({ queryKey: ['cashbox-balance'] });
+      qc.invalidateQueries({ queryKey: ['cash-transactions'] });
       toast.success('Compra registrada');
       router.push('/compras');
       router.refresh();
@@ -80,6 +115,9 @@ export default function NuevaCompraPage() {
       supplierId,
       date,
       notes: notes.trim() || undefined,
+      invoiceUrl,
+      taxAmountOverride:
+        taxOverride !== null ? Number(taxOverride).toFixed(2) : undefined,
       items: items.map((i) => ({
         productId: i.productId,
         qty: i.qty,
@@ -92,6 +130,38 @@ export default function NuevaCompraPage() {
     setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
   }
 
+  // Si el operador edita el IVA y queda igual al auto-calculado, limpiamos el
+  // override para que vuelva a recalcularse al cambiar items.
+  useEffect(() => {
+    if (taxOverride === null) return;
+    if (Math.abs(Number(taxOverride) - autoTax) < 0.005) {
+      setTaxOverride(null);
+    }
+  }, [autoTax, taxOverride]);
+
+  async function onSelectInvoice(file?: File | null) {
+    if (!file) return;
+    if (!ACCEPTED_DOC_MIMES.includes(file.type)) {
+      toast.error('Formato no permitido. PDF, JPG, PNG o WEBP.');
+      return;
+    }
+    if (file.size > MAX_DOC_BYTES) {
+      toast.error('Archivo supera 10 MB.');
+      return;
+    }
+    setUploadingInvoice(true);
+    try {
+      const result = await uploadPurchaseInvoice(file);
+      setInvoiceUrl(result.url);
+      toast.success('Factura subida');
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'No se pudo subir la factura'));
+    } finally {
+      setUploadingInvoice(false);
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  }
+
   return (
     <form onSubmit={onSubmit} className="space-y-6">
       <div className="flex items-center justify-between">
@@ -100,7 +170,7 @@ export default function NuevaCompraPage() {
           <Button type="button" variant="outline" onClick={() => router.back()}>
             Cancelar
           </Button>
-          <Button type="submit" disabled={!valid || mut.isPending}>
+          <Button type="submit" disabled={!valid || mut.isPending || uploadingInvoice}>
             {mut.isPending ? 'Guardando...' : 'Registrar compra'}
           </Button>
         </div>
@@ -130,6 +200,50 @@ export default function NuevaCompraPage() {
         <div className="space-y-2">
           <Label>Fecha</Label>
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </div>
+        <div className="space-y-2">
+          <Label>Factura adjunta (opcional)</Label>
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
+            className="hidden"
+            onChange={(e) => onSelectInvoice(e.target.files?.[0])}
+          />
+          {invoiceUrl ? (
+            <div className="flex items-center gap-2 rounded-md border bg-muted/30 p-2 text-sm">
+              <Paperclip className="h-4 w-4" />
+              <a
+                href={publicDocumentUrl(invoiceUrl) ?? '#'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 truncate text-muted-foreground hover:underline"
+              >
+                Ver factura
+              </a>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setInvoiceUrl(null)}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => inputRef.current?.click()}
+              disabled={uploadingInvoice}
+              className="w-full justify-start"
+            >
+              <Upload className="h-4 w-4" />
+              {uploadingInvoice
+                ? 'Subiendo...'
+                : 'Subir factura (PDF / imagen)'}
+            </Button>
+          )}
         </div>
         <div className="space-y-2 md:col-span-3">
           <Label>Notas (opcional)</Label>
@@ -170,7 +284,7 @@ export default function NuevaCompraPage() {
               <TableHead>SKU</TableHead>
               <TableHead>Producto</TableHead>
               <TableHead className="w-[120px] text-right">Cantidad</TableHead>
-              <TableHead className="w-[140px] text-right">Costo unitario</TableHead>
+              <TableHead className="w-[160px] text-right">Costo unit. (bruto)</TableHead>
               <TableHead className="w-[140px] text-right">Subtotal</TableHead>
               <TableHead className="w-[60px]" />
             </TableRow>
@@ -210,7 +324,7 @@ export default function NuevaCompraPage() {
                     />
                   </TableCell>
                   <TableCell className="text-right tabular-nums font-medium">
-                    ${subtotal}
+                    {formatCurrency(subtotal)}
                   </TableCell>
                   <TableCell className="text-right">
                     <Button
@@ -225,18 +339,48 @@ export default function NuevaCompraPage() {
                 </TableRow>
               );
             })}
-            {items.length > 0 && (
-              <TableRow className="bg-muted/30 font-semibold">
-                <TableCell colSpan={4} className="text-right">
-                  Total
-                </TableCell>
-                <TableCell className="text-right tabular-nums">${total}</TableCell>
-                <TableCell />
-              </TableRow>
-            )}
           </TableBody>
         </Table>
       </div>
+
+      {items.length > 0 && (
+        <div className="ml-auto max-w-md rounded-md border bg-card p-4 space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Total bruto</span>
+            <span className="tabular-nums font-medium">
+              {formatCurrency(totalBruto.toFixed(2))}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-muted-foreground">
+              IVA ({(taxRate * 100).toFixed(2)}%)
+            </span>
+            <Input
+              type="text"
+              inputMode="decimal"
+              value={taxOverride !== null ? taxOverride : autoTax.toFixed(2)}
+              onChange={(e) => setTaxOverride(e.target.value)}
+              className="w-32 text-right tabular-nums"
+            />
+          </div>
+          <div className="flex justify-between border-t pt-2">
+            <span className="text-muted-foreground">Subtotal neto</span>
+            <span className="tabular-nums">
+              {formatCurrency(subtotalNeto.toFixed(2))}
+            </span>
+          </div>
+          <div className="flex justify-between border-t pt-2 font-semibold">
+            <span>Total</span>
+            <span className="tabular-nums">{formatCurrency(totalBruto.toFixed(2))}</span>
+          </div>
+          {taxOverride !== null && (
+            <p className="text-xs text-muted-foreground">
+              IVA editado manualmente. El subtotal neto se ajusta para que la
+              suma cuadre con el total bruto.
+            </p>
+          )}
+        </div>
+      )}
     </form>
   );
 }

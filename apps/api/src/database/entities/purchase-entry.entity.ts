@@ -30,8 +30,22 @@ export class PurchaseEntry {
   @Column({ type: 'datetime', precision: 6 })
   date!: Date;
 
+  // Total bruto (con IVA). Suma de los subtotales de los items.
   @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
   total!: string;
+
+  // Subtotal neto (sin IVA). Calculado al confirmar la compra.
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  subtotal!: string;
+
+  // IVA descompuesto. Calculado o sobreescrito por el operador para coincidir
+  // con la factura del proveedor (puede haber redondeos).
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  taxAmount!: string;
+
+  // URL relativa al archivo de factura adjunto (PDF o imagen).
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  invoiceUrl!: string | null;
 
   @Column({ type: 'text', nullable: true })
   notes!: string | null;

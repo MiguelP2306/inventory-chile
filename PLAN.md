@@ -350,25 +350,36 @@ inventory-management/
 
 > **Decisiones del wizard** (todas confirmadas): galería de fotos, solo `COMPATIBLE` en `product_codes`, `universalCode` como columna directa, default `ORIGINAL`, JPG/PNG/WEBP, 10 MB máximo, sin límite de cantidad, tab nueva "Códigos", patrón "crear → subir", miniatura 40×40, filtro de tipo, búsqueda extendida.
 
-### Fase 5 — Caja, gastos, IVA y comisiones
+### Fase 5 — Caja, gastos, IVA y comisiones ✅
 
-1. **Migración** que agrega:
-  - `sales.subtotal`, `sales.taxAmount`, `sales.commissionAmount` (todos `decimal(15,2)`).
-  - `purchase_entries.subtotal`, `purchase_entries.taxAmount`.
-  - `purchase_entries.invoiceUrl` (varchar 500, nullable) — adjuntar factura.
-  - `company_settings.taxRate` (decimal(5,4), default `0.1900` para IVA Chile 19%).
-  - `company_settings.cardCommissionRate` (decimal(5,4), default `0.0250`).
-2. **Seed** de categorías de gasto adicionales: `IVA Compra`, `IVA Venta`, `Comisión Tarjeta`.
-3. CRUD de `ExpenseCategory` (módulo nuevo, patrón simple igual a brands).
-4. CRUD de gastos manuales (registro con fecha, categoría, monto, método de pago, descripción, comprobante adjunto opcional).
-5. Vista "Libro de caja" con filtros por fecha/tipo/método/origen/categoría, total ingresos, total egresos, saldo del período.
+1. **Migración** [`1778230000000-CashboxAndTaxes.ts`](apps/api/src/database/migrations/1778230000000-CashboxAndTaxes.ts) que:
+  - Agrega `expense_categories.isSystem` (BOOL DEFAULT 0).
+  - Agrega `sales.subtotal`, `sales.taxAmount`, `sales.commissionAmount` (todos `decimal(15,2)`, default 0; se llenan en Fase 7).
+  - Agrega `purchase_entries.subtotal`, `purchase_entries.taxAmount`, `purchase_entries.invoiceUrl`.
+  - Agrega `company_settings.taxRate` (`decimal(5,4)` default `0.1900`).
+  - Agrega `company_settings.cardCommissionRate` (`decimal(5,4)` default `0.0250`).
+  - Crea tabla `expenses` (gastos manuales con número correlativo + anulación).
+  - Crea tabla `counters` (contadores correlativos por `(kind, year)`, atomic con row lock).
+  - **Backfill** de IVA en compras existentes: `subtotal = total/1.19`, `taxAmount = total - subtotal` (asume 19%, idempotente: solo aplica donde subtotal=0 y taxAmount=0).
+  - **Backfill** idempotente de `cash_transactions` para cada `purchase_entry` que aún no tenga su transacción (clave: `WHERE NOT EXISTS …` por `sourceId`).
+2. **Seed** ([run-seeds.ts](apps/api/src/database/seeds/run-seeds.ts)) actualizado: agrega `IVA Compra`, `IVA Venta`, `Comisión Tarjeta` con `isSystem=true`. CompanySettings nuevo arranca con `currency=CLP`, `taxRate=0.1900`, `cardCommissionRate=0.0250`.
+3. **CRUD de `ExpenseCategory`** ([apps/api/src/expense-categories/](apps/api/src/expense-categories/)) con flag `isSystem` que protege las 3 categorías reservadas: no se pueden modificar ni borrar desde la UI.
+4. **CRUD de gastos manuales** ([apps/api/src/expenses/](apps/api/src/expenses/)):
+  - `POST /expenses` crea el gasto + transacción de caja (`source=MANUAL, type=EXPENSE`) en transacción atómica. Asigna `number = GAS-AAAA-NNNNN` vía `CountersService`.
+  - `PATCH /expenses/:id` permite editar **solo** si el gasto pertenece al mes actual; reescribe la `cash_transaction` vinculada en la misma transacción.
+  - `POST /expenses/:id/void` marca `voidedAt` + crea transacción compensatoria (INCOME) que cancela la original.
+  - Comprobante adjunto opcional vía `POST /uploads/expense-receipt`.
+5. **Vista "Libro de caja"** ([/caja](apps/web/app/(dashboard)/caja/page.tsx)) con filtros por fecha/tipo/método/origen/categoría/anuladas + 4 cards de saldo (total + por método CASH/TRANSFER/CARD).
 6. **Integración automática:**
-  - `PurchaseEntry` confirma → inserta `CashTransaction(EXPENSE, source=PURCHASE)` con monto = `total`. Si tiene `taxAmount`, **NO** se separa en caja (queda registrado en la compra para reportes de IVA).
-  - `Sale.confirm()` (Fase 7) → inserta `CashTransaction(INCOME, source=SALE)` con `total`. Si `paymentMethod=CARD`, además inserta automáticamente `CashTransaction(EXPENSE, source=SALE, expenseCategoryId=Comisión Tarjeta)` por el monto `commissionAmount`.
-7. Endpoint `GET /cashbox/balance` que devuelve saldo actual y por método de pago.
-8. **Adjuntar factura en compras:** widget de upload (mismo módulo `uploads` de Fase 4B), endpoint `POST /uploads/purchase-invoice`. Listado de compras muestra ícono de descarga si tiene factura.
+  - **Compras** (`PurchaseesService.create`) ahora calcula `subtotal/taxAmount` desde `companySettings.taxRate` (con override) e inserta `CashTransaction(EXPENSE, source=PURCHASE)` por el `total` bruto en la misma transacción atómica. Default `paymentMethod=TRANSFER` (configurable más adelante).
+  - **Ventas** (Fase 7): el patrón de integración queda preparado vía `CashboxService.recordTransaction(input, manager?)` y `voidTransaction(id, userId, manager?)`.
+7. **Endpoint `GET /cashbox/balance`** que devuelve saldo total + saldo por método + ingresos/egresos acumulados.
+8. **Adjuntar factura en compras:** widget en `/compras/nuevo` (mismo whitelist PDF + JPG/PNG/WEBP de uploads de Fase 4B). Endpoint `POST /uploads/purchase-invoice`. Listado de compras muestra ícono de paperclip si tiene factura.
+9. **Pantalla Configuración** ([/configuracion](apps/web/app/(dashboard)/configuracion/page.tsx)): edita `taxRate` y `cardCommissionRate` como porcentajes humanos. Link a `/configuracion/categorias-gasto`.
 
-> **Reportes de IVA**: la suma de `sales.taxAmount` por período da el IVA débito; la suma de `purchase_entries.taxAmount` da el IVA crédito. Aprovechado en Fase 8.
+> **Reportes de IVA** (Fase 8): la suma de `sales.taxAmount` por período da el IVA débito; la suma de `purchase_entries.taxAmount` da el IVA crédito. Las columnas ya están listas desde Fase 5.
+
+> **Decisiones de Fase 5 confirmadas con cliente** (ver tabla "Decisiones pendientes" más abajo): IVA configurable; precios brutos; comisión tarjeta única (default 2.5%); cancelación de compras pospuesta a Fase 7; mismos métodos de pago en gastos y ventas; categorías editables con flag `isSystem`; correlativo `GAS-AAAA-NNNNN`; adjuntos PDF + imágenes 10 MB; sin saldo apertura dedicado; edición libre de gastos del mes actual; backfill automático de compras al subir Fase 5; IVA auto-calculado con override.
 
 ### Fase 6 — Cotizaciones y envío
 
@@ -581,10 +592,10 @@ Al cierre de cada fase:
 | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | 1   | ¿Separar `customers.address` en calle / número / comuna o dejar texto libre?                                                                                     | 4              | ✅ Confirmado: **3 columnas separadas**, las 3 opcionales.                                                                |
 | 2   | "Mismo producto con mismo código" (frase del cliente) — ¿permitir duplicados de SKU? ¿códigos compartidos entre productos? ¿fusionar productos con mismo código? | 4B             | Pendiente. Asunción: `sku` se mantiene único; `product_codes` permite que distintos productos compartan el mismo `code`. |
-| 3   | Comisión por tarjeta: ¿% fijo, por método (débito vs crédito), por venta individual?                                                                             | 5 / 7          | Pendiente. Asunción: `cardCommissionRate` único en `CompanySettings`.                                                    |
-| 4   | Tasa de IVA: ¿19% Chile fijo o configurable?                                                                                                                     | 5              | Pendiente. Asunción: configurable, default `0.19`.                                                                       |
+| 3   | Comisión por tarjeta: ¿% fijo, por método (débito vs crédito), por venta individual?                                                                             | 5 / 7          | ✅ Confirmado: **% único configurable en CompanySettings, default 2.5%**.                                                  |
+| 4   | Tasa de IVA: ¿19% Chile fijo o configurable?                                                                                                                     | 5              | ✅ Confirmado: **configurable desde Configuración, default 19%**.                                                          |
 | 5   | Mercado Libre: ¿integración real con API ML o registro manual?                                                                                                   | 7.5            | Pendiente. Asunción: manual.                                                                                             |
-| 6   | Almacenamiento de archivos: ¿disco local, S3, Cloudinary?                                                                                                        | 4B / 5         | Pendiente. Asunción: disco local en `apps/api/uploads/`.                                                                 |
+| 6   | Almacenamiento de archivos: ¿disco local, S3, Cloudinary?                                                                                                        | 4B / 5         | ✅ Confirmado para MVP: **disco local en `apps/api/uploads/`** (S3/Cloudinary como evolución al desplegar).                |
 | 7   | Guía de despacho: ¿numeración propia? ¿requisitos legales SII?                                                                                                   | 7.7            | Pendiente. Asunción: entidad `DispatchNote` con correlativo, sin emisión SII.                                            |
 | 8   | Impresión 80mm: ¿impresora térmica POS o vista web?                                                                                                              | 6 / 7 / 7.7    | Pendiente. Asunción: HTML con `@page` 80mm.                                                                              |
 | 9   | Validación de RUT chileno: ¿formato + DV estricto, o solo formato?                                                                                               | 4              | ✅ Confirmado: **formato + dígito verificador + normalización**.                                                          |
@@ -600,6 +611,16 @@ Al cierre de cada fase:
 | 19  | Detalle de proveedor con historial de compras                                                                                                                    | 4              | ✅ Confirmado: **sí**, tabs Datos + Compras.                                                                              |
 | 20  | "Clientes" en sidebar                                                                                                                                            | 4              | ✅ Confirmado: sección **Operación**.                                                                                     |
 | 21  | Notas internas de cliente — ¿aparecen en docs?                                                                                                                   | 4              | ✅ Confirmado: **no**, solo dentro del sistema.                                                                           |
+| 22  | Precios netos vs brutos                                                                                                                                          | 5              | ✅ Confirmado: **brutos** (precios y costos incluyen IVA). El sistema descompone al confirmar venta/compra.              |
+| 23  | Métodos de pago en gastos manuales                                                                                                                               | 5              | ✅ Confirmado: **mismos 3 que ventas** (CASH/TRANSFER/CARD).                                                              |
+| 24  | Cancelación de compras (¿en Fase 5 o más tarde?)                                                                                                                 | 5 / 7          | ✅ Confirmado: **postergada a Fase 7** junto con cancelación de ventas.                                                   |
+| 25  | Categorías de gasto: editables o fijas                                                                                                                           | 5              | ✅ Confirmado: **CRUD completo** + flag `isSystem` para las 3 categorías reservadas (no editables ni borrables).          |
+| 26  | Numeración de gastos manuales                                                                                                                                    | 5              | ✅ Confirmado: **correlativo `GAS-AAAA-NNNNN`** generado atómicamente vía tabla `counters`.                               |
+| 27  | Formatos aceptados en factura/comprobante                                                                                                                        | 5              | ✅ Confirmado: **PDF + JPG/PNG/WEBP**, máx 10 MB.                                                                          |
+| 28  | Saldo apertura de caja                                                                                                                                           | 5              | ✅ Confirmado: **sin pantalla dedicada**. El cliente registra el saldo inicial como movimiento manual con categoría "Otros". |
+| 29  | Edición de gastos: ¿libre, restringida, solo anular?                                                                                                             | 5              | ✅ Confirmado: **edición libre del mes actual**. Si el gasto es de un mes anterior, solo se puede anular con compensación. |
+| 30  | Backfill de compras existentes en `cash_transactions`                                                                                                            | 5              | ✅ Confirmado: **backfill automático e idempotente** en la migración.                                                     |
+| 31  | IVA en compras: auto-calculado, override o manual                                                                                                                | 5              | ✅ Confirmado: **auto-calculado desde el total bruto, con override opcional** cuando la factura del proveedor tenga redondeo distinto. |
 
 
 ## Suposiciones tomadas (avísame si alguna no aplica)

@@ -108,6 +108,10 @@ export interface PurchaseInput {
   warehouseId?: string;
   date?: string;
   notes?: string;
+  // Fase 5: factura adjunta + override del IVA cuando la factura del proveedor
+  // tiene un redondeo distinto del auto-calculado.
+  invoiceUrl?: string | null;
+  taxAmountOverride?: string;
   items: PurchaseItemInput[];
 }
 

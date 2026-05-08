@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 /**
  * Hook chico para sincronizar filtros con la URL (?clave=valor).
@@ -11,8 +11,13 @@ import { useCallback, useMemo } from 'react';
  * - `setFilter` reemplaza la URL con `router.replace` (no agrega al historial).
  * - Cuando se setea un valor "vacío" (null, undefined o ''), se borra la query.
  *
- * Los `defaults` definen las claves manejadas; sus valores son siempre `string`
- * en `values` (string vacío si no hay query).
+ * **Por qué el `pendingRef`:** dos llamadas a `setFilter` en el mismo tick
+ * (típico en selects que setean su key + resetean `page`) — sin el ref, la
+ * segunda lee el `search` capturado por el callback antes del re-render y
+ * sobreescribe la primera. El ref guarda la última URL "intendida" y cada
+ * `setFilter` parte de ahí, así el chained update funciona. El `useEffect`
+ * sincroniza el ref cuando la URL cambia desde afuera (back/forward del
+ * navegador, link externo, clear).
  */
 export interface UrlFilters<K extends string> {
   values: Record<K, string>;
@@ -28,6 +33,13 @@ export function useUrlFilters<K extends string>(
   const pathname = usePathname();
   const search = useSearchParams();
 
+  const searchString = search.toString();
+  const pendingRef = useRef<string>(searchString);
+
+  useEffect(() => {
+    pendingRef.current = searchString;
+  }, [searchString]);
+
   const values = useMemo(() => {
     const out = { ...defaults } as Record<K, string>;
     for (const key of Object.keys(defaults) as K[]) {
@@ -40,6 +52,7 @@ export function useUrlFilters<K extends string>(
   const replace = useCallback(
     (params: URLSearchParams) => {
       const qs = params.toString();
+      pendingRef.current = qs;
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
     [router, pathname],
@@ -47,24 +60,24 @@ export function useUrlFilters<K extends string>(
 
   const setFilter = useCallback(
     (key: K, value: string | null | undefined) => {
-      const params = new URLSearchParams(search.toString());
+      const params = new URLSearchParams(pendingRef.current);
       if (value == null || value === '') params.delete(key);
       else params.set(key, value);
       replace(params);
     },
-    [search, replace],
+    [replace],
   );
 
   const setFilters = useCallback(
     (patch: Partial<Record<K, string | null | undefined>>) => {
-      const params = new URLSearchParams(search.toString());
+      const params = new URLSearchParams(pendingRef.current);
       for (const [k, v] of Object.entries(patch)) {
         if (v == null || v === '') params.delete(k);
         else params.set(k, v as string);
       }
       replace(params);
     },
-    [search, replace],
+    [replace],
   );
 
   const clear = useCallback(() => {

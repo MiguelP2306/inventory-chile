@@ -1,10 +1,11 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Plus } from 'lucide-react';
+import { Paperclip, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { publicDocumentUrl } from '@/lib/cashbox-api';
 import {
   Select,
   SelectContent,
@@ -121,7 +122,10 @@ export default function ComprasPage() {
               <TableHead>Fecha</TableHead>
               <TableHead>Proveedor</TableHead>
               <TableHead>Notas</TableHead>
+              <TableHead className="text-right">Subtotal</TableHead>
+              <TableHead className="text-right">IVA</TableHead>
               <TableHead className="text-right">Total</TableHead>
+              <TableHead className="w-[80px] text-center">Factura</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -129,7 +133,7 @@ export default function ComprasPage() {
               <>
                 {Array.from({ length: 4 }).map((_, i) => (
                   <TableRow key={i}>
-                    <TableCell colSpan={4}>
+                    <TableCell colSpan={7}>
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
                   </TableRow>
@@ -138,25 +142,49 @@ export default function ComprasPage() {
             )}
             {!list.isLoading && items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground">
+                <TableCell colSpan={7} className="text-center text-muted-foreground">
                   Sin compras registradas todavía.
                 </TableCell>
               </TableRow>
             )}
-            {items.map((p) => (
-              <TableRow key={p.id}>
-                <TableCell>
-                  {new Date(p.date).toLocaleDateString('es-AR', { dateStyle: 'medium' })}
-                </TableCell>
-                <TableCell className="font-medium">{p.supplier?.name ?? '—'}</TableCell>
-                <TableCell className="text-xs text-muted-foreground">
-                  {p.notes ?? '—'}
-                </TableCell>
-                <TableCell className="text-right tabular-nums font-medium">
-                  {formatCurrency(p.total)}
-                </TableCell>
-              </TableRow>
-            ))}
+            {items.map((p) => {
+              const invoice = publicDocumentUrl(p.invoiceUrl);
+              return (
+                <TableRow key={p.id}>
+                  <TableCell>
+                    {new Date(p.date).toLocaleDateString('es-CL', { dateStyle: 'medium' })}
+                  </TableCell>
+                  <TableCell className="font-medium">{p.supplier?.name ?? '—'}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
+                    {p.notes ?? '—'}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {formatCurrency(p.subtotal)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {formatCurrency(p.taxAmount)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums font-medium">
+                    {formatCurrency(p.total)}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {invoice ? (
+                      <a
+                        href={invoice}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Ver factura"
+                        className="inline-flex text-muted-foreground hover:text-foreground"
+                      >
+                        <Paperclip className="h-4 w-4" />
+                      </a>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>

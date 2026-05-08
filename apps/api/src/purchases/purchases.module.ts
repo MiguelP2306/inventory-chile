@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { CashboxModule } from '../cashbox/cashbox.module';
 import {
+  CompanySettings,
   PurchaseEntry,
   PurchaseEntryItem,
   Supplier,
@@ -12,8 +14,15 @@ import { PurchasesService } from './purchases.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([PurchaseEntry, PurchaseEntryItem, Supplier, Warehouse]),
+    TypeOrmModule.forFeature([
+      PurchaseEntry,
+      PurchaseEntryItem,
+      Supplier,
+      Warehouse,
+      CompanySettings,
+    ]),
     InventoryModule,
+    CashboxModule,
   ],
   controllers: [PurchasesController],
   providers: [PurchasesService],

@@ -165,9 +165,84 @@ export interface PurchaseEntryDto {
   supplierId: string;
   date: string;
   total: string;
+  // Fase 5: descomposición IVA + factura adjunta.
+  subtotal: string;
+  taxAmount: string;
+  invoiceUrl: string | null;
   notes: string | null;
   userId: string;
   supplier?: SupplierDto;
   items?: PurchaseEntryItemDto[];
   user?: { id: string; name: string; email: string };
+}
+
+// ---------- Caja, gastos, settings (Fase 5) ----------
+
+export type PaymentMethodDto = 'CASH' | 'TRANSFER' | 'CARD';
+export type CashTransactionTypeDto = 'INCOME' | 'EXPENSE';
+export type CashTransactionSourceDto = 'SALE' | 'PURCHASE' | 'MANUAL';
+
+export interface ExpenseCategoryDto {
+  id: string;
+  name: string;
+  isSystem: boolean;
+}
+
+export interface CashTransactionDto {
+  id: string;
+  date: string;
+  type: CashTransactionTypeDto;
+  source: CashTransactionSourceDto;
+  sourceId: string | null;
+  description: string | null;
+  amount: string;
+  paymentMethod: PaymentMethodDto;
+  expenseCategoryId: string | null;
+  expenseCategory?: ExpenseCategoryDto | null;
+  isVoided: boolean;
+  user?: { id: string; name: string; email: string };
+  createdAt: string;
+}
+
+export interface CashboxBalanceDto {
+  total: string;
+  byMethod: {
+    CASH: string;
+    TRANSFER: string;
+    CARD: string;
+  };
+  income: string;
+  expense: string;
+}
+
+export interface ExpenseDto {
+  id: string;
+  number: string;
+  date: string;
+  categoryId: string;
+  category?: ExpenseCategoryDto;
+  amount: string;
+  paymentMethod: PaymentMethodDto;
+  description: string;
+  receiptUrl: string | null;
+  voidedAt: string | null;
+  voidedById: string | null;
+  user?: { id: string; name: string; email: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CompanySettingsDto {
+  id: string;
+  name: string;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  taxId: string | null;
+  logoUrl: string | null;
+  currency: string;
+  quotationFooter: string | null;
+  defaultValidityDays: number;
+  taxRate: string;
+  cardCommissionRate: string;
 }

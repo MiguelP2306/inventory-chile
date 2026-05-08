@@ -75,19 +75,26 @@ async function run() {
   }
   console.log(`[seed] ${baseCategories.length} categorías de producto verificadas`);
 
-  // 4. Categorías de gasto
-  const expenseCategories = [
-    'Arriendo',
-    'Transporte',
-    'Publicidad',
-    'Servicios',
-    'Sueldos',
-    'Otros',
+  // 4. Categorías de gasto. Las de "sistema" (IVA Compra, IVA Venta,
+  // Comisión Tarjeta) NO pueden eliminarse desde la UI porque la lógica
+  // automática las referencia por nombre.
+  const expenseCategories: Array<{ name: string; isSystem: boolean }> = [
+    { name: 'Arriendo', isSystem: false },
+    { name: 'Transporte', isSystem: false },
+    { name: 'Publicidad', isSystem: false },
+    { name: 'Servicios', isSystem: false },
+    { name: 'Sueldos', isSystem: false },
+    { name: 'Otros', isSystem: false },
+    { name: 'IVA Compra', isSystem: true },
+    { name: 'IVA Venta', isSystem: true },
+    { name: 'Comisión Tarjeta', isSystem: true },
   ];
-  for (const name of expenseCategories) {
+  for (const { name, isSystem } of expenseCategories) {
     const existing = await expenseCategoryRepo.findOne({ where: { name } });
     if (!existing) {
-      await expenseCategoryRepo.insert({ name });
+      await expenseCategoryRepo.insert({ name, isSystem });
+    } else if (existing.isSystem !== isSystem) {
+      await expenseCategoryRepo.update({ id: existing.id }, { isSystem });
     }
   }
   console.log(`[seed] ${expenseCategories.length} categorías de gasto verificadas`);
@@ -121,7 +128,9 @@ async function run() {
     );
   }
 
-  // 6. CompanySettings (singleton)
+  // 6. CompanySettings (singleton). taxRate y cardCommissionRate tienen
+  // defaults en la migración (0.1900 y 0.0250); los explicito acá para que
+  // el insert inicial tenga valores legibles si alguien lo audita.
   const existingSettings = await settingsRepo.find({ take: 1 });
   if (existingSettings.length === 0) {
     await settingsRepo.insert({
@@ -131,10 +140,12 @@ async function run() {
       email: null,
       taxId: null,
       logoUrl: null,
-      currency: 'USD',
+      currency: 'CLP',
       quotationFooter:
         'Esta cotización tiene una validez de 15 días desde su emisión.',
       defaultValidityDays: 15,
+      taxRate: '0.1900',
+      cardCommissionRate: '0.0250',
     });
     console.log('[seed] CompanySettings creado con valores placeholder');
   } else {

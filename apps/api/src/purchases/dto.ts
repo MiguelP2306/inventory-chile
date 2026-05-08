@@ -40,6 +40,17 @@ export class CreatePurchaseEntryDto {
   @IsString()
   notes?: string;
 
+  // URL relativa de la factura adjunta (devuelta por POST /uploads/purchase-invoice).
+  @IsOptional()
+  @IsString()
+  invoiceUrl?: string | null;
+
+  // Override del IVA calculado por el sistema. Si no se manda, se computa
+  // desde `total / (1 + companySettings.taxRate)`.
+  @IsOptional()
+  @IsNumberString({ no_symbols: false })
+  taxAmountOverride?: string;
+
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
