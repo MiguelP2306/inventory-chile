@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
+import { ProductThumbnail } from '@/components/product-thumbnail';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -308,16 +309,7 @@ export default function ProductosPage() {
                 <TableRow key={p.id} className="cursor-pointer">
                   <TableCell>
                     <Link href={`/productos/${p.id}`}>
-                      {cover ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={cover}
-                          alt=""
-                          className="h-10 w-10 rounded object-cover"
-                        />
-                      ) : (
-                        <div className="h-10 w-10 rounded bg-muted" />
-                      )}
+                      <ProductThumbnail src={cover} size={40} />
                     </Link>
                   </TableCell>
                   <TableCell className="font-mono text-xs">

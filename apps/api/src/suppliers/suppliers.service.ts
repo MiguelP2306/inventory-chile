@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, Not, Repository } from 'typeorm';
+import { dayRange } from '../common/date-range';
 import { rethrowFkAsConflict } from '../common/fk-error';
 import { normalizePhone } from '../common/validators/phone';
 import { normalizeRut } from '../common/validators/rut';
@@ -127,8 +128,7 @@ export class SuppliersService {
     const pageSize = query.pageSize ?? 20;
     const where: Record<string, unknown> = { supplierId };
     if (query.dateFrom || query.dateTo) {
-      const from = query.dateFrom ? new Date(query.dateFrom) : new Date('1900-01-01');
-      const to = query.dateTo ? new Date(query.dateTo) : new Date('2999-12-31');
+      const { from, to } = dayRange(query.dateFrom, query.dateTo);
       where.date = Between(from, to);
     }
     const [items, total] = await this.purchases.findAndCount({

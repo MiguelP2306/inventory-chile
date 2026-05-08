@@ -222,6 +222,10 @@ export function ProductForm({ product }: Props) {
     onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo eliminar')),
   });
 
+  function onInvalid() {
+    toast.error('Hay errores en los tabs marcados. Revisá los campos resaltados.');
+  }
+
   function onSubmit(values: FormValues) {
     if (mut.isPending) return;
     const input: ProductInput = {
@@ -255,8 +259,28 @@ export function ProductForm({ product }: Props) {
   const errors = form.formState.errors;
   const submitting = mut.isPending || form.formState.isSubmitting;
 
+  const errorsAsRecord = errors as unknown as Record<string, unknown>;
+  const errorCounts = {
+    datos: countTabErrors(errorsAsRecord, [
+      'sku',
+      'name',
+      'partNumber',
+      'barcode',
+      'universalCode',
+      'productKind',
+      'categoryId',
+      'brandId',
+      'location',
+      'description',
+      'isActive',
+    ]),
+    precios: countTabErrors(errorsAsRecord, ['cost', 'price', 'minStock', 'maxStock']),
+    compat: countArrayErrors(errors.fitments),
+    codigos: countArrayErrors(errors.compatibleCodes),
+  };
+
   return (
-    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+    <form onSubmit={form.handleSubmit(onSubmit, onInvalid)} className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">
           {product ? `Editar producto` : 'Nuevo producto'}
@@ -290,13 +314,21 @@ export function ProductForm({ product }: Props) {
 
       <Tabs defaultValue="datos" className="space-y-4">
         <TabsList>
-          <TabsTrigger value="datos">Datos</TabsTrigger>
-          <TabsTrigger value="precios">Precios y stock</TabsTrigger>
+          <TabsTrigger value="datos">
+            Datos
+            <ErrorBadge count={errorCounts.datos} />
+          </TabsTrigger>
+          <TabsTrigger value="precios">
+            Precios y stock
+            <ErrorBadge count={errorCounts.precios} />
+          </TabsTrigger>
           <TabsTrigger value="compat">
             Compatibilidad ({fitments.fields.length})
+            <ErrorBadge count={errorCounts.compat} />
           </TabsTrigger>
           <TabsTrigger value="codigos">
             Códigos ({codes.fields.length})
+            <ErrorBadge count={errorCounts.codigos} />
           </TabsTrigger>
           <TabsTrigger value="imagenes">
             Imágenes ({product ? (product.images?.length ?? 0) : pendingImages.length})
@@ -788,4 +820,45 @@ function Field({
       {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );
+}
+
+function ErrorBadge({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      aria-label={`${count} error${count === 1 ? '' : 'es'}`}
+      className="ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-[11px] font-semibold leading-none text-destructive-foreground"
+    >
+      {count}
+    </span>
+  );
+}
+
+function countTabErrors(
+  errors: Record<string, unknown>,
+  fields: string[],
+): number {
+  return fields.reduce((acc, f) => (errors[f] ? acc + 1 : acc), 0);
+}
+
+// Cuenta errores dentro de un FieldArray (cada índice puede tener errores en
+// distintas sub-claves; cuenta una unidad por fila con al menos un error).
+function countArrayErrors(arrayErrors: unknown): number {
+  if (!arrayErrors) return 0;
+  let total = 0;
+  if (Array.isArray(arrayErrors)) {
+    for (const row of arrayErrors) {
+      if (row && typeof row === 'object' && Object.keys(row).length > 0) total += 1;
+    }
+  }
+  // El error a nivel raíz (ej. el superRefine) suma 1 más si existe.
+  if (
+    typeof arrayErrors === 'object' &&
+    arrayErrors !== null &&
+    'root' in (arrayErrors as Record<string, unknown>) &&
+    (arrayErrors as { root?: unknown }).root
+  ) {
+    total += 1;
+  }
+  return total;
 }

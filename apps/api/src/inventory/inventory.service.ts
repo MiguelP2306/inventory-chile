@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { Between, DataSource, EntityManager, Repository } from 'typeorm';
+import { dayRange } from '../common/date-range';
 import {
   InventoryMovement,
   Product,
@@ -132,8 +133,7 @@ export class InventoryService {
     if (query.warehouseId) where.warehouseId = query.warehouseId;
     if (query.type) where.type = query.type;
     if (query.dateFrom || query.dateTo) {
-      const from = query.dateFrom ? new Date(query.dateFrom) : new Date('1900-01-01');
-      const to = query.dateTo ? new Date(query.dateTo) : new Date('2999-12-31');
+      const { from, to } = dayRange(query.dateFrom, query.dateTo);
       where.createdAt = Between(from, to);
     }
 

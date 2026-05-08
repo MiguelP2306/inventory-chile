@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Plus, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { ProductThumbnail } from '@/components/product-thumbnail';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -12,7 +13,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { quickSearchProducts } from '@/lib/catalog-api';
+import { listProducts, publicImageUrl } from '@/lib/catalog-api';
+import { formatCurrency } from '@/lib/format';
 import type { ProductDto } from '@inventory/shared';
 
 interface Props {
@@ -20,28 +22,47 @@ interface Props {
   buttonLabel?: string;
 }
 
+const PAGE_SIZE = 10;
+
 export function ProductPicker({ onPick, buttonLabel = 'Agregar producto' }: Props) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q.trim()), 200);
     return () => clearTimeout(t);
   }, [q]);
 
+  // Cuando cambia el término de búsqueda, vuelvo a la primera página.
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedQ]);
+
+  // Resetear estado al cerrar.
   useEffect(() => {
     if (!open) {
       setQ('');
       setDebouncedQ('');
+      setPage(1);
     }
   }, [open]);
 
   const results = useQuery({
-    queryKey: ['quick-search', debouncedQ],
-    queryFn: () => quickSearchProducts(debouncedQ, 20),
-    enabled: open && debouncedQ.length >= 1,
+    queryKey: ['product-picker', { q: debouncedQ, page }],
+    queryFn: () =>
+      listProducts({
+        q: debouncedQ || undefined,
+        page,
+        pageSize: PAGE_SIZE,
+      }),
+    enabled: open,
   });
+
+  const items = results.data?.items ?? [];
+  const total = results.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <>
@@ -50,7 +71,7 @@ export function ProductPicker({ onPick, buttonLabel = 'Agregar producto' }: Prop
         {buttonLabel}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Elegir producto</DialogTitle>
           </DialogHeader>
@@ -64,22 +85,20 @@ export function ProductPicker({ onPick, buttonLabel = 'Agregar producto' }: Prop
                 onChange={(e) => setQ(e.target.value)}
               />
             </div>
-            <div className="max-h-[300px] space-y-1 overflow-y-auto">
+            <div className="max-h-[420px] space-y-1 overflow-y-auto">
               {results.isLoading && (
                 <>
-                  {Array.from({ length: 4 }).map((_, i) => (
-                    <Skeleton key={i} className="h-12 w-full" />
+                  {Array.from({ length: PAGE_SIZE }).map((_, i) => (
+                    <Skeleton key={i} className="h-14 w-full" />
                   ))}
                 </>
               )}
-              {!results.isLoading &&
-                debouncedQ &&
-                (results.data?.length ?? 0) === 0 && (
-                  <p className="py-4 text-center text-sm text-muted-foreground">
-                    Sin resultados.
-                  </p>
-                )}
-              {results.data?.map((p) => (
+              {!results.isLoading && items.length === 0 && (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  {debouncedQ ? 'Sin resultados.' : 'No hay productos cargados.'}
+                </p>
+              )}
+              {items.map((p) => (
                 <button
                   key={p.id}
                   type="button"
@@ -87,27 +106,55 @@ export function ProductPicker({ onPick, buttonLabel = 'Agregar producto' }: Prop
                     onPick(p);
                     setOpen(false);
                   }}
-                  className="flex w-full items-center justify-between rounded-md border p-3 text-left transition-colors hover:bg-accent"
+                  className="flex w-full items-center gap-3 rounded-md border p-3 text-left transition-colors hover:bg-accent"
                 >
-                  <div>
-                    <div className="font-medium">{p.name}</div>
-                    <div className="text-xs text-muted-foreground">
+                  <ProductThumbnail
+                    src={publicImageUrl(p.coverUrl ?? null)}
+                    size={40}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium truncate">{p.name}</div>
+                    <div className="text-xs text-muted-foreground truncate">
                       {p.sku}
                       {p.brand?.name ? ` · ${p.brand.name}` : ''}
                       {p.category?.name ? ` · ${p.category.name}` : ''}
                     </div>
                   </div>
-                  <div className="text-sm text-muted-foreground">
-                    Costo ${p.cost} · Precio ${p.price}
+                  <div className="text-right text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                    <div>Costo {formatCurrency(p.cost)}</div>
+                    <div>Precio {formatCurrency(p.price)}</div>
                   </div>
                 </button>
               ))}
-              {!debouncedQ && (
-                <p className="py-4 text-center text-sm text-muted-foreground">
-                  Escribí al menos 1 carácter para buscar.
-                </p>
-              )}
             </div>
+
+            {total > 0 && (
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>
+                  {total} producto{total === 1 ? '' : 's'} · página {page} de {totalPages}
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1 || results.isFetching}
+                  >
+                    Anterior
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page >= totalPages || results.isFetching}
+                  >
+                    Siguiente
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
