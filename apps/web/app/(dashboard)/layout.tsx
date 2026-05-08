@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { LogoutButton } from '@/components/logout-button';
+import { OperationFab } from '@/components/operation-fab';
 import { QuickSearch } from '@/components/quick-search';
 import { Sidebar } from '@/components/sidebar';
 import { getCurrentUser } from '@/lib/server-api';
@@ -25,6 +26,7 @@ export default async function DashboardLayout({
         </header>
         <main className="flex-1 p-6">{children}</main>
       </div>
+      <OperationFab />
     </div>
   );
 }

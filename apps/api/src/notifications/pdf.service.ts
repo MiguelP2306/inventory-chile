@@ -1,0 +1,440 @@
+import { Injectable, Logger } from '@nestjs/common';
+import type {
+  PublicQuotationDto,
+  QuotationDto,
+  QuotationStatusDto,
+} from '@inventory/shared';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { CompanySettings } from '../database/entities';
+
+export type PdfFormat = 'letter' | 'thermal80';
+
+interface CompanyInfo {
+  name: string;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  taxId: string | null;
+  logoUrl: string | null;
+  quotationFooter: string | null;
+}
+
+interface CustomerInfo {
+  name: string;
+  taxId: string | null;
+  email: string | null;
+  phone: string | null;
+}
+
+interface QuotationItemLine {
+  code: string;
+  description: string;
+  qty: number;
+  unitPrice: string;
+  discount: string;
+  discountPercent: string | null;
+  subtotal: string;
+}
+
+interface PdfInput {
+  number: string;
+  date: string;
+  validUntil: string | null;
+  status: QuotationStatusDto;
+  subtotal: string;
+  taxAmount: string;
+  total: string;
+  customer: CustomerInfo;
+  items: QuotationItemLine[];
+  company: CompanyInfo;
+}
+
+@Injectable()
+export class PdfService {
+  private readonly logger = new Logger(PdfService.name);
+
+  async generate(input: PdfInput, format: PdfFormat = 'letter'): Promise<Buffer> {
+    if (format === 'thermal80') {
+      return this.generateThermal(input);
+    }
+    return this.generateLetter(input);
+  }
+
+  /**
+   * Helper para construir el input desde un QuotationDto + CompanySettings.
+   * Usado por el endpoint logueado.
+   */
+  fromQuotationDto(
+    q: QuotationDto,
+    settings: CompanySettings,
+  ): PdfInput {
+    return {
+      number: q.number,
+      date: q.date,
+      validUntil: q.validUntil,
+      status: q.status,
+      subtotal: q.subtotal,
+      taxAmount: q.taxAmount,
+      total: q.total,
+      customer: {
+        name: q.customerView.name,
+        taxId: q.customerView.taxId,
+        email: q.customerView.email,
+        phone: q.customerView.phone,
+      },
+      items: (q.items ?? []).map((it) => ({
+        code:
+          it.product?.partNumber ??
+          it.product?.sku ??
+          it.product?.universalCode ??
+          '',
+        description: it.product?.name ?? '',
+        qty: it.qty,
+        unitPrice: it.unitPrice,
+        discount: it.discount,
+        discountPercent: it.discountPercent,
+        subtotal: it.subtotal,
+      })),
+      company: {
+        name: settings.name,
+        address: settings.address,
+        phone: settings.phone,
+        email: settings.email,
+        taxId: settings.taxId,
+        logoUrl: settings.logoUrl,
+        quotationFooter: settings.quotationFooter,
+      },
+    };
+  }
+
+  fromPublicDto(p: PublicQuotationDto): PdfInput {
+    return {
+      number: p.number,
+      date: p.date,
+      validUntil: p.validUntil,
+      status: p.status,
+      subtotal: p.subtotal,
+      taxAmount: p.taxAmount,
+      total: p.total,
+      customer: p.customer,
+      items: p.items,
+      company: p.company,
+    };
+  }
+
+  private async generateLetter(input: PdfInput): Promise<Buffer> {
+    const doc = new jsPDF({ unit: 'pt', format: 'letter' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 40;
+    let y = margin;
+
+    if (input.company.logoUrl) {
+      try {
+        const dataUrl = await fetchAsDataUrl(input.company.logoUrl);
+        if (dataUrl) {
+          doc.addImage(dataUrl, 'PNG', margin, y, 80, 40);
+        }
+      } catch (err) {
+        this.logger.warn(`No se pudo cargar el logo: ${(err as Error).message}`);
+      }
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text(input.company.name, pageWidth - margin, y + 14, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    let rightY = y + 28;
+    if (input.company.taxId) {
+      doc.text(`RUT: ${input.company.taxId}`, pageWidth - margin, rightY, {
+        align: 'right',
+      });
+      rightY += 12;
+    }
+    if (input.company.address) {
+      doc.text(input.company.address, pageWidth - margin, rightY, {
+        align: 'right',
+      });
+      rightY += 12;
+    }
+    if (input.company.phone) {
+      doc.text(input.company.phone, pageWidth - margin, rightY, {
+        align: 'right',
+      });
+      rightY += 12;
+    }
+    if (input.company.email) {
+      doc.text(input.company.email, pageWidth - margin, rightY, {
+        align: 'right',
+      });
+      rightY += 12;
+    }
+
+    y = Math.max(y + 60, rightY) + 10;
+
+    doc.setDrawColor(200);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 18;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text(`Cotización ${input.number}`, margin, y);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    y += 16;
+    doc.text(`Fecha: ${formatDate(input.date)}`, margin, y);
+    if (input.validUntil) {
+      doc.text(
+        `Válida hasta: ${formatDate(input.validUntil)}`,
+        margin + 200,
+        y,
+      );
+    }
+    y += 14;
+    doc.text(`Estado: ${translateStatus(input.status)}`, margin, y);
+    y += 18;
+
+    // Cliente box
+    doc.setFont('helvetica', 'bold');
+    doc.text('Cliente', margin, y);
+    doc.setFont('helvetica', 'normal');
+    y += 14;
+    doc.text(input.customer.name || 'Sin especificar', margin, y);
+    y += 12;
+    if (input.customer.taxId) {
+      doc.text(`RUT: ${input.customer.taxId}`, margin, y);
+      y += 12;
+    }
+    if (input.customer.email) {
+      doc.text(input.customer.email, margin, y);
+      y += 12;
+    }
+    if (input.customer.phone) {
+      doc.text(input.customer.phone, margin, y);
+      y += 12;
+    }
+    y += 8;
+
+    autoTable(doc, {
+      startY: y,
+      head: [['Código', 'Descripción', 'Cant', 'P. Unit', 'Desc', 'Subtotal']],
+      body: input.items.map((it) => [
+        it.code,
+        it.description,
+        it.qty.toString(),
+        formatMoney(it.unitPrice),
+        it.discountPercent
+          ? `${parseFloat(it.discountPercent).toFixed(2)}%`
+          : formatMoney(it.discount),
+        formatMoney(it.subtotal),
+      ]),
+      styles: { fontSize: 9, cellPadding: 4 },
+      headStyles: { fillColor: [40, 40, 40] },
+      columnStyles: {
+        2: { halign: 'right' },
+        3: { halign: 'right' },
+        4: { halign: 'right' },
+        5: { halign: 'right' },
+      },
+      margin: { left: margin, right: margin },
+    });
+
+    // @ts-expect-error lastAutoTable es agregado por jspdf-autotable
+    const tableEnd = doc.lastAutoTable?.finalY ?? y;
+    let totalsY = tableEnd + 20;
+
+    const totalsX = pageWidth - margin - 200;
+    doc.setFontSize(10);
+    doc.text('Subtotal neto:', totalsX, totalsY);
+    doc.text(formatMoney(input.subtotal), pageWidth - margin, totalsY, {
+      align: 'right',
+    });
+    totalsY += 14;
+    doc.text('IVA:', totalsX, totalsY);
+    doc.text(formatMoney(input.taxAmount), pageWidth - margin, totalsY, {
+      align: 'right',
+    });
+    totalsY += 14;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.text('Total:', totalsX, totalsY);
+    doc.text(formatMoney(input.total), pageWidth - margin, totalsY, {
+      align: 'right',
+    });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+
+    if (input.company.quotationFooter) {
+      const footerY = doc.internal.pageSize.getHeight() - margin;
+      doc.text(input.company.quotationFooter, margin, footerY, {
+        maxWidth: pageWidth - margin * 2,
+      });
+    }
+
+    const arrayBuffer = doc.output('arraybuffer');
+    return Buffer.from(arrayBuffer);
+  }
+
+  private async generateThermal(input: PdfInput): Promise<Buffer> {
+    // 80 mm = ~226.77 pt; alto crece con el contenido. Empezamos con uno
+    // generoso y dejamos que jsPDF agregue páginas si hace falta.
+    const widthPt = 226.77;
+    const doc = new jsPDF({
+      unit: 'pt',
+      format: [widthPt, 800],
+    });
+    const margin = 8;
+    let y = margin + 6;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text(input.company.name, widthPt / 2, y, { align: 'center' });
+    y += 12;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    if (input.company.taxId) {
+      doc.text(`RUT: ${input.company.taxId}`, widthPt / 2, y, {
+        align: 'center',
+      });
+      y += 9;
+    }
+    if (input.company.address) {
+      doc.text(input.company.address, widthPt / 2, y, {
+        align: 'center',
+        maxWidth: widthPt - margin * 2,
+      });
+      y += 9;
+    }
+    if (input.company.phone) {
+      doc.text(input.company.phone, widthPt / 2, y, { align: 'center' });
+      y += 9;
+    }
+    y += 4;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text(`Cotización ${input.number}`, widthPt / 2, y, { align: 'center' });
+    y += 12;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.text(`Fecha: ${formatDate(input.date)}`, margin, y);
+    y += 9;
+    if (input.validUntil) {
+      doc.text(`Válida hasta: ${formatDate(input.validUntil)}`, margin, y);
+      y += 9;
+    }
+    y += 4;
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('Cliente:', margin, y);
+    y += 9;
+    doc.setFont('helvetica', 'normal');
+    doc.text(input.customer.name || 'Sin especificar', margin, y, {
+      maxWidth: widthPt - margin * 2,
+    });
+    y += 9;
+    if (input.customer.taxId) {
+      doc.text(`RUT: ${input.customer.taxId}`, margin, y);
+      y += 9;
+    }
+
+    autoTable(doc, {
+      startY: y + 4,
+      head: [['Cant', 'Descripción', 'Subtotal']],
+      body: input.items.map((it) => [
+        it.qty.toString(),
+        `${it.code ? it.code + ' · ' : ''}${it.description}`,
+        formatMoney(it.subtotal),
+      ]),
+      styles: { fontSize: 6, cellPadding: 2 },
+      headStyles: { fillColor: [40, 40, 40], fontSize: 6 },
+      columnStyles: {
+        0: { cellWidth: 20, halign: 'right' },
+        2: { cellWidth: 50, halign: 'right' },
+      },
+      margin: { left: margin, right: margin },
+      tableWidth: widthPt - margin * 2,
+    });
+
+    // @ts-expect-error lastAutoTable es agregado por jspdf-autotable
+    const tableEnd = doc.lastAutoTable?.finalY ?? y;
+    let totalsY = tableEnd + 8;
+
+    doc.setFontSize(7);
+    doc.text('Subtotal neto:', margin, totalsY);
+    doc.text(formatMoney(input.subtotal), widthPt - margin, totalsY, {
+      align: 'right',
+    });
+    totalsY += 9;
+    doc.text('IVA:', margin, totalsY);
+    doc.text(formatMoney(input.taxAmount), widthPt - margin, totalsY, {
+      align: 'right',
+    });
+    totalsY += 9;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.text('Total:', margin, totalsY);
+    doc.text(formatMoney(input.total), widthPt - margin, totalsY, {
+      align: 'right',
+    });
+    totalsY += 12;
+
+    if (input.company.quotationFooter) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6);
+      doc.text(input.company.quotationFooter, margin, totalsY, {
+        maxWidth: widthPt - margin * 2,
+      });
+    }
+
+    const arrayBuffer = doc.output('arraybuffer');
+    return Buffer.from(arrayBuffer);
+  }
+}
+
+function formatMoney(value: string): string {
+  const n = parseFloat(value);
+  if (!Number.isFinite(n)) return value;
+  return n.toLocaleString('es-CL', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('es-CL');
+}
+
+function translateStatus(s: QuotationStatusDto): string {
+  switch (s) {
+    case 'DRAFT':
+      return 'Borrador';
+    case 'SENT':
+      return 'Enviada';
+    case 'APPROVED':
+      return 'Aprobada';
+    case 'REJECTED':
+      return 'Rechazada';
+    case 'CONVERTED':
+      return 'Convertida en venta';
+    case 'EXPIRED':
+      return 'Vencida';
+    default:
+      return s;
+  }
+}
+
+async function fetchAsDataUrl(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    const mime = res.headers.get('content-type') ?? 'image/png';
+    return `data:${mime};base64,${buf.toString('base64')}`;
+  } catch {
+    return null;
+  }
+}

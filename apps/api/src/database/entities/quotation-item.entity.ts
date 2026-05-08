@@ -39,8 +39,14 @@ export class QuotationItem {
   @Column({ type: 'decimal', precision: 15, scale: 2 })
   unitPrice!: string;
 
+  // Descuento siempre se guarda como monto resuelto (en CLP). Si el operador
+  // ingresó como %, se calcula el monto y `discountPercent` recuerda el %
+  // original para imprimirlo en el PDF.
   @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
   discount!: string;
+
+  @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
+  discountPercent!: string | null;
 
   @Column({ type: 'decimal', precision: 15, scale: 2 })
   subtotal!: string;

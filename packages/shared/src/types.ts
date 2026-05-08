@@ -246,3 +246,115 @@ export interface CompanySettingsDto {
   taxRate: string;
   cardCommissionRate: string;
 }
+
+// ---------- Cotizaciones (Fase 6) ----------
+
+export type QuotationStatusDto =
+  | 'DRAFT'
+  | 'SENT'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'CONVERTED'
+  | 'EXPIRED';
+
+export interface QuotationItemDto {
+  id: string;
+  productId: string;
+  qty: number;
+  unitPrice: string;
+  discount: string;
+  // Si fue ingresado como porcentaje, queda persistido para imprimir en PDF.
+  discountPercent: string | null;
+  subtotal: string;
+  product?: {
+    id: string;
+    sku: string;
+    name: string;
+    partNumber: string | null;
+    universalCode: string | null;
+    description: string | null;
+  };
+}
+
+// Vista del cliente para la cotización: si es libre se llenan los snapshots,
+// si es del catálogo se popula `customer`. Nunca ambas a la vez.
+export interface QuotationCustomerView {
+  fromCatalog: boolean;
+  name: string;
+  taxId: string | null;
+  email: string | null;
+  phone: string | null;
+  customerId: string | null;
+}
+
+export interface QuotationDto {
+  id: string;
+  number: string;
+  customerId: string | null;
+  customer?: CustomerDto | null;
+  customerNameSnapshot: string | null;
+  customerPhoneSnapshot: string | null;
+  customerEmailSnapshot: string | null;
+  customerTaxIdSnapshot: string | null;
+  customerView: QuotationCustomerView;
+  date: string;
+  validUntil: string | null;
+  status: QuotationStatusDto;
+  subtotal: string;
+  taxAmount: string;
+  total: string;
+  notes: string | null;
+  publicToken: string;
+  publicUrl: string;
+  sentAt: string | null;
+  user?: { id: string; name: string; email: string };
+  items?: QuotationItemDto[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Detalle público de la cotización (sin datos del usuario interno ni notas).
+// Usado por GET /public/quotations/:token y por la pantalla pública del cliente.
+export interface PublicQuotationDto {
+  id: string;
+  number: string;
+  date: string;
+  validUntil: string | null;
+  status: QuotationStatusDto;
+  subtotal: string;
+  taxAmount: string;
+  total: string;
+  customer: {
+    name: string;
+    taxId: string | null;
+    email: string | null;
+    phone: string | null;
+  };
+  items: Array<{
+    code: string;
+    description: string;
+    qty: number;
+    unitPrice: string;
+    discount: string;
+    discountPercent: string | null;
+    subtotal: string;
+  }>;
+  company: {
+    name: string;
+    address: string | null;
+    phone: string | null;
+    email: string | null;
+    logoUrl: string | null;
+    taxId: string | null;
+    quotationFooter: string | null;
+  };
+  pdfUrl: string;
+}
+
+export interface QuotationSendResultDto {
+  status: QuotationStatusDto;
+  sentAt: string | null;
+  // Para WhatsApp es la URL `wa.me/...?text=...`. Para email es null
+  // (el envío ya se hizo server-side).
+  whatsappUrl?: string;
+}

@@ -17,8 +17,8 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 | — | **Refinamientos transversales** (post Fase 3): formato monetario, paginación universal, filtros en URL, FK errors claros, eliminar producto, unicidad RUT, validaciones extra | ✅ |
 | 4 | Clientes y proveedores (RUT chileno + catálogo de comunas + detalle de proveedor con tabs Datos+Compras) | ✅ |
 | 4B | Catálogo extendido: código universal + códigos compatibles + galería de fotos + ORIGINAL/ALTERNATIVO + uploads infrastructure | ✅ |
-| 5 | Caja, gastos, IVA, comisiones por tarjeta + factura adjunta en compras | pendiente |
-| 6 | Cotizaciones + modal venta/cotización + impresión 80mm/carta + WhatsApp/email | pendiente |
+| 5 | Caja, gastos, IVA, comisiones por tarjeta + factura adjunta en compras | ✅ |
+| 6 | Cotizaciones + modal venta/cotización + impresión 80mm/carta + WhatsApp/email | ✅ |
 | 7 | Ventas con caja integrada (selector de bodega + comisión tarjeta + impresión) | pendiente |
 | 7.5 | Multi-bodega + transferencias (flujo Mercado Libre Full manual) | pendiente |
 | 7.6 | Devoluciones + Garantías | pendiente |
@@ -413,6 +413,233 @@ Endpoints existentes ampliados:
 6. **Compra con IVA**: `/compras/nuevo` → Nueva entrada con 1 producto a $11.900 bruto. El panel muestra Total bruto $11.900, IVA $1.900 (auto), Subtotal neto $10.000. Subir factura PDF. Confirmar. La compra aparece en `/compras` con icono de factura. En `/caja` aparece un egreso (TRANSFER, source=Compra) por $11.900.
 7. **Override de IVA**: en /compras/nuevo editar el campo IVA a $1.901 → subtotal neto se ajusta automáticamente a $9.999 → confirmar → la compra guardada respeta esos valores.
 8. **Saldo de caja**: `/caja` arriba muestra el saldo total y por método. Filtrar por origen=Manual → solo gastos manuales. Filtrar fecha = hoy → cuadra con la actividad del día.
+
+---
+
+## Fase 6 — Cotizaciones y envío
+
+Bloque que digitaliza el flujo cotización → envío al cliente → conversión a venta. La cotización es el documento previo a la venta: precios y disponibilidad sin afectar stock todavía. Ahora es el `CashboxService` ya integrado el que cierra el ciclo en Fase 7 cuando la venta se confirme.
+
+### Decisiones de negocio acordadas
+
+| Tema | Decisión |
+| --- | --- |
+| Cliente | **Catálogo o libre**: el operador elige cliente del catálogo o llena nombre/teléfono/email/RUT a mano. **En modo libre TODOS los campos son opcionales** — la cotización se puede emitir sin ningún dato del cliente para flujo rápido. El email/teléfono se piden recién al enviar (ver "Envío con contacto on-the-fly" abajo). Schema: `customerId` nullable + columnas `customerNameSnapshot/PhoneSnapshot/EmailSnapshot/TaxIdSnapshot`. |
+| Flujo de UI | **Todo en modal** — el form de creación/edición vive en un `<Dialog>` que se abre desde el listado, el detalle o el **FAB global**. El operador nunca pierde el contexto de la pantalla en la que está. Las rutas `/cotizaciones/nueva` y `/cotizaciones/[id]/editar` redirigen al listado/detalle con `?new=1` / `?edit=1` para abrir el modal automáticamente (preserva los deep-links). |
+| FAB (Floating Action Button) | **Botón flotante global** en el dashboard layout (esquina inferior derecha, fixed). Visible en cualquier pantalla autenticada. Click → abre el modal "¿Qué querés crear?" → "Cotización" abre el `<QuotationFormDialog>` inline (sin navegar). "Venta" queda deshabilitada hasta Fase 7. Al guardar, toast con acción "Ver detalle". Oculto en login y en la vista pública `/p/...`. |
+| Estado inicial | **DRAFT siempre** al guardar. "Enviar por email/WhatsApp" la pasa a SENT y setea `sentAt`. |
+| Vigencia | `validUntil = date + companySettings.defaultValidityDays` (default 15). Cron diario 03:00 marca EXPIRED las SENT/APPROVED con `validUntil < hoy`. |
+| Edición | **Libre hasta CONVERTED**. Solo CONVERTED y EXPIRED son inmutables (PATCH devuelve 409). |
+| Eliminar | Solo si DRAFT. SENT/APPROVED/etc devuelven 409 ("anulá o convertí, no borres"). |
+| Stock | **No se reserva** al cotizar. Stock baja recién al confirmar venta (Fase 7). |
+| PDF | Generado **server-side** con `jspdf` + `jspdf-autotable`. Formato Carta default + selector "Imprimir 80mm". Mismo PDF para web, email adjunto y link público. |
+| Email | **Resend** con plantilla HTML branded simple + PDF adjunto. En dev usa `cotizaciones@onresend.dev`; en Fase 12 se cambia al dominio real verificado. |
+| WhatsApp | **`wa.me`** con texto pre-llenado: «Hola {nombre}, te envío la cotización {número} por un total de {total}. La podés ver y descargar acá: {publicUrl}». El backend devuelve la URL `wa.me`, el frontend la abre en una nueva pestaña. (Cloud API de Meta queda como evolución para enviar adjuntos nativos.) |
+| Link público | URL `/p/cotizacion/:token` sin auth. Token expira el mismo día que `validUntil` — después el PDF público devuelve 410 Gone. La página del detalle igual se ve con badge "Vencida". |
+| Convertir a venta | El endpoint `POST /quotations/:id/convert` devuelve un `prefill` con cliente + items + totales. El frontend redirige a `/ventas/nueva?fromQuotation=ID`. La cotización pasa a CONVERTED **solo cuando la venta se confirme** en Fase 7 (en Fase 6 hay un placeholder). |
+| Descuentos | **Por línea**, monto o %. La columna `quotation_items.discount` guarda el monto resuelto; `discountPercent` (nullable) recuerda si fue ingresado como % para imprimirlo así. Sin descuento global. |
+| Modal entrada | En Fase 6 hay un modal "Venta o Cotización" con la opción "Venta" deshabilitada (badge "Próximamente"). En Fase 7 se habilita. |
+| Estados APPROVED/REJECTED | **Botones manuales en el detalle interno**. Sin botones en el link público — el operador habla con el cliente y marca el estado a mano. |
+
+### Modelo de datos (cambios)
+
+```text
+Quotation (ampliada)
+   + customerId            char(36) NULL              -- ahora nullable (cliente libre)
+   + customerNameSnapshot  varchar(200) NULL
+   + customerPhoneSnapshot varchar(40) NULL
+   + customerEmailSnapshot varchar(200) NULL
+   + customerTaxIdSnapshot varchar(40) NULL
+   + subtotal              decimal(15,2) DEFAULT 0    -- neto sin IVA
+   + taxAmount             decimal(15,2) DEFAULT 0    -- IVA descompuesto
+   + publicToken           varchar(64) NOT NULL UNIQUE
+   + sentAt                datetime(6) NULL
+
+QuotationItem (ampliada)
+   + discountPercent       decimal(5,2) NULL          -- recuerda si descuento se ingresó como %
+
+Counters (preexistente)
+   -- usa kind='QUOTATION' para correlativos COT-AAAA-NNNNN
+```
+
+### Reglas críticas de integridad
+
+- **Cliente XOR snapshot**: o `customerId` está presente o `customerNameSnapshot` está presente, nunca ambos a la vez. La validación vive en el servicio (no DTO) y se enforce en `create` y `update`. Cuando el operador cambia de catálogo a libre o viceversa, el servicio limpia el campo opuesto.
+- **Cálculos**: precios y descuentos son **brutos** (incluyen IVA, mismo enfoque que Fase 5). El backend descompone:
+  - `lineGross = qty * unitPrice - discount`
+  - `subtotal_neto = sum(lineGross / (1 + taxRate))`
+  - `taxAmount = sum(lineGross - lineGross/(1+taxRate))`
+  - `total = sum(lineGross)`
+  - Redondeo HALF_UP a 2 decimales por línea y al total.
+- **Token público**: generado con `randomUUID().replace(/-/g,'')`. Se persiste en `publicToken` y se sirve sin auth vía `@Public()`. La URL completa la arma el backend con `PUBLIC_BASE_URL` env var + `/p/cotizacion/{token}`.
+- **Envío de email**: el backend llama a Resend **antes** de marcar `sentAt`. Si Resend falla → 502 BadGateway, el estado no cambia. Esto evita marcar como enviado algo que nunca llegó.
+- **Envío por WhatsApp**: el endpoint NO envía nada por sí mismo — solo arma la URL `wa.me` y la marca como SENT. Si Cloud API de Meta entra en una fase futura, el wrapper queda intacto y se agrega un canal adicional.
+- **Cron de auto-expiración**: `@Cron('0 3 * * *')` en `QuotationsCronService`. Idempotente — corre cualquier número de veces sin efectos colaterales. Loguea cuántas marcó.
+- **Edición de items**: estrategia replace (mismo patrón que fitments en Fase 2 y compatibles en Fase 4B). El service borra todos los items existentes e inserta los nuevos en una transacción.
+
+### Migración aplicada
+
+[`1778331000000-QuotationsPhase6.ts`](apps/api/src/database/migrations/1778331000000-QuotationsPhase6.ts):
+
+1. Drop FK `FK_116e4084cf9a95beea7e502ac0d` sobre `quotations.customerId`.
+2. `MODIFY` `customerId` a NULLABLE.
+3. Re-add FK `FK_quotations_customer` (ON DELETE RESTRICT, igual que antes).
+4. Agrega `customerNameSnapshot`, `customerPhoneSnapshot`, `customerEmailSnapshot`, `customerTaxIdSnapshot` (todas varchar nullable).
+5. Agrega `subtotal`, `taxAmount` (decimal 15,2 default 0).
+6. Agrega `publicToken` (varchar 64), backfillea con `REPLACE(UUID(),'-','')` para filas existentes, lo vuelve NOT NULL, agrega índice único.
+7. Agrega `sentAt` (datetime nullable).
+8. Agrega `quotation_items.discountPercent` (decimal 5,2 nullable).
+
+### Endpoints nuevos
+
+| Método | Ruta | Para qué sirve |
+| --- | --- | --- |
+| `GET` | `/api/quotations` | Listado paginado con filtros (`status`, `customerId`, `dateFrom/To`, `q`, `page`, `pageSize`). |
+| `GET` | `/api/quotations/:id` | Detalle con items + customer + product. |
+| `POST` | `/api/quotations` | Crear (DRAFT). Asigna `number = COT-AAAA-NNNNN` vía `CountersService`. Genera `publicToken`. Calcula `validUntil` si no viene. |
+| `PATCH` | `/api/quotations/:id` | Editar — bloquea si CONVERTED/EXPIRED. Reemplaza items en transacción. |
+| `DELETE` | `/api/quotations/:id` | Solo si DRAFT. |
+| `POST` | `/api/quotations/:id/approve` | Pasa a APPROVED. |
+| `POST` | `/api/quotations/:id/reject` | Pasa a REJECTED. Body `{ notes? }` para guardar motivo. |
+| `POST` | `/api/quotations/:id/convert` | Devuelve `{ prefill: {...} }` para que el form de venta (Fase 7) prellene. **No** crea Sale ni cambia estado en Fase 6. |
+| `POST` | `/api/quotations/:id/send/whatsapp` | Body `{ to? }`. Devuelve `{ whatsappUrl, status, sentAt }`. Marca SENT. Si `to` viene y la cot es de cliente libre, **persiste el snapshot del teléfono** (próximo envío no lo vuelve a pedir). |
+| `POST` | `/api/quotations/:id/send/email` | Body `{ to? }`. Envía con Resend (HTML + PDF adjunto). Marca SENT solo si el envío fue OK. 502 si falla. Si `to` viene y la cot es de cliente libre, **persiste el snapshot del email**. |
+| `GET` | `/api/quotations/:id/pdf?format=letter\|thermal80` | PDF binario (Content-Type application/pdf, inline). |
+| `GET` | `/api/public/quotations/:token` | **Sin auth.** Detalle público (`PublicQuotationDto`). 404 si token inválido. |
+| `GET` | `/api/public/quotations/:token/pdf?format=letter\|thermal80` | **Sin auth.** PDF binario. 410 Gone si `validUntil < hoy`. |
+
+### Pantallas
+
+| Ruta | Descripción |
+| --- | --- |
+| [`/cotizaciones`](apps/web/app/(dashboard)/cotizaciones/page.tsx) | Listado paginado con filtros URL (status / fecha / búsqueda libre). Badges de color por estado. Botón "Nueva cotización" abre el `<QuotationFormDialog>` directamente (modal). Cliente sin nombre se muestra como "Sin cliente". Soporta `?new=1` para abrir el modal desde un deep-link. |
+| [`/cotizaciones/[id]`](apps/web/app/(dashboard)/cotizaciones/[id]/page.tsx) | Detalle con todas las acciones según estado. **El botón "Editar" abre el modal `<QuotationFormDialog>` en la misma pantalla** (no navega). "Enviar email"/"Enviar WhatsApp" envían directo si el cliente tiene contacto cargado, o abren el `<SendContactDialog>` para pedirlo si no. Soporta `?edit=1` para abrir el modal automáticamente. |
+| [`/cotizaciones/nueva`](apps/web/app/(dashboard)/cotizaciones/nueva/page.tsx) | **Redirect** a `/cotizaciones?new=1` — preserva deep-links viejos pero ahora el form vive en modal. |
+| [`/cotizaciones/[id]/editar`](apps/web/app/(dashboard)/cotizaciones/[id]/editar/page.tsx) | **Redirect** a `/cotizaciones/[id]?edit=1`. |
+| [`/p/cotizacion/[token]`](apps/web/app/p/cotizacion/[token]/page.tsx) | **Vista pública sin auth ni sidebar.** Logo, datos empresa, tabla de items, totales, footer, botón "Descargar PDF". Badge "Vencida" si está EXPIRED. |
+| [`/ventas/nueva`](apps/web/app/(dashboard)/ventas/nueva/page.tsx) | Placeholder Fase 7 que muestra el prefill de la cotización cuando llega `?fromQuotation=ID`. |
+
+### Componentes clave
+
+- [`<QuotationFormDialog>`](apps/web/components/forms/quotation-form-dialog.tsx) — wrapper del form con `<Dialog>` ancho (max-w-5xl). Usado tanto desde el listado (`mode='create'`) como desde el detalle (`mode='edit'`). El listado y el detalle controlan el `open/onOpenChange` y reciben el `onSaved` para invalidar las queries y cerrar.
+- [`<QuotationForm>`](apps/web/components/forms/quotation-form.tsx) — el form puro con tabs Cliente / Items / Notas. Acepta `embedded` para no renderizar el header propio (el Dialog ya tiene el suyo). Acepta `onSuccess`/`onCancel` para que el caller controle la navegación. **En modo "Cliente libre" todos los campos son opcionales** — sin nombre, sin email, sin teléfono, sin RUT. La cotización se puede crear con solo los items.
+- [`<SendContactDialog>`](apps/web/components/quotations/send-contact-dialog.tsx) — dialog reusable que pide email o teléfono según `channel`. Devuelve el valor por `onConfirm(to)`. El detalle lo abre cuando el operador hace click en "Enviar email"/"Enviar WhatsApp" y la cotización no tiene contacto cargado. Backend persiste el snapshot al recibir el `to`.
+- [`<OperationFab>`](apps/web/components/operation-fab.tsx) — **FAB global** en el dashboard layout. Posición fixed bottom-right, círculo con ícono Plus, z-40, visible desde cualquier pantalla autenticada. Click → abre `<OperationModal>` con callback `onPickQuotation` que abre directamente el `<QuotationFormDialog>` inline (sin navegar). Al guardar, muestra toast con acción "Ver detalle" para navegar opcionalmente al detalle.
+- [`<OperationModal>`](apps/web/components/operation-modal.tsx) — modal "¿Qué querés crear?" con 2 opciones (Cotización / Venta). Acepta props opcionales `onPickQuotation?` y `onPickSale?`: si vienen, llama el callback en lugar de navegar. Sin callbacks, hace `router.push('/cotizaciones?new=1')`. La opción "Venta" queda deshabilitada (badge "Próximamente") hasta que Fase 7 agregue el `onPickSale` correspondiente al FAB.
+
+### Patrones reutilizables (para fases siguientes)
+
+- **`CountersService.nextNumber('QUOTATION', year)`** — patrón de correlativo replicable para Sales (`SALE`) y Dispatch (`DISPATCH`) en Fases 7 y 7.7.
+- **Cliente catálogo XOR snapshot** — mismo patrón sirve para Sales si en algún momento se quiere permitir venta a cliente libre. La validación vive en el service (`if (customerId && snapshot) throw ...`).
+- **`PdfService.generate(dto, settings, format)`** — fácilmente extensible. Para nota de venta y guía de despacho (Fases 7 y 7.7) se agregan métodos `generateSale()` / `generateDispatchNote()` con el mismo patrón.
+- **`EmailService.sendQuotation()` / `WhatsappUtil.buildQuotationMessage()`** — wrappers reusables. Cuando llegue Sale en Fase 7, se replica como `sendSaleConfirmation` y `buildSaleMessage`.
+- **Endpoints públicos con `@Public()` + token firmado** — patrón aplicable a recibos de venta y guías de despacho públicas. La estrategia "expira con `validUntil`" no aplica a venta (siempre vigente), pero el patrón del controller queda igual.
+- **Cron con `@nestjs/schedule`** — `ScheduleModule.forRoot()` ya está en `app.module.ts`. Próximos crons (limpieza de uploads huérfanos, reportes nocturnos) se agregan con un service nuevo y `@Cron(...)`.
+
+### Variables de entorno nuevas
+
+```env
+# Email transaccional (Resend) — en dev podés dejar la key vacía, el envío
+# fallará con un mensaje claro hasta que se configure.
+RESEND_API_KEY=
+EMAIL_FROM=cotizaciones@onresend.dev
+
+# URL pública del frontend — usada para armar links que se mandan por
+# email/WhatsApp. En producción apuntar al dominio real.
+PUBLIC_BASE_URL=http://localhost:3000
+```
+
+### Troubleshooting — `ERR_SSL_PROTOCOL_ERROR` al abrir el link en Chrome
+
+Cuando se prueba en local y se hace click en el link de la cotización (el que va por WhatsApp o email apuntando a `http://localhost:3000/p/cotizacion/...`), **Chrome lo upgradea automáticamente a `https://localhost:3000/...`** y como el dev server no tiene SSL devuelve `ERR_SSL_PROTOCOL_ERROR` ("Este sitio no puede proporcionar una conexión segura").
+
+Esto pasa por:
+
+- **Chrome HTTPS-First Mode** (activo por default desde Chrome 124) — fuerza https en cualquier URL.
+- **HSTS guardado para `localhost`** — si en algún proyecto anterior visitaste `https://localhost:XXXX`, Chrome se acuerda y aplica HSTS.
+
+**Solución manual rápida**: editar la URL en la barra de direcciones del navegador y **cambiar `https://` por `http://`**, luego enter. La página carga normal.
+
+**Limpiar HSTS de localhost en Chrome** (deja de pasar a futuro):
+
+1. Abrir `chrome://net-internals/#hsts`
+2. En **"Delete domain security policies"**, escribir `localhost` → **Delete**
+3. Cerrar y reabrir la pestaña con el link
+
+**O usar Firefox / Safari** que no fuerzan https en `localhost`.
+
+Cuando se haga el deploy de producción (Fase 12) con un dominio real (ej. `https://cotizaciones.tu-dominio.cl`), este problema desaparece — `PUBLIC_BASE_URL` apunta al dominio https real y Chrome no necesita upgradear nada.
+
+### Verificación end-to-end
+
+1. **Migración**: `./run.sh db:migrate` aplica `QuotationsPhase61778331000000`. `quotations.customerId` queda NULL-able, `publicToken` único en todas las filas.
+2. **Crear cotización (cliente del catálogo)**: `/cotizaciones/nueva` → tab Cliente → seleccionar uno existente → tab Items → agregar 2 productos con cantidades distintas → un descuento como % en uno → Guardar borrador. Aparece en `/cotizaciones` con número `COT-2026-00001`, estado **DRAFT**, total calculado bruto correcto.
+3. **Crear cotización (cliente libre)**: `/cotizaciones/nueva` → toggle "Cliente libre" → llenar solo nombre + teléfono → 1 ítem → Guardar borrador. Listado lo muestra con el nombre snapshot.
+4. **Editar**: abrir el detalle → "Editar" → cambiar cantidad → Guardar borrador. Total se recalcula.
+5. **Imprimir Carta**: detalle → "Imprimir Carta" → abre el PDF en pestaña nueva con tabla y totales legibles.
+6. **Imprimir 80mm**: detalle → "Imprimir 80mm" → PDF más angosto, mismo contenido condensado.
+7. **Link público**: detalle → "Copiar link público" → pegar en navegador en sesión de incógnito → muestra la cotización sin sidebar ni auth, con botón "Descargar PDF".
+8. **Enviar por WhatsApp**: cliente libre con teléfono `+56911223344` → "Enviar por WhatsApp" → abre `wa.me/56911223344?text=...` con el mensaje pre-llenado. Cotización pasa a **SENT**.
+8b. **Enviar por WhatsApp sin teléfono cargado** (flujo rápido): crear cotización libre sin nombre/teléfono → en el detalle hacer click en "Enviar por WhatsApp" → se abre el `<SendContactDialog>` pidiendo el teléfono → ingresar `+56911223344` → confirmar. Backend persiste el teléfono en `customerPhoneSnapshot` y abre `wa.me/...`. La próxima vez no lo vuelve a pedir.
+9. **Enviar por email** (requiere `RESEND_API_KEY` configurada): cliente con email → "Enviar por email" → llega el email con PDF adjunto + link al detalle público. Cotización pasa a SENT.
+9b. **Enviar por email sin email cargado**: igual al 8b pero pide el email en el dialog. Persistido en `customerEmailSnapshot`.
+10. **Aprobar**: cotización en SENT → "Marcar aprobada" → estado **APPROVED**.
+11. **Rechazar**: SENT → "Marcar rechazada" → dialog con motivo opcional → estado **REJECTED**, motivo guardado en `notes`.
+12. **Convertir a venta**: APPROVED → "Convertir a venta" → redirige a `/ventas/nueva?fromQuotation=ID` y muestra el prefill (placeholder Fase 7). La cotización **no** pasa a CONVERTED todavía (eso es en Fase 7 al confirmar la venta).
+13. **Auto-expirar**: setear manualmente una cotización SENT con `validUntil = ayer` → ejecutar `expireOverdue()` (o esperar al cron de las 03:00) → estado **EXPIRED**. El link público sigue mostrando la cotización con badge "Vencida". El PDF público devuelve 410.
+14. **Bloqueo de edición**: intentar editar una CONVERTED o EXPIRED → mensaje "Esta cotización no se puede editar" + botón volver.
+15. **Eliminar**: solo cotizaciones DRAFT muestran el botón "Eliminar" — confirm dialog → desaparecen del listado. SENT/etc no permiten borrado (devuelve 409).
+16. **Crear cotización rápida sin cliente**: listado → "Nueva cotización" → modal → toggle "Cliente libre" → **dejar todos los campos del cliente vacíos** → tab Items → agregar 1 producto → "Guardar borrador". Se crea la cotización con el label "Sin cliente" en el listado. Después se puede enviar por email/WhatsApp ingresando el contacto on-the-fly (ver pasos 8b/9b).
+17. **Editar desde el modal sin perder contexto**: estando en `/cotizaciones` o `/cotizaciones/[id]`, click en "Editar" → se abre el modal `<QuotationFormDialog>` sobre la pantalla actual → al guardar se cierra el modal y la pantalla se refresca sin navegación.
+18. **FAB global**: estando en cualquier pantalla del dashboard (ej. `/inventario`, `/clientes`, `/caja`), click en el botón flotante azul en la esquina inferior derecha → abre el modal "¿Qué querés crear?" → click en "Cotización" → abre el `<QuotationFormDialog>` sin sacar al operador de la pantalla actual → guardar → toast "Cotización COT-2026-00042 creada" con acción "Ver detalle" para navegar opcionalmente. El operador queda donde estaba.
+
+### Resumen de lo realizado
+
+**Documentación**
+
+- PLAN.md y README.md marcan Fase 5 como ✅ y Fase 6 como ✅. PLAN.md tiene la sección Fase 6 reescrita con las 17 decisiones confirmadas (#32–#48 en la tabla). README.md tiene una sección completa "Fase 6 — Cotizaciones y envío" con modelo de datos, endpoints, pantallas, patrones reusables, env vars y 15 pasos de verificación end-to-end.
+
+**Backend** ([apps/api](apps/api/))
+
+- Migración [`1778331000000-QuotationsPhase6.ts`](apps/api/src/database/migrations/1778331000000-QuotationsPhase6.ts): `customerId` nullable, snapshots cliente libre, `subtotal/taxAmount/publicToken/sentAt`, `discountPercent` en items.
+- Entidades actualizadas con todos los campos.
+- Módulo [`quotations`](apps/api/src/quotations/) completo: service + controller + public controller + cron + dto. Cálculos brutos→netos con redondeo HALF_UP, correlativo `COT-AAAA-NNNNN` vía `CountersService`, validación cliente XOR snapshot.
+- Módulo [`notifications`](apps/api/src/notifications/): `EmailService` (Resend), `PdfService` (jsPDF + jspdf-autotable, formatos Carta y 80mm), `whatsapp.util.ts`.
+- `ScheduleModule.forRoot()` + cron `@Cron('0 3 * * *')` para auto-expirar SENT/APPROVED.
+- `.env.example` con `RESEND_API_KEY`, `EMAIL_FROM`, `PUBLIC_BASE_URL`.
+
+**Shared** ([packages/shared](packages/shared/))
+
+- Nuevos tipos: `QuotationDto`, `QuotationItemDto`, `QuotationCustomerView`, `PublicQuotationDto`, `QuotationStatusDto`, `QuotationSendResultDto`.
+
+**Refactor posterior — flujo modal y cliente libre opcional** (mayo 2026)
+
+A pedido del cliente: toda la creación y edición de cotizaciones ahora vive en un **modal** para no sacar al operador de la pantalla en la que está, y en modo "cliente libre" **todos los campos del cliente son opcionales** — el email/teléfono se piden recién al enviar.
+
+- Backend (service + controller): aflojada la validación cliente XOR snapshot — solo se prohíbe tener ambos a la vez (cero datos del cliente está OK). `POST /quotations/:id/send/email` y `/send/whatsapp` aceptan `{ to? }` opcional; si viene y la cot es de cliente libre, se persiste en el snapshot correspondiente.
+- Frontend nuevo: [`<QuotationFormDialog>`](apps/web/components/forms/quotation-form-dialog.tsx) (wrapper Dialog ancho), [`<SendContactDialog>`](apps/web/components/quotations/send-contact-dialog.tsx) (pide email/teléfono al envío). El form acepta `embedded`, `onSuccess`, `onCancel`. Las páginas `/cotizaciones/nueva` y `/cotizaciones/[id]/editar` redirigen al listado/detalle con `?new=1` / `?edit=1` para abrir el modal automáticamente.
+- FAB global: [`<OperationFab>`](apps/web/components/operation-fab.tsx) en el dashboard layout. Permite crear cotizaciones desde cualquier pantalla sin perder contexto. `OperationModal` refactorizado para aceptar callbacks (`onPickQuotation` / `onPickSale`) en lugar de siempre navegar — esto habilita el flujo inline del FAB. Cuando Fase 7 entre, basta con agregar `onPickSale` al FAB para que también abra el form de venta inline.
+
+**Frontend** ([apps/web](apps/web/))
+
+- API client [`lib/quotations-api.ts`](apps/web/lib/quotations-api.ts) — `sendEmail(id, to?)` y `sendWhatsapp(id, to?)` aceptan destino opcional.
+- Form [`components/forms/quotation-form.tsx`](apps/web/components/forms/quotation-form.tsx): tabs Cliente/Items/Notas, toggle catálogo↔libre **con todos los campos opcionales**, combobox de cliente, ProductPicker reusado, descuento $ o %, totales en vivo, "Guardar borrador" + dropdown "Guardar y enviar". Soporta `embedded` para usarse dentro del Dialog.
+- Pantallas: [`/cotizaciones`](apps/web/app/(dashboard)/cotizaciones/page.tsx) (listado), [`/cotizaciones/nueva`](apps/web/app/(dashboard)/cotizaciones/nueva/page.tsx), [`/cotizaciones/[id]`](apps/web/app/(dashboard)/cotizaciones/[id]/page.tsx) (detalle con todas las acciones por estado), [`/cotizaciones/[id]/editar`](apps/web/app/(dashboard)/cotizaciones/[id]/editar/page.tsx), [`/p/cotizacion/[token]`](apps/web/app/p/cotizacion/[token]/page.tsx) (vista pública sin auth/sidebar), [`/ventas/nueva`](apps/web/app/(dashboard)/ventas/nueva/page.tsx) (placeholder Fase 7 con prefill).
+- [`components/operation-modal.tsx`](apps/web/components/operation-modal.tsx): modal "Cotización vs Venta" con Venta deshabilitada.
+- [`components/quotation-status-badge.tsx`](apps/web/components/quotation-status-badge.tsx) reusable.
+- Componentes UI shadcn nuevos: `textarea.tsx`, `popover.tsx`.
+- Sidebar con item "Cotizaciones" en sección Operación (icono `ClipboardList`).
+
+**Verificación**
+
+- `pnpm --filter @inventory/shared build` ✅
+- `pnpm --filter @inventory/api typecheck` ✅
+- `pnpm --filter @inventory/web typecheck` ✅
+- Migración aplicable (`db:migrate` corrió OK durante el desarrollo).
+
+**Pendiente para usar en producción de la fase**
+
+- Configurar `RESEND_API_KEY` en `.env.local` para enviar emails reales — sin la key, todo lo demás funciona y el envío por WhatsApp arma `wa.me` sin depender de Resend.
 
 ---
 
@@ -1333,6 +1560,23 @@ Si el admin ya existe, **el seed no lo recrea** — borralo manualmente primero 
 | 29 | Edición de gastos | 5 | ✅ Libre en mes actual; anular con compensación si es anterior |
 | 30 | Backfill de compras existentes en caja | 5 | ✅ Automático e idempotente en la migración |
 | 31 | IVA en compras (calc auto u override) | 5 | ✅ Auto-calculado, override opcional |
+| 32 | Cliente en cotización: catálogo o libre | 6 | ✅ Libre permitido — `customerId` nullable + columnas snapshot |
+| 33 | Estado inicial al guardar cotización | 6 | ✅ DRAFT siempre + botón separado "Enviar" la pasa a SENT |
+| 34 | Generación de PDF para email/WhatsApp | 6 | ✅ `jspdf` + `jspdf-autotable` server-side. WhatsApp envía link al PDF público |
+| 35 | Vigencia (validUntil) y auto-expiración | 6 | ✅ 15 días default + cron diario marca EXPIRED |
+| 36 | Reserva de stock al cotizar | 6 | ✅ No se reserva. Stock baja solo al confirmar venta |
+| 37 | Edición de cotización después de SENT | 6 | ✅ Editable libremente hasta CONVERTED |
+| 38 | "Convertir a venta" — flujo | 6/7 | ✅ Abre `/ventas/nueva?fromQuotation=<id>` con form prellenado |
+| 39 | Vigencia del link público | 6 | ✅ Token expira = `validUntil`. Después 410 Gone |
+| 40 | Formato de impresión default | 6 | ✅ Carta default + selector "Imprimir 80mm" |
+| 41 | Descuentos en cotización | 6 | ✅ Por línea (monto o %), sin descuento global |
+| 42 | Plantilla mensaje WhatsApp | 6 | ✅ Saludo + número cot + total + link al PDF |
+| 43 | Plantilla email | 6 | ✅ HTML simple branded + PDF adjunto |
+| 44 | Resend — dominio verificado | 6/12 | ✅ Dev (`onresend.dev`) en Fase 6, dominio real en Fase 12 |
+| 45 | Modal "Venta o Cotización" en Fase 6 | 6 | ✅ Implementado con opción "Venta" deshabilitada hasta Fase 7 |
+| 46 | Sidebar — ubicación de Cotizaciones | 6 | ✅ Sección "Operación" → "Cotizaciones" |
+| 47 | Transición APPROVED / REJECTED | 6 | ✅ Botones manuales en el detalle interno |
+| 48 | Columnas del PDF de cotización | 6 | ✅ Código + Descripción + Cant + P.Unit + Desc + Subtotal |
 
 ---
 
@@ -1342,9 +1586,9 @@ Cada fase es un PR independiente con verificación end-to-end al cierre. Ver [PL
 
 **Fase 5:** ✅ Caja, gastos, IVA y comisiones — ver sección "Fase 5" arriba.
 
-**Fase 6 (siguiente):** Cotizaciones + modal "venta o cotización" + impresión 80mm/carta + WhatsApp/email. Reusa `CountersService` con `kind=QUOTATION` para correlativos `COT-AAAA-NNNNN`.
+**Fase 6:** ✅ Cotizaciones + modal "venta o cotización" + impresión 80mm/Carta + WhatsApp/email — ver sección "Fase 6" arriba.
 
-**Fase 7:** Ventas con caja integrada, selector de bodega, comisión tarjeta automática, impresión 80mm/carta.
+**Fase 7 (siguiente):** Ventas con caja integrada, selector de bodega, comisión tarjeta automática, impresión 80mm/Carta. Habilita la opción "Venta" del modal y reemplaza el placeholder de `/ventas/nueva`. La conversión cotización → venta queda funcional al confirmar la venta (cotización pasa a CONVERTED + items consumen stock + caja registra ingreso).
 
 **Fases 7.5 / 7.6 / 7.7:** Multi-bodega + transferencias (flujo Mercado Libre Full); Devoluciones (suman stock) y Garantías (no afectan stock); Guía de despacho con número correlativo.
 

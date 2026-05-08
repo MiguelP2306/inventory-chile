@@ -23,13 +23,28 @@ export class Quotation {
   @Column({ type: 'varchar', length: 40 })
   number!: string;
 
-  @ManyToOne(() => Customer, { onDelete: 'RESTRICT', nullable: false })
+  // customerId nullable: permite cliente libre con datos en columnas snapshot.
+  @ManyToOne(() => Customer, { onDelete: 'RESTRICT', nullable: true })
   @JoinColumn({ name: 'customerId' })
-  customer?: Customer;
+  customer?: Customer | null;
 
   @Index('idx_quotations_customer')
-  @Column({ type: 'char', length: 36 })
-  customerId!: string;
+  @Column({ type: 'char', length: 36, nullable: true })
+  customerId!: string | null;
+
+  // Snapshots usados cuando customerId es NULL (cliente libre). Si hay
+  // customerId, estos quedan NULL y se lee del catálogo.
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  customerNameSnapshot!: string | null;
+
+  @Column({ type: 'varchar', length: 40, nullable: true })
+  customerPhoneSnapshot!: string | null;
+
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  customerEmailSnapshot!: string | null;
+
+  @Column({ type: 'varchar', length: 40, nullable: true })
+  customerTaxIdSnapshot!: string | null;
 
   @Index('idx_quotations_date')
   @Column({ type: 'datetime', precision: 6 })
@@ -42,11 +57,29 @@ export class Quotation {
   @Column({ type: 'enum', enum: QuotationStatus, default: QuotationStatus.DRAFT })
   status!: QuotationStatus;
 
+  // Subtotal neto (sin IVA), IVA descompuesto y total bruto.
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  subtotal!: string;
+
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  taxAmount!: string;
+
   @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
   total!: string;
 
   @Column({ type: 'text', nullable: true })
   notes!: string | null;
+
+  // Token firmado para el link público `/p/cotizacion/:token` (sin auth).
+  // El token expira el mismo día que `validUntil`.
+  @Index('idx_quotations_public_token', { unique: true })
+  @Column({ type: 'varchar', length: 64 })
+  publicToken!: string;
+
+  // Timestamp del primer envío exitoso (email o WhatsApp). NULL hasta que
+  // pase a SENT por primera vez.
+  @Column({ type: 'datetime', precision: 6, nullable: true })
+  sentAt!: Date | null;
 
   @ManyToOne(() => User, { onDelete: 'RESTRICT', nullable: false })
   @JoinColumn({ name: 'userId' })
