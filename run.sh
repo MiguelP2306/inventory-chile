@@ -7,7 +7,8 @@
 #
 # Comandos:
 #   ./run.sh setup    -> instalación completa de cero (idempotente)
-#   ./run.sh dev      -> verifica MySQL y arranca api+web (modo watch)
+#   ./run.sh dev      -> verifica Node, MySQL, aplica migraciones pendientes
+#                        y arranca api+web (modo watch)
 #   ./run.sh stop     -> detiene los procesos node lanzados por dev
 #   ./run.sh status   -> muestra estado de servicios y procesos
 #   ./run.sh doctor   -> diagnostica problemas comunes sin tocar nada
@@ -58,6 +59,48 @@ port_in_use() {
 }
 
 # ---------- ensure_* (acciones idempotentes) ----------
+ensure_node_version() {
+  if [ ! -f .nvmrc ]; then return; fi
+  local required current
+  required="$(tr -d '[:space:]' < .nvmrc)"
+  current="$(node --version 2>/dev/null | sed 's/^v//')"
+
+  if [ "$current" = "$required" ]; then
+    ok "Node $current (coincide con .nvmrc)"
+    return
+  fi
+
+  warn "Node activo: ${current:-ninguno} — .nvmrc requiere $required"
+
+  # Cargar nvm desde las ubicaciones comunes (es una función de shell, no
+  # un binario en el PATH).
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  local nvm_loaded=0
+  for nvm_sh in "$NVM_DIR/nvm.sh" "/opt/homebrew/opt/nvm/nvm.sh" "/usr/local/opt/nvm/nvm.sh"; do
+    if [ -s "$nvm_sh" ]; then
+      # shellcheck disable=SC1090
+      . "$nvm_sh"
+      nvm_loaded=1
+      break
+    fi
+  done
+
+  if [ "$nvm_loaded" -ne 1 ] || ! type nvm >/dev/null 2>&1; then
+    err "nvm no está instalado. Opciones:"
+    echo "    a) Instalá nvm: https://github.com/nvm-sh/nvm#installing-and-updating"
+    echo "    b) Instalá Node $required manualmente y reintentá."
+    exit 1
+  fi
+
+  color "Cambiando a Node $required vía nvm"
+  if ! nvm use "$required" >/dev/null 2>&1; then
+    color "Node $required no está instalado en nvm — instalando ahora"
+    nvm install "$required"
+    nvm use "$required" >/dev/null
+  fi
+  ok "Node $(node --version) activo"
+}
+
 ensure_pnpm() {
   if have pnpm; then return; fi
   color "Habilitando pnpm vía corepack"
@@ -177,6 +220,7 @@ run_seeds() {
 cmd_setup() {
   detect_os
   color "Setup completo para $OS"
+  ensure_node_version
   ensure_pnpm
   ensure_mysql_client
   ensure_mysql_running
@@ -197,6 +241,7 @@ cmd_setup() {
 
 cmd_build() {
   detect_os
+  ensure_node_version
   ensure_pnpm
   install_deps
   build_shared
@@ -209,6 +254,7 @@ cmd_build() {
 
 cmd_dev() {
   detect_os
+  ensure_node_version
   ensure_pnpm
   ensure_mysql_client
   ensure_env_files
@@ -219,6 +265,10 @@ cmd_dev() {
     exit 1
   fi
   ok "MySQL local OK (inventory@127.0.0.1:3306/inventory)"
+
+  # Aplicar siempre las migraciones pendientes — evita bugs raros cuando
+  # otro dev (o uno mismo desde otra rama) suma migraciones sin avisar.
+  run_migrations
 
   mkdir -p "$ROOT_DIR/.run"
 
@@ -346,7 +396,14 @@ cmd_doctor() {
   color "Diagnóstico (no toca nada)"
   echo
   echo "  OS detectado:        $OS"
-  echo "  Node:                $(node --version 2>/dev/null || echo 'NO INSTALADO')"
+  local node_now node_req
+  node_now="$(node --version 2>/dev/null || echo 'NO INSTALADO')"
+  node_req="$( [ -f .nvmrc ] && tr -d '[:space:]' < .nvmrc || echo '?' )"
+  if [ "${node_now#v}" = "$node_req" ]; then
+    echo "  Node:                $node_now (coincide con .nvmrc)"
+  else
+    warn "Node:                $node_now — .nvmrc requiere v$node_req (./run.sh dev hará el switch con nvm)"
+  fi
   if have corepack; then echo "  corepack:            $(corepack --version)"; else warn "corepack no encontrado"; fi
   if have pnpm;     then echo "  pnpm:                $(pnpm --version)"; else warn "pnpm no encontrado (corepack lo instala)"; fi
   if have mysql;    then echo "  mysql client:        $(mysql --version | awk '{print $3,$4,$5}')"; else warn "mysql CLI no encontrado"; fi
