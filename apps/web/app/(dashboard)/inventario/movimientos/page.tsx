@@ -228,7 +228,7 @@ export default function MovimientosPage() {
 function TypeBadge({ type }: { type: MovementDto['type'] }) {
   const map: Record<MovementDto['type'], { label: string; cls: string }> = {
     PURCHASE_IN: { label: 'Compra', cls: 'bg-stock-ok/15 text-stock-ok' },
-    SALE_OUT: { label: 'Venta', cls: 'bg-blue-500/15 text-blue-600' },
+    SALE_OUT: { label: 'Venta', cls: 'bg-blue-500/15 text-blue-600 dark:text-blue-300' },
     ADJUSTMENT: { label: 'Ajuste', cls: 'bg-stock-low/15 text-stock-low' },
     RETURN_IN: { label: 'Dev. entrada', cls: 'bg-stock-ok/15 text-stock-ok' },
     RETURN_OUT: { label: 'Dev. salida', cls: 'bg-stock-out/15 text-stock-out' },

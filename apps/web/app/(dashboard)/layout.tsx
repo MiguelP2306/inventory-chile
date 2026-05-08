@@ -3,6 +3,7 @@ import { LogoutButton } from '@/components/logout-button';
 import { OperationFab } from '@/components/operation-fab';
 import { QuickSearch } from '@/components/quick-search';
 import { Sidebar } from '@/components/sidebar';
+import { ThemeToggle } from '@/components/theme-toggle';
 import { getCurrentUser } from '@/lib/server-api';
 
 export default async function DashboardLayout({
@@ -20,6 +21,7 @@ export default async function DashboardLayout({
         <header className="flex h-14 items-center justify-between border-b bg-card px-4">
           <QuickSearch />
           <div className="flex items-center gap-3 text-sm">
+            <ThemeToggle />
             <span className="text-muted-foreground">{user.email}</span>
             <LogoutButton />
           </div>

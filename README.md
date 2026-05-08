@@ -643,6 +643,19 @@ A pedido del cliente: toda la creación y edición de cotizaciones ahora vive en
 
 ---
 
+## Tema oscuro
+
+El frontend soporta **light / dark / system** vía [`next-themes`](https://github.com/pacocoursey/next-themes). El toggle (sol/luna) vive en el header del dashboard. La preferencia se persiste en `localStorage` y respeta `prefers-color-scheme` del sistema cuando está en modo "system".
+
+- **Activación**: `<ThemeProvider attribute="class" defaultTheme="system" enableSystem>` en [`components/providers.tsx`](apps/web/components/providers.tsx).
+- **Toggle**: [`components/theme-toggle.tsx`](apps/web/components/theme-toggle.tsx) — botón ghost con ícono Sun/Moon. Usa `mounted` flag para evitar hydration mismatch.
+- **Variables CSS**: definidas en [`app/globals.css`](apps/web/app/globals.css) bajo `:root` (light) y `.dark` (dark). El stack de shadcn las consume vía Tailwind (`bg-background`, `text-foreground`, etc.).
+- **Vista pública forzada en light**: [`/p/cotizacion/[token]/layout.tsx`](apps/web/app/p/cotizacion/[token]/layout.tsx) usa la clase `force-light` (definida en `globals.css`) que reescribe las variables al palette claro. Esto garantiza que el cliente final ve la cotización igual sin importar la preferencia del operador interno.
+- **Componentes con colores semánticos** (badges de estado de cotización, alertas, badges de tipos de movimiento) tienen variantes `dark:` agregadas para contraste correcto en ambos temas.
+- **PDF**: lo genera el backend con jsPDF — siempre fondo blanco / texto negro (no afectado por el tema).
+
+---
+
 ## Stack
 
 - **Frontend** ([apps/web](apps/web/)): Next.js 15 (App Router) + TypeScript + TailwindCSS + shadcn/ui + TanStack Query + React Hook Form + Zod
