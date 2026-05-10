@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, Pencil, Plus, Trash2 } from 'lucide-react';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -32,6 +32,7 @@ import {
   updateSupplier,
   type SupplierInput,
 } from '@/lib/inventory-api';
+import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
 import type { SupplierDto } from '@inventory/shared';
 
@@ -48,14 +49,11 @@ const empty: SupplierInput = {
 
 export default function ProveedoresPage() {
   const qc = useQueryClient();
-  const { values, setFilters, setFilter } = useUrlFilters({ q: '', page: '' });
-  const q = values.q ?? '';
+  const filters = useUrlFilters({ q: '', page: '' });
+  const { values, setFilter } = filters;
+  const search = useDebouncedUrlFilter(filters, 'q', { resetKeys: ['page'] });
   const page = Number(values.page || '1');
-  const [debouncedQ, setDebouncedQ] = useState(q);
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedQ(q.trim()), 250);
-    return () => clearTimeout(t);
-  }, [q]);
+  const debouncedQ = (values.q ?? '').trim();
 
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<SupplierDto | null>(null);
@@ -146,8 +144,8 @@ export default function ProveedoresPage() {
 
       <Input
         placeholder="Buscar por nombre, NIT/RUC, email o teléfono"
-        value={q}
-        onChange={(e) => setFilters({ q: e.target.value, page: null })}
+        value={search.value}
+        onChange={(e) => search.setValue(e.target.value)}
         className="max-w-md"
       />
 

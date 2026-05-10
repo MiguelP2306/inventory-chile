@@ -33,6 +33,39 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 
 ---
 
+## Historial de correcciones (feedback del cliente)
+
+> Bitácora de fixes de UX y bugs reportados por el cliente sobre módulos ya entregados. Cada entrada describe el problema, la solución aplicada y los archivos tocados, para no perder el contexto cuando vuelvan a aparecer dudas o se quiera auditar el motivo de un cambio.
+
+### Ronda 1 — 2026-05-10
+
+#### 1. Input de búsqueda con lag (problema global)
+
+- **Síntoma reportado:** al escribir rápido en cualquier input "Buscar..." se perdían caracteres y la UI se sentía pegajosa. El usuario tenía que escribir lento para no equivocarse.
+- **Causa raíz:** los inputs estaban atados directamente al estado de URL (`useUrlFilters`). Cada keystroke disparaba `router.replace`, que reordena el árbol de React y descarta updates si llegan más rápido que el render.
+- **Solución:** nuevo hook [`apps/web/lib/use-debounced-url-filter.ts`](apps/web/lib/use-debounced-url-filter.ts) que mantiene un `localValue` sincronizado al input en cada tecla y solo empuja a la URL después de **300 ms** de inactividad. Sincroniza el local cuando el filtro cambia desde afuera (back/forward, click en "Limpiar filtros", link compartido).
+- **Pantallas migradas:** productos, inventario, clientes, proveedores, vehículos (modelos), gastos, y el componente reutilizable `SimpleNameList` (que alimenta categorías, marcas y marcas de vehículo).
+- **Patrón nuevo a respetar:** todo input de búsqueda libre (`q`) en una pantalla con `useUrlFilters` debe usar `useDebouncedUrlFilter(filters, 'q', { resetKeys: ['page'] })`. Selectores y filtros de fecha siguen usando `setFilter`/`setFilters` directo — el problema solo aparece en escritura libre rápida.
+
+#### 2. Botón "Limpiar filtros" en Productos poco visible
+
+- **Síntoma reportado:** el usuario no encontraba cómo resetear los filtros aplicados en `/productos`.
+- **Causa raíz:** el botón existía pero quedaba flotando debajo del bloque de filtros de vehículo, separado visualmente del resto de filtros.
+- **Solución:** se mueve el botón "Limpiar filtros" al header de la pantalla, junto al CTA "Nuevo producto", y solo aparece cuando hay filtros activos. Decisión confirmada con el cliente: **visible solo cuando hay filtros activos**, no siempre.
+- **Archivos:** [`apps/web/app/(dashboard)/productos/page.tsx`](apps/web/app/(dashboard)/productos/page.tsx).
+
+#### 3. Modal "Ajustar stock" pedía valores firmados
+
+- **Síntoma reportado:** el modal exigía que el usuario ingresara números positivos para sumar y negativos para restar. Era confuso para usuarios no técnicos y propenso a errores.
+- **Solución:** rediseño con tabs en la parte superior — **Aumentar** / **Disminuir** / **Establecer** — siguiendo el patrón shadcn `Tabs` + `TabsList`. El input solo acepta enteros positivos (`min=0`, `step=1`); el sistema calcula el delta firmado según la tab elegida y lo manda al endpoint `/inventory/adjust`.
+  - Modo **Aumentar**: delta = +qty.
+  - Modo **Disminuir**: delta = −qty.
+  - Modo **Establecer**: delta = qty − stockActual (útil para conteo físico). El modal muestra la variación calculada antes de confirmar.
+- **Edge cases:** si el delta resulta 0 (modo Establecer con la cantidad actual), el botón se deshabilita con texto "Sin cambios" y no se inserta movimiento — para no ensuciar el historial.
+- **Archivos:** [`apps/web/components/adjust-stock-dialog.tsx`](apps/web/components/adjust-stock-dialog.tsx).
+
+---
+
 ## Refinamientos transversales aplicados (post Fase 3)
 
 Bloque de mejoras hechas en respuesta a las primeras observaciones del cliente sobre los módulos ya entregados. **No** introduce schema nuevo; son utilidades, validaciones y patrones reutilizables que las fases siguientes deben respetar.
@@ -59,6 +92,7 @@ Bloque de mejoras hechas en respuesta a las primeras observaciones del cliente s
 ### Patrones a reusar en fases siguientes
 
 - Toda nueva pantalla de listado debe usar `useUrlFilters`.
+- Todo input de **búsqueda libre** (`q`) sobre `useUrlFilters` debe usar `useDebouncedUrlFilter(filters, 'q', { resetKeys: ['page'] })` (300 ms) para que la escritura rápida no pierda caracteres.
 - Todo nuevo `remove()` que pueda violar FK debe envolverse con `rethrowFkAsConflict`.
 - Toda visualización de monto debe pasar por `formatCurrency`.
 - Todo nuevo listado que pueda crecer debe paginar.

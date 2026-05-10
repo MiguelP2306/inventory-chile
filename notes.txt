@@ -1,0 +1,9 @@
+En toda la web
+	El search no funciona correctamente, al tipear tengo que esperar a que el caracter este porque si tipeo rapido no me toma los caracteres, es como que si obtiene de manera muy lenta mi interaccion y tengo que esperar. Si escribo muy rapido no toma mis caracteres correctamente
+
+
+Productos >
+	No hay un boton para limpiar los filtros 
+
+Inventario >
+	Al abrir el modal de "Ajustar stock" hay un input para colocar la cantidad si es negativo se coloca -numero en el input o si es positivo simple se deja numero. Esto se puede mejorar para que sea mas entendible para el usuario comun, que cualquiera pueda entender como asignar una cantidad negativa o positiva, quiero que mejores la UI sobre eso

@@ -3,7 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { ProductThumbnail } from '@/components/product-thumbnail';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -33,6 +33,7 @@ import {
   productsByVehicle,
   publicImageUrl,
 } from '@/lib/catalog-api';
+import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
 import type { ProductDto, ProductKindDto } from '@inventory/shared';
 
@@ -57,9 +58,10 @@ const filterDefaults = {
 } as const;
 
 export default function ProductosPage() {
-  const { values, setFilter, setFilters, clear } = useUrlFilters(filterDefaults);
+  const filters = useUrlFilters(filterDefaults);
+  const { values, setFilter, setFilters, clear } = filters;
+  const search = useDebouncedUrlFilter(filters, 'q', { resetKeys: ['page'] });
 
-  const q = values.q ?? '';
   const categoryId = values.category || ALL;
   const brandId = values.brand || ALL;
   const productKind = (values.kind || ALL) as 'ORIGINAL' | 'ALTERNATIVE' | typeof ALL;
@@ -68,15 +70,12 @@ export default function ProductosPage() {
   const vehYear = values.vyear ?? '';
   const page = Number(values.page || '1');
 
-  const [debouncedQ, setDebouncedQ] = useState(q);
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedQ(q.trim()), 250);
-    return () => clearTimeout(t);
-  }, [q]);
+  const debouncedQ = (values.q ?? '').trim();
 
   const vehicleSearchActive = vehMakeId !== ALL || vehModelId !== ALL || vehYear !== '';
   const filtersActive =
     debouncedQ !== '' ||
+    search.value !== '' ||
     categoryId !== ALL ||
     brandId !== ALL ||
     productKind !== ALL ||
@@ -130,20 +129,27 @@ export default function ProductosPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Productos</h1>
-        <Button asChild>
-          <Link href="/productos/nuevo">
-            <Plus className="h-4 w-4" />
-            Nuevo producto
-          </Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          {filtersActive && (
+            <Button variant="ghost" size="sm" onClick={clear}>
+              Limpiar filtros
+            </Button>
+          )}
+          <Button asChild>
+            <Link href="/productos/nuevo">
+              <Plus className="h-4 w-4" />
+              Nuevo producto
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {/* Filtros principales */}
       <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
         <Input
           placeholder="Buscar por SKU, código universal, compatible, nombre..."
-          value={q}
-          onChange={(e) => setFilters({ q: e.target.value, page: null })}
+          value={search.value}
+          onChange={(e) => search.setValue(e.target.value)}
         />
         <Select
           value={categoryId}
@@ -260,14 +266,6 @@ export default function ProductosPage() {
           </Select>
         </div>
       </div>
-
-      {filtersActive && (
-        <div>
-          <Button variant="ghost" size="sm" onClick={clear}>
-            Limpiar todos los filtros
-          </Button>
-        </div>
-      )}
 
       {/* Tabla */}
       <div className="rounded-md border bg-card">

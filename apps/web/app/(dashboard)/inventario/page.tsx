@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { Settings2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { AdjustStockDialog } from '@/components/adjust-stock-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -24,6 +24,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { listStockPaginated } from '@/lib/inventory-api';
+import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
 import type { StockStatus, StockSummary } from '@inventory/shared';
 
@@ -31,20 +32,17 @@ const ALL = '__all__';
 const PAGE_SIZE = 50;
 
 export default function InventarioPage() {
-  const { values, setFilters, setFilter } = useUrlFilters({
+  const filters = useUrlFilters({
     q: '',
     status: '',
     page: '',
   });
-  const q = values.q ?? '';
+  const { values, setFilters, setFilter } = filters;
+  const search = useDebouncedUrlFilter(filters, 'q', { resetKeys: ['page'] });
   const status = values.status || ALL;
   const page = Number(values.page || '1');
 
-  const [debouncedQ, setDebouncedQ] = useState(q);
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedQ(q.trim()), 250);
-    return () => clearTimeout(t);
-  }, [q]);
+  const debouncedQ = (values.q ?? '').trim();
 
   const [adjustTarget, setAdjustTarget] = useState<StockSummary | null>(null);
 
@@ -85,8 +83,8 @@ export default function InventarioPage() {
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <Input
           placeholder="Buscar por SKU, número de parte, código de barras o nombre"
-          value={q}
-          onChange={(e) => setFilters({ q: e.target.value, page: null })}
+          value={search.value}
+          onChange={(e) => search.setValue(e.target.value)}
           className="md:col-span-2"
         />
         <Select

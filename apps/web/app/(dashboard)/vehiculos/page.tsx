@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 import { SimpleNameList } from '@/components/simple-name-list';
 import { Button } from '@/components/ui/button';
@@ -44,6 +44,7 @@ import {
   updateVehicleMake,
   updateVehicleModel,
 } from '@/lib/catalog-api';
+import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
 
 const ALL = '__all__';
@@ -76,20 +77,16 @@ export default function VehiculosPage() {
 
 function ModelsList() {
   const qc = useQueryClient();
-  const { values, setFilters, setFilter } = useUrlFilters({
+  const filters = useUrlFilters({
     q: '',
     make: '',
     page: '',
   });
-  const q = values.q ?? '';
+  const { values, setFilters, setFilter } = filters;
+  const search = useDebouncedUrlFilter(filters, 'q', { resetKeys: ['page'] });
   const makeFilter = values.make || ALL;
   const page = Number(values.page || '1');
-
-  const [debouncedQ, setDebouncedQ] = useState(q);
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedQ(q.trim()), 250);
-    return () => clearTimeout(t);
-  }, [q]);
+  const debouncedQ = (values.q ?? '').trim();
 
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<{ id: string; name: string; makeId: string } | null>(
@@ -191,8 +188,8 @@ function ModelsList() {
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <Input
           placeholder="Buscar por modelo o marca"
-          value={q}
-          onChange={(e) => setFilters({ q: e.target.value, page: null })}
+          value={search.value}
+          onChange={(e) => search.setValue(e.target.value)}
         />
         <Select
           value={makeFilter}
