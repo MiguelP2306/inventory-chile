@@ -32,6 +32,7 @@ import {
 } from '@/lib/cashbox-api';
 import { apiErrorMessage } from '@/lib/catalog-api';
 import { formatCurrency } from '@/lib/format';
+import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
 import type { ExpenseDto, PaymentMethodDto } from '@inventory/shared';
 
@@ -46,7 +47,7 @@ const METHOD_LABELS: Record<PaymentMethodDto, string> = {
 
 export default function GastosPage() {
   const qc = useQueryClient();
-  const { values, setFilter, clear } = useUrlFilters({
+  const filters = useUrlFilters({
     category: '',
     method: '',
     dateFrom: '',
@@ -55,6 +56,8 @@ export default function GastosPage() {
     voided: '',
     page: '',
   });
+  const { values, setFilter, clear } = filters;
+  const search = useDebouncedUrlFilter(filters, 'q', { resetKeys: ['page'] });
   const category = values.category || ALL;
   const method = values.method || ALL;
   const dateFrom = values.dateFrom ?? '';
@@ -136,11 +139,8 @@ export default function GastosPage() {
       <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
         <Input
           placeholder="Buscar (descripción/N°)"
-          value={q}
-          onChange={(e) => {
-            setFilter('q', e.target.value || null);
-            setFilter('page', null);
-          }}
+          value={search.value}
+          onChange={(e) => search.setValue(e.target.value)}
           className="md:col-span-2"
         />
         <Select

@@ -1,7 +1,8 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { Equal, Minus, Plus } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -13,8 +14,11 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { apiErrorMessage } from '@/lib/catalog-api';
 import { adjustStock } from '@/lib/inventory-api';
+
+type Mode = 'increase' | 'decrease' | 'set';
 
 interface Props {
   product: { id: string; sku: string; name: string };
@@ -25,14 +29,42 @@ interface Props {
 
 export function AdjustStockDialog({ product, currentQty, open, onOpenChange }: Props) {
   const qc = useQueryClient();
+  const [mode, setMode] = useState<Mode>('increase');
   const [qty, setQty] = useState<string>('');
   const [reason, setReason] = useState<string>('');
+
+  // Reset al cerrar para no mantener estado de la apertura anterior.
+  useEffect(() => {
+    if (!open) {
+      setMode('increase');
+      setQty('');
+      setReason('');
+    }
+  }, [open]);
+
+  const qtyNum = Number(qty);
+  const qtyValid =
+    qty !== '' && Number.isInteger(qtyNum) && qtyNum >= 0;
+
+  // Delta firmado que se envía al backend según el modo elegido.
+  const signedDelta = (() => {
+    if (!qtyValid) return 0;
+    if (mode === 'increase') return qtyNum;
+    if (mode === 'decrease') return -qtyNum;
+    return qtyNum - currentQty;
+  })();
+
+  const resultingQty = currentQty + signedDelta;
+  const isNoChange = qtyValid && signedDelta === 0;
+  const isNegativeResult = resultingQty < 0;
+  const valid =
+    qtyValid && !isNoChange && !isNegativeResult && reason.trim().length > 0;
 
   const mut = useMutation({
     mutationFn: () =>
       adjustStock({
         productId: product.id,
-        qty: Number(qty),
+        qty: signedDelta,
         reason: reason.trim(),
       }),
     onSuccess: () => {
@@ -40,15 +72,19 @@ export function AdjustStockDialog({ product, currentQty, open, onOpenChange }: P
       qc.invalidateQueries({ queryKey: ['movements'] });
       toast.success('Stock ajustado');
       onOpenChange(false);
-      setQty('');
-      setReason('');
     },
     onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo ajustar')),
   });
 
-  const qtyNum = Number(qty);
-  const valid = !!qty && Number.isInteger(qtyNum) && qtyNum !== 0 && reason.trim().length > 0;
-  const resultingQty = currentQty + (Number.isFinite(qtyNum) ? qtyNum : 0);
+  const inputLabel =
+    mode === 'increase'
+      ? 'Cantidad a agregar'
+      : mode === 'decrease'
+        ? 'Cantidad a restar'
+        : 'Cantidad final tras el conteo';
+
+  const inputPlaceholder =
+    mode === 'set' ? 'ej: 42' : 'ej: 10';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -70,33 +106,71 @@ export function AdjustStockDialog({ product, currentQty, open, onOpenChange }: P
             <div>
               Stock actual: <span className="font-semibold">{currentQty}</span>
             </div>
-            {qty && Number.isFinite(qtyNum) && (
-              <div>
-                Stock resultante:{' '}
+          </div>
+
+          <Tabs value={mode} onValueChange={(v) => setMode(v as Mode)}>
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="increase">
+                <Plus className="h-4 w-4" />
+                Aumentar
+              </TabsTrigger>
+              <TabsTrigger value="decrease">
+                <Minus className="h-4 w-4" />
+                Disminuir
+              </TabsTrigger>
+              <TabsTrigger value="set">
+                <Equal className="h-4 w-4" />
+                Establecer
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          <div className="space-y-2">
+            <Label htmlFor="qty">{inputLabel}</Label>
+            <Input
+              id="qty"
+              type="number"
+              min={0}
+              step={1}
+              autoFocus
+              placeholder={inputPlaceholder}
+              value={qty}
+              onChange={(e) => setQty(e.target.value)}
+            />
+            {qtyValid && (
+              <div className="text-sm">
+                {mode === 'set' && (
+                  <span className="text-muted-foreground">
+                    Variación calculada:{' '}
+                    <span className="font-medium text-foreground tabular-nums">
+                      {signedDelta > 0 ? '+' : ''}
+                      {signedDelta}
+                    </span>
+                    {' · '}
+                  </span>
+                )}
+                <span className="text-muted-foreground">
+                  Stock resultante:{' '}
+                </span>
                 <span
                   className={
-                    resultingQty < 0
-                      ? 'font-semibold text-destructive'
-                      : 'font-semibold'
+                    isNegativeResult
+                      ? 'font-semibold text-destructive tabular-nums'
+                      : 'font-semibold tabular-nums'
                   }
                 >
                   {resultingQty}
                 </span>
-                {resultingQty < 0 && ' (no permitido)'}
+                {isNegativeResult && (
+                  <span className="ml-1 text-destructive">(no permitido)</span>
+                )}
+                {isNoChange && (
+                  <span className="ml-1 text-muted-foreground">(sin cambios)</span>
+                )}
               </div>
             )}
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="qty">Cantidad (signada)</Label>
-            <Input
-              id="qty"
-              type="number"
-              autoFocus
-              placeholder="Positivo entra, negativo sale (ej: -5)"
-              value={qty}
-              onChange={(e) => setQty(e.target.value)}
-            />
-          </div>
+
           <div className="space-y-2">
             <Label htmlFor="reason">Motivo</Label>
             <Input
@@ -106,12 +180,17 @@ export function AdjustStockDialog({ product, currentQty, open, onOpenChange }: P
               onChange={(e) => setReason(e.target.value)}
             />
           </div>
+
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancelar
             </Button>
             <Button type="submit" disabled={!valid || mut.isPending}>
-              {mut.isPending ? 'Ajustando...' : 'Ajustar'}
+              {mut.isPending
+                ? 'Ajustando...'
+                : isNoChange
+                  ? 'Sin cambios'
+                  : 'Ajustar'}
             </Button>
           </DialogFooter>
         </form>

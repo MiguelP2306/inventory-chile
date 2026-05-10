@@ -3,7 +3,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -16,6 +15,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { listCustomersPaginated } from '@/lib/customers-api';
+import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
 import { formatPhonePretty } from '@/lib/validators/phone';
 import { formatRutPretty } from '@/lib/validators/rut';
@@ -23,15 +23,11 @@ import { formatRutPretty } from '@/lib/validators/rut';
 const PAGE_SIZE = 20;
 
 export default function ClientesPage() {
-  const { values, setFilters, setFilter } = useUrlFilters({ q: '', page: '' });
-  const q = values.q ?? '';
+  const filters = useUrlFilters({ q: '', page: '' });
+  const { values, setFilter } = filters;
+  const search = useDebouncedUrlFilter(filters, 'q', { resetKeys: ['page'] });
   const page = Number(values.page || '1');
-
-  const [debouncedQ, setDebouncedQ] = useState(q);
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedQ(q.trim()), 250);
-    return () => clearTimeout(t);
-  }, [q]);
+  const debouncedQ = (values.q ?? '').trim();
 
   const list = useQuery({
     queryKey: ['customers', { q: debouncedQ, page }],
@@ -61,8 +57,8 @@ export default function ClientesPage() {
 
       <Input
         placeholder="Buscar por nombre, RUT, email o teléfono"
-        value={q}
-        onChange={(e) => setFilters({ q: e.target.value, page: null })}
+        value={search.value}
+        onChange={(e) => search.setValue(e.target.value)}
         className="max-w-md"
       />
 
