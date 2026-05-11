@@ -45,6 +45,7 @@ interface PdfInput {
   subtotal: string;
   taxAmount: string;
   total: string;
+  notes: string | null;
   customer: CustomerInfo;
   items: QuotationItemLine[];
   company: CompanyInfo;
@@ -77,6 +78,7 @@ export class PdfService {
       subtotal: q.subtotal,
       taxAmount: q.taxAmount,
       total: q.total,
+      notes: q.notes,
       customer: {
         name: q.customerView.name,
         taxId: q.customerView.taxId,
@@ -117,6 +119,7 @@ export class PdfService {
       subtotal: p.subtotal,
       taxAmount: p.taxAmount,
       total: p.total,
+      notes: p.notes,
       customer: p.customer,
       items: p.items,
       company: p.company,
@@ -265,6 +268,22 @@ export class PdfService {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
 
+    // Notas de la cotización (visibles al cliente final). Las renderizamos
+    // debajo de los totales con un título "Notas" para distinguirlas del
+    // footer general de la empresa.
+    if (input.notes && input.notes.trim()) {
+      let notesY = totalsY + 28;
+      doc.setFont('helvetica', 'bold');
+      doc.text('Notas', margin, notesY);
+      notesY += 12;
+      doc.setFont('helvetica', 'normal');
+      const wrapped = doc.splitTextToSize(
+        input.notes.trim(),
+        pageWidth - margin * 2,
+      );
+      doc.text(wrapped, margin, notesY);
+    }
+
     if (input.company.quotationFooter) {
       const footerY = doc.internal.pageSize.getHeight() - margin;
       doc.text(input.company.quotationFooter, margin, footerY, {
@@ -379,6 +398,23 @@ export class PdfService {
       align: 'right',
     });
     totalsY += 12;
+
+    if (input.notes && input.notes.trim()) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7);
+      doc.text('Notas:', margin, totalsY);
+      totalsY += 9;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6);
+      const wrapped = doc.splitTextToSize(
+        input.notes.trim(),
+        widthPt - margin * 2,
+      );
+      doc.text(wrapped, margin, totalsY);
+      // jsPDF no nos dice cuánto ocupó; aproximamos con la cant. de líneas.
+      const lines = Array.isArray(wrapped) ? wrapped.length : 1;
+      totalsY += lines * 8 + 4;
+    }
 
     if (input.company.quotationFooter) {
       doc.setFont('helvetica', 'normal');

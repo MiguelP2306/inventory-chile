@@ -1,9 +1,17 @@
-En toda la web
-	El search no funciona correctamente, al tipear tengo que esperar a que el caracter este porque si tipeo rapido no me toma los caracteres, es como que si obtiene de manera muy lenta mi interaccion y tengo que esperar. Si escribo muy rapido no toma mis caracteres correctamente
+Vamos con la siguiente fase que seria la fase 7. Analiza mi @PLAN.md  y mi @README.md  para que tengas mas contexto de la fase 7 que sera la a desarrollar, documenta todo en el @README.md para yo tener contexto de lo que es esta fase y que se hizo y cambia el status de "pendiente" a "✅" .
+
+Hazme todas las preguntas necesarias para que puedas hacer un mejor trabajo, las quiero en una en una con elecciones para yo eligir
 
 
-Productos >
-	No hay un boton para limpiar los filtros 
+===================================================================================================================================
 
-Inventario >
-	Al abrir el modal de "Ajustar stock" hay un input para colocar la cantidad si es negativo se coloca -numero en el input o si es positivo simple se deja numero. Esto se puede mejorar para que sea mas entendible para el usuario comun, que cualquiera pueda entender como asignar una cantidad negativa o positiva, quiero que mejores la UI sobre eso
+Cotizacion > 
+	El input de search tiene un problema que antes tenian todos los search de todas las pestanas y al parecer "cotizacion" es la unica pagina que se quedo con ese error. Si el usuario escribe rápidamente, algunos caracteres no se registran. El input parece tener un delay o lag en la captura de texto. El usuario se ve obligado a escribir lentamente para evitar errores.
+
+	En el modal de crear/editar cotizacion al agregar producto en el tab de items hay una opcion para poder escoger si hacer el descuento en dolares o en porcentaje ($/%) pero tiene un problema de responsive ya que solo se ve bien para escoger dolar ($) pero para escoger porcentaje (%) se ve mal aun punto en el que apenas puedo escoger porcentaje
+
+	En algunas ocaciones cuando tengo un error al crear/editar cotizacion y le doy a "guardar y enviar" y tengo un error como por ejemplo el siguiente "Falta el teléfono del cliente para enviar por WhatsApp." me notifica el error y despues me cierra el modal perdiendo la informacion que tenia, que me notifique cual y donde esta el error es correcto, pero no deberia de cerrarme el modal si hay un error porque pierdo la informacion, no tengo claro si pasa lo mismo en el caso de que presione el boton "Guardar borrador" revisalo y arreglalo en el caso de que funcione igual
+
+	En el caso de que todo salga satisfactorio y me crea mi link de cotizacion con whastapp por ejemplo, la fecha limite de esta cotizacion es Fecha: 9 de mayo de 2026 · Vence: 31 de julio de 2026 pero cuando quiero imprimir la carta con size normal o 80mm cuando veo el texto de abajo me dice "Esta cotización tiene una validez de 15 días desde su emisión." lo cual no tiene sentido, no esta agarrando la fecha limite correcta. Lo mismo pasa cuando creo el link de cotizacion me dice abajo "Esta cotización tiene una validez de 15 días desde su emisión." y la fecha de esta cotizacion es de "Fecha: 9 de mayo de 2026" y "Válida hasta: 31 de julio de 2026"
+
+	Cuando genero el PDF y la cotizacion tiene una "nota" esta nota no se ve en el pdf tampoco se ve en el link "http://localhost:3000/p/cotizacion/bcc701da3c8fdd4bbf799c03b47e71ec821ba8328264c550". La nota solo se ve en la ruta que detalla la cotizacion "cotizaciones/6a8ec2a5-462b-4b98-b6db-20f5960f7dcf"

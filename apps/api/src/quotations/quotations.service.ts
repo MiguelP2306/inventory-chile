@@ -142,6 +142,7 @@ export class QuotationsService {
       subtotal: q.subtotal,
       taxAmount: q.taxAmount,
       total: q.total,
+      notes: q.notes,
       customer: {
         name: view.name,
         taxId: view.taxId,

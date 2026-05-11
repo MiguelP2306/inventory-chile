@@ -141,8 +141,11 @@ async function run() {
       taxId: null,
       logoUrl: null,
       currency: 'CLP',
+      // Footer genérico sujeto a personalización desde /configuracion. La
+      // validez real de cada cotización se muestra como "Válida hasta: <fecha>"
+      // — no la duplicamos acá para no generar inconsistencias con validUntil.
       quotationFooter:
-        'Esta cotización tiene una validez de 15 días desde su emisión.',
+        'Sujeta a confirmación de stock al momento de la venta. Precios en pesos chilenos (CLP), IVA incluido.',
       defaultValidityDays: 15,
       taxRate: '0.1900',
       cardCommissionRate: '0.0250',

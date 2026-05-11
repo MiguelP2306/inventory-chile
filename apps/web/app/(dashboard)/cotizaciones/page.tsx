@@ -5,6 +5,7 @@ import { Eye, Pencil, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { QuotationFormDialog } from '@/components/forms/quotation-form-dialog';
 import { QuotationStatusBadge } from '@/components/quotation-status-badge';
 import { Button } from '@/components/ui/button';
@@ -48,27 +49,24 @@ export default function CotizacionesPage() {
   const searchParams = useSearchParams();
   const qc = useQueryClient();
 
-  const { values, setFilter, clear } = useUrlFilters({
+  const filters = useUrlFilters({
     status: '',
     q: '',
     dateFrom: '',
     dateTo: '',
     page: '',
   });
+  const { values, setFilter, clear } = filters;
+  const search = useDebouncedUrlFilter(filters, 'q', { resetKeys: ['page'] });
   const status = values.status || ALL;
-  const q = values.q ?? '';
   const dateFrom = values.dateFrom ?? '';
   const dateTo = values.dateTo ?? '';
   const page = Number(values.page || '1');
 
-  const [debouncedQ, setDebouncedQ] = useState(q);
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedQ(q.trim()), 250);
-    return () => clearTimeout(t);
-  }, [q]);
+  const debouncedQ = (values.q ?? '').trim();
 
   const filtersActive =
-    status !== ALL || dateFrom !== '' || dateTo !== '' || q !== '';
+    status !== ALL || dateFrom !== '' || dateTo !== '' || search.value !== '';
 
   const list = useQuery({
     queryKey: [
@@ -117,11 +115,8 @@ export default function CotizacionesPage() {
       <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
         <Input
           placeholder="Buscar (número, cliente, RUT)"
-          value={q}
-          onChange={(e) => {
-            setFilter('q', e.target.value || null);
-            setFilter('page', null);
-          }}
+          value={search.value}
+          onChange={(e) => search.setValue(e.target.value)}
           className="md:col-span-2"
         />
         <Select

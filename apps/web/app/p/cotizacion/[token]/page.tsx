@@ -198,6 +198,13 @@ export default async function PublicQuotationPage({
         </div>
       </div>
 
+      {q.notes && q.notes.trim() && (
+        <div className="rounded-md border bg-background p-4">
+          <h2 className="text-sm font-semibold text-muted-foreground">Notas</h2>
+          <p className="mt-2 whitespace-pre-wrap text-sm">{q.notes}</p>
+        </div>
+      )}
+
       <div className="flex justify-center">
         <Button asChild size="lg">
           <a

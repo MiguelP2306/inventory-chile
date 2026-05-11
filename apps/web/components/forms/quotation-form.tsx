@@ -145,6 +145,20 @@ export function QuotationForm({
     'cliente',
   );
 
+  // Cliente seleccionado del catálogo (necesario para validar contacto antes
+  // de "Guardar y enviar"). Sólo se popula en modo catalog.
+  const [catalogCustomer, setCatalogCustomer] = useState<CustomerDto | null>(
+    initialData?.customer ?? null,
+  );
+
+  // Cuando "Guardar y enviar" tuvo éxito el save pero falló el envío runtime
+  // (Resend caído, etc.), guardamos el id de la cotización ya creada para que
+  // un reintento NO genere un duplicado. Se limpia al desmontar / abrir nuevo
+  // modal (el wrapper usa `key` para remount limpio).
+  const [savedQuotationId, setSavedQuotationId] = useState<string | null>(
+    initialData?.id ?? null,
+  );
+
   const settings = useQuery({
     queryKey: ['settings', 'company'],
     queryFn: getCompanySettings,
@@ -305,50 +319,160 @@ export function QuotationForm({
     }
   }
 
+  /**
+   * Pre-validación del contacto necesario para el canal elegido. Se ejecuta
+   * ANTES de guardar, así si falta el dato el modal queda intacto (no se crea
+   * cotización a medias y el operador no pierde lo que escribió).
+   *
+   * - email → requiere customerEmail (catálogo) o customerEmailSnapshot (libre).
+   * - whatsapp → requiere customerPhone normalizable a E.164.
+   *
+   * Si falta y el cliente viene del catálogo, mostramos un toast con CTA para
+   * abrir el perfil del cliente en otra pestaña. Si es libre, error inline.
+   */
+  function preValidateChannel(channel: 'email' | 'whatsapp'): boolean {
+    const values = form.getValues();
+    const fromCatalog = values.clientType === 'catalog';
+
+    if (channel === 'email') {
+      const email = fromCatalog
+        ? catalogCustomer?.email?.trim() ?? ''
+        : (values.customerEmailSnapshot ?? '').trim();
+      if (!email) {
+        setActiveTab('cliente');
+        if (fromCatalog && catalogCustomer) {
+          toast.error('Este cliente no tiene email guardado.', {
+            action: {
+              label: 'Ir al cliente',
+              onClick: () =>
+                window.open(
+                  `/clientes/${catalogCustomer.id}`,
+                  '_blank',
+                  'noopener,noreferrer',
+                ),
+            },
+          });
+        } else {
+          form.setError('customerEmailSnapshot', {
+            type: 'manual',
+            message: 'Agregá un email para enviar por correo',
+          });
+          toast.error('Agregá el email del cliente para enviar por correo');
+        }
+        return false;
+      }
+    } else {
+      const rawPhone = fromCatalog
+        ? catalogCustomer?.phone?.trim() ?? ''
+        : (values.customerPhoneSnapshot ?? '').trim();
+      if (!rawPhone || !isValidPhone(rawPhone)) {
+        setActiveTab('cliente');
+        if (fromCatalog && catalogCustomer) {
+          toast.error(
+            rawPhone
+              ? 'El teléfono del cliente no es válido.'
+              : 'Este cliente no tiene teléfono guardado.',
+            {
+              action: {
+                label: 'Ir al cliente',
+                onClick: () =>
+                  window.open(
+                    `/clientes/${catalogCustomer.id}`,
+                    '_blank',
+                    'noopener,noreferrer',
+                  ),
+              },
+            },
+          );
+        } else {
+          form.setError('customerPhoneSnapshot', {
+            type: 'manual',
+            message: 'Agregá un teléfono válido para enviar por WhatsApp',
+          });
+          toast.error('Agregá el teléfono del cliente para enviar por WhatsApp');
+        }
+        return false;
+      }
+    }
+    return true;
+  }
+
   async function handleSave(after?: 'email' | 'whatsapp') {
     const valid = await form.trigger();
     if (!valid) {
       onErrors(form.formState.errors);
       return;
     }
+    if (after && !preValidateChannel(after)) return;
+
     const payload = buildPayload();
     if (!payload) return;
 
+    let saved: QuotationDto;
     try {
-      const saved = await saveMut.mutateAsync(payload);
-
-      if (after === 'email') {
-        try {
-          await sendEmailMut.mutateAsync(saved.id);
-          toast.success('Cotización guardada y enviada por email');
-        } catch (err) {
-          toast.error(apiErrorMessage(err, 'No se pudo enviar el email'));
-        }
-      } else if (after === 'whatsapp') {
-        try {
-          const result = await sendWhatsappMut.mutateAsync(saved.id);
-          if (result.whatsappUrl) {
-            window.open(result.whatsappUrl, '_blank', 'noopener,noreferrer');
-          }
-          toast.success('Cotización guardada. Se abrió WhatsApp en otra pestaña.');
-        } catch (err) {
-          toast.error(apiErrorMessage(err, 'No se pudo enviar por WhatsApp'));
-        }
+      // Reintento sin duplicar: si en un intento anterior la cotización ya
+      // se guardó pero el envío falló, hacemos UPDATE en vez de CREATE para
+      // no generar un número correlativo nuevo y huérfano.
+      if (savedQuotationId) {
+        saved = await updateQuotation(savedQuotationId, payload);
       } else {
-        toast.success(
-          mode === 'edit'
-            ? 'Cotización actualizada'
-            : 'Cotización guardada como borrador',
-        );
+        saved = await saveMut.mutateAsync(payload);
+        setSavedQuotationId(saved.id);
       }
-
-      qc.invalidateQueries({ queryKey: ['quotations'] });
-      qc.invalidateQueries({ queryKey: ['quotation', saved.id] });
-      onSuccess?.(saved);
     } catch (err) {
       toast.error(apiErrorMessage(err, 'No se pudo guardar la cotización'));
+      return;
     }
+
+    qc.invalidateQueries({ queryKey: ['quotations'] });
+    qc.invalidateQueries({ queryKey: ['quotation', saved.id] });
+
+    if (after === 'email') {
+      try {
+        await sendEmailMut.mutateAsync(saved.id);
+        toast.success('Cotización guardada y enviada por email');
+      } catch (err) {
+        // El save fue OK; el envío falló. Mantenemos el modal abierto y
+        // savedQuotationId seteado para que el reintento no duplique.
+        toast.error(
+          apiErrorMessage(
+            err,
+            'La cotización se guardó pero falló el envío del email. Verificá los datos y reintentá.',
+          ),
+        );
+        return;
+      }
+    } else if (after === 'whatsapp') {
+      try {
+        const result = await sendWhatsappMut.mutateAsync(saved.id);
+        if (result.whatsappUrl) {
+          window.open(result.whatsappUrl, '_blank', 'noopener,noreferrer');
+        }
+        toast.success('Cotización guardada. Se abrió WhatsApp en otra pestaña.');
+      } catch (err) {
+        toast.error(
+          apiErrorMessage(
+            err,
+            'La cotización se guardó pero falló el envío por WhatsApp. Verificá los datos y reintentá.',
+          ),
+        );
+        return;
+      }
+    } else {
+      toast.success(
+        mode === 'edit' || savedQuotationId !== saved.id
+          ? 'Cotización actualizada'
+          : 'Cotización guardada como borrador',
+      );
+    }
+
+    onSuccess?.(saved);
   }
+
+  // Si la cotización ya fue persistida en este intento (saved OK + envío
+  // falló), los labels de los botones cambian para que el operador entienda
+  // que el reintento NO crea una segunda cotización.
+  const pendingRetry = mode === 'create' && savedQuotationId !== null;
 
   const actionButtons = (
     <div className="flex flex-wrap items-center gap-2">
@@ -367,12 +491,20 @@ export function QuotationForm({
         disabled={submitting}
       >
         <Save className="h-4 w-4" />
-        {saveMut.isPending ? 'Guardando...' : 'Guardar borrador'}
+        {saveMut.isPending
+          ? 'Guardando...'
+          : pendingRetry
+            ? 'Guardar cambios'
+            : 'Guardar borrador'}
       </Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button type="button" disabled={submitting}>
-            {submitting ? 'Procesando...' : 'Guardar y enviar'}
+            {submitting
+              ? 'Procesando...'
+              : pendingRetry
+                ? 'Reintentar envío'
+                : 'Guardar y enviar'}
             <ChevronDown className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
@@ -413,6 +545,13 @@ export function QuotationForm({
             )}
           </div>
           {actionButtons}
+        </div>
+      )}
+
+      {pendingRetry && (
+        <div className="rounded-md border border-amber-500/40 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          La cotización se guardó pero el envío falló. Verificá los datos del
+          cliente y reintentá — no se creará una cotización duplicada.
         </div>
       )}
 
@@ -460,7 +599,10 @@ export function QuotationForm({
                     <Label>Cliente</Label>
                     <CustomerCombobox
                       value={field.value ?? null}
-                      onChange={(id) => field.onChange(id)}
+                      onChange={(id, customer) => {
+                        field.onChange(id);
+                        setCatalogCustomer(customer ?? null);
+                      }}
                       initialCustomer={initialData?.customer ?? null}
                     />
                     {form.formState.errors.customerId && (
@@ -617,42 +759,38 @@ export function QuotationForm({
                         />
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-1">
-                          <div className="flex overflow-hidden rounded-md border">
-                            <button
-                              type="button"
-                              onClick={() => updateItem(idx, { discountKind: '$' })}
-                              className={cn(
-                                'px-2 py-1 text-xs',
-                                it.discountKind === '$'
-                                  ? 'bg-primary text-primary-foreground'
-                                  : 'bg-background text-muted-foreground',
-                              )}
-                            >
-                              $
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => updateItem(idx, { discountKind: '%' })}
-                              className={cn(
-                                'px-2 py-1 text-xs',
-                                it.discountKind === '%'
-                                  ? 'bg-primary text-primary-foreground'
-                                  : 'bg-background text-muted-foreground',
-                              )}
-                            >
-                              %
-                            </button>
-                          </div>
-                          <Input
+                        <div className="flex h-10 items-stretch overflow-hidden rounded-md border focus-within:ring-2 focus-within:ring-ring">
+                          <input
                             type="text"
                             inputMode="decimal"
                             value={it.discountValue}
                             onChange={(e) =>
                               updateItem(idx, { discountValue: e.target.value })
                             }
-                            className="text-right"
+                            className="min-w-0 flex-1 bg-background px-2 text-right text-sm outline-none"
+                            aria-label="Valor de descuento"
                           />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateItem(idx, {
+                                discountKind: it.discountKind === '$' ? '%' : '$',
+                              })
+                            }
+                            title={
+                              it.discountKind === '$'
+                                ? 'Descuento en monto fijo. Click para cambiar a porcentaje.'
+                                : 'Descuento porcentual. Click para cambiar a monto fijo.'
+                            }
+                            aria-label={
+                              it.discountKind === '$'
+                                ? 'Cambiar a porcentaje'
+                                : 'Cambiar a monto fijo'
+                            }
+                            className="flex w-9 shrink-0 items-center justify-center border-l bg-muted text-sm font-semibold text-foreground hover:bg-muted/70"
+                          >
+                            {it.discountKind}
+                          </button>
                         </div>
                       </TableCell>
                       <TableCell className="text-right tabular-nums font-medium">
@@ -687,7 +825,8 @@ export function QuotationForm({
               placeholder="Plazo de entrega, observaciones, condiciones de pago, etc."
             />
             <p className="text-xs text-muted-foreground">
-              Las notas se imprimen al final del PDF de la cotización.
+              Las notas se muestran al cliente: aparecen en el PDF y en el link
+              público de la cotización.
             </p>
           </div>
         </TabsContent>

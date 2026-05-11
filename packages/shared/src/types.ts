@@ -313,8 +313,13 @@ export interface QuotationDto {
   updatedAt: string;
 }
 
-// Detalle público de la cotización (sin datos del usuario interno ni notas).
+// Detalle público de la cotización (sin datos del usuario interno).
 // Usado por GET /public/quotations/:token y por la pantalla pública del cliente.
+//
+// Las `notes` SÍ se incluyen: el campo está pensado para "plazo de entrega,
+// observaciones, condiciones de pago" — contenido que el cliente final
+// necesita ver. Si en el futuro hace falta separar notas internas de las
+// públicas, se agregaría un campo `internalNotes` aparte.
 export interface PublicQuotationDto {
   id: string;
   number: string;
@@ -324,6 +329,7 @@ export interface PublicQuotationDto {
   subtotal: string;
   taxAmount: string;
   total: string;
+  notes: string | null;
   customer: {
     name: string;
     taxId: string | null;

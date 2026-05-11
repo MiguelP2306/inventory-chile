@@ -37,6 +37,55 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 
 > Bitácora de fixes de UX y bugs reportados por el cliente sobre módulos ya entregados. Cada entrada describe el problema, la solución aplicada y los archivos tocados, para no perder el contexto cuando vuelvan a aparecer dudas o se quiera auditar el motivo de un cambio.
 
+### Ronda 2 — 2026-05-10 (módulo Cotizaciones)
+
+#### 1. Input de búsqueda en `/cotizaciones` con lag
+
+- **Síntoma reportado:** la pantalla de cotizaciones tenía el mismo bug de pérdida de caracteres al escribir rápido que ya se había corregido en el resto de la app.
+- **Causa raíz:** la pantalla quedó sin migrar al hook `useDebouncedUrlFilter` cuando se aplicó la Ronda 1. Seguía usando el patrón viejo `useState + setTimeout` con el input atado directo al estado de URL.
+- **Solución:** migrar [`apps/web/app/(dashboard)/cotizaciones/page.tsx`](apps/web/app/(dashboard)/cotizaciones/page.tsx) a `useDebouncedUrlFilter(filters, 'q', { resetKeys: ['page'] })`. Mismo patrón que productos, inventario, clientes, etc.
+- **NO se tocaron** los pickers internos del modal (`ProductPicker`, `CustomerCombobox`): usan `useState` local + debounce a 200 ms y por diseño no presentan el problema (no disparan `router.replace` por keystroke).
+
+#### 2. Selector $/% de descuento ilegible en mobile
+
+- **Síntoma reportado:** dentro del modal de cotización, en la tab Items, los botones `$` y `%` del selector de tipo de descuento se rompían visualmente en mobile. El botón de porcentaje quedaba casi imposible de tocar.
+- **Causa raíz:** el control era `[$ ][%][input]` en una columna fija de `w-[180px]`. En mobile la columna se comprimía, los botones se hacían muy chicos y el input se solapaba.
+- **Solución:** rediseño a un toggle único adosado al input. Ahora el input numérico ocupa todo el ancho disponible y a la derecha hay un único botón de 36 px que muestra el símbolo actual (`$` o `%`) y alterna al click. La altura coincide con la del input (mismo `h-10`), foco accesible (`focus-within:ring-2`), tooltip con explicación.
+- **Archivos:** [`apps/web/components/forms/quotation-form.tsx`](apps/web/components/forms/quotation-form.tsx).
+
+#### 3. Modal de cotización se cerraba con error
+
+- **Síntoma reportado:** al hacer "Guardar y enviar" si fallaba el envío (ej: falta de teléfono para WhatsApp), el toast de error aparecía pero el modal se cerraba igual. El usuario sentía que perdía los datos.
+- **Causa raíz (doble):**
+  1. El `try` interno de `sendEmail/sendWhatsapp` tragaba el error y permitía que `onSuccess(saved)` se ejecutara igual, lo cual cerraba el modal vía el wrapper.
+  2. No había pre-validación: el operador descubría la falta de contacto recién tras el save, cuando la cotización ya se había creado en la base. Reintentar habría duplicado el correlativo.
+- **Solución:**
+  - **Pre-validación de contacto**: antes de guardar, si elige "Enviar por email" se valida que haya email (catálogo o snapshot); si elige WhatsApp se valida teléfono normalizable a E.164. Si falta, toast de error con CTA "Ir al cliente" (cuando es del catálogo) o `setError` inline (cuando es libre). El save NO se ejecuta — modal intacto, datos preservados.
+  - **Reintento sin duplicar**: si la validación pasa pero el envío falla en runtime (ej: Resend caído), se guarda el `id` de la cotización en estado local. El próximo click reusa ese id (`updateQuotation` en vez de `createQuotation`), evitando un correlativo duplicado. Los botones cambian de label a "Guardar cambios" / "Reintentar envío" y un banner amarillo explica el estado.
+- **Archivos:** [`apps/web/components/forms/quotation-form.tsx`](apps/web/components/forms/quotation-form.tsx).
+
+#### 4. Texto fijo "15 días" inconsistente con `validUntil`
+
+- **Síntoma reportado:** el PDF y el link público mostraban la línea "Esta cotización tiene una validez de 15 días desde su emisión." incluso cuando la fecha de vencimiento de la cotización había sido configurada manualmente a otro plazo. El cliente final veía dos validez distintas.
+- **Causa raíz:** el texto vivía como literal en `CompanySettings.quotationFooter` (sembrado en [`run-seeds.ts`](apps/api/src/database/seeds/run-seeds.ts)). Se renderizaba tal cual en PDF (`pdf.service.ts`) y en el link público — sin interpolar `validUntil`.
+- **Solución:**
+  - Footer del seed reescrito a un texto neutro: `"Sujeta a confirmación de stock al momento de la venta. Precios en pesos chilenos (CLP), IVA incluido."`. La fecha real ya está en "Válida hasta: <fecha>" en todas las salidas, así que la línea de validez en el footer era redundante.
+  - **Migración idempotente** [`1778760000000-QuotationFooterCleanup.ts`](apps/api/src/database/migrations/1778760000000-QuotationFooterCleanup.ts) que actualiza el footer existente SOLO si todavía contiene el texto viejo exacto. Si el cliente ya lo customizó desde `/configuracion`, se respeta. El `down` revierte simétricamente.
+  - El footer queda como **texto editable libre** desde la pantalla de configuración — el cliente puede ponerlo en blanco o personalizarlo. La validez puntual de cada cotización es ahora responsabilidad única de `validUntil`.
+
+#### 5. Notas no aparecían en PDF ni en link público
+
+- **Síntoma reportado:** las notas escritas en la tab "Notas" del modal solo se veían en el detalle interno. En el PDF y en el link público no aparecían.
+- **Causa raíz:** decisión inicial conservadora — el `PublicQuotationDto` y el `PdfInput` excluían intencionalmente las notas (comentario explícito en [`packages/shared/src/types.ts`](packages/shared/src/types.ts)). El cliente final no las veía nunca.
+- **Solución:**
+  - Agregar `notes: string | null` a `PublicQuotationDto` y a `PdfInput`.
+  - Poblarlo en `toPublicDto` ([`apps/api/src/quotations/quotations.service.ts`](apps/api/src/quotations/quotations.service.ts)) y en `fromQuotationDto`/`fromPublicDto` ([`apps/api/src/notifications/pdf.service.ts`](apps/api/src/notifications/pdf.service.ts)).
+  - Renderizar las notas en el PDF (después de los totales, con título "Notas", soporte de wrap multilinea) en los formatos carta y tirilla 80 mm.
+  - Renderizar las notas en la página pública [`apps/web/app/p/cotizacion/[token]/page.tsx`](apps/web/app/p/cotizacion/[token]/page.tsx) en un bloque dedicado debajo de los totales.
+  - Actualizar el placeholder de la tab Notas para reflejar que ahora son visibles al cliente. Si en el futuro hace falta separar notas internas, se agregaría un campo `internalNotes` aparte — la puerta queda abierta sin tocar el actual.
+
+---
+
 ### Ronda 1 — 2026-05-10
 
 #### 1. Input de búsqueda con lag (problema global)
