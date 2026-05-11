@@ -42,6 +42,12 @@ export class SaleItem {
   @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
   discount!: string;
 
+  // Si el operador ingresó el descuento como %, guardamos el % original para
+  // reimprimir la nota con la misma representación. El `discount` siempre
+  // tiene el monto resuelto.
+  @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
+  discountPercent!: string | null;
+
   @Column({ type: 'decimal', precision: 15, scale: 2 })
   subtotal!: string;
 

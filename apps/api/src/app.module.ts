@@ -18,6 +18,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { ProductsModule } from './products/products.module';
 import { PurchasesModule } from './purchases/purchases.module';
 import { QuotationsModule } from './quotations/quotations.module';
+import { SalesModule } from './sales/sales.module';
 import { SettingsModule } from './settings/settings.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { UPLOADS_ROOT } from './uploads/upload-config';
@@ -57,6 +58,7 @@ import { VehiclesModule } from './vehicles/vehicles.module';
     SettingsModule,
     NotificationsModule,
     QuotationsModule,
+    SalesModule,
   ],
   controllers: [HealthController],
   providers: [],

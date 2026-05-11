@@ -1,8 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type {
+  PaymentMethodDto,
   PublicQuotationDto,
   QuotationDto,
   QuotationStatusDto,
+  SaleDto,
+  SaleStatusDto,
 } from '@inventory/shared';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -37,11 +40,22 @@ interface QuotationItemLine {
   subtotal: string;
 }
 
+/**
+ * Tipo del documento. El mismo render se reutiliza para cotizaciones y ventas
+ * (Fase 7); el título y algunos detalles cambian.
+ */
+type DocumentKind = 'quotation' | 'sale';
+
 interface PdfInput {
+  kind: DocumentKind;
   number: string;
   date: string;
+  // Solo cotizaciones tienen "válida hasta". En ventas es null.
   validUntil: string | null;
-  status: QuotationStatusDto;
+  // El tipo aquí se mantiene amplio para no acoplar PdfInput al estado de
+  // cada documento — el renderer no usa el estado para nada cosmético salvo
+  // el badge informativo, que solo se imprime para cotizaciones por ahora.
+  status: QuotationStatusDto | SaleStatusDto;
   subtotal: string;
   taxAmount: string;
   total: string;
@@ -49,6 +63,9 @@ interface PdfInput {
   customer: CustomerInfo;
   items: QuotationItemLine[];
   company: CompanyInfo;
+  // Solo aplica a ventas: método de pago + comisión tarjeta (cuando aplica).
+  paymentMethod?: PaymentMethodDto;
+  commissionAmount?: string;
 }
 
 @Injectable()
@@ -71,6 +88,7 @@ export class PdfService {
     settings: CompanySettings,
   ): PdfInput {
     return {
+      kind: 'quotation',
       number: q.number,
       date: q.date,
       validUntil: q.validUntil,
@@ -112,6 +130,7 @@ export class PdfService {
 
   fromPublicDto(p: PublicQuotationDto): PdfInput {
     return {
+      kind: 'quotation',
       number: p.number,
       date: p.date,
       validUntil: p.validUntil,
@@ -123,6 +142,57 @@ export class PdfService {
       customer: p.customer,
       items: p.items,
       company: p.company,
+    };
+  }
+
+  /**
+   * Construye el input para imprimir una "Nota de venta" desde un SaleDto.
+   * Diferencias clave con cotización:
+   *  - kind='sale' → cambia el título del documento.
+   *  - validUntil siempre null (la venta no vence).
+   *  - paymentMethod + commissionAmount agregan una línea en los totales.
+   */
+  fromSaleDto(s: SaleDto, settings: CompanySettings): PdfInput {
+    return {
+      kind: 'sale',
+      number: s.number,
+      date: s.date,
+      validUntil: null,
+      status: s.status,
+      subtotal: s.subtotal,
+      taxAmount: s.taxAmount,
+      total: s.total,
+      notes: s.notes,
+      paymentMethod: s.paymentMethod,
+      commissionAmount: s.commissionAmount,
+      customer: {
+        name: s.customer?.name ?? 'Sin especificar',
+        taxId: s.customer?.taxId ?? null,
+        email: s.customer?.email ?? null,
+        phone: s.customer?.phone ?? null,
+      },
+      items: (s.items ?? []).map((it) => ({
+        code:
+          it.product?.partNumber ??
+          it.product?.sku ??
+          it.product?.universalCode ??
+          '',
+        description: it.product?.name ?? '',
+        qty: it.qty,
+        unitPrice: it.unitPrice,
+        discount: it.discount,
+        discountPercent: it.discountPercent,
+        subtotal: it.subtotal,
+      })),
+      company: {
+        name: settings.name,
+        address: settings.address,
+        phone: settings.phone,
+        email: settings.email,
+        taxId: settings.taxId,
+        logoUrl: settings.logoUrl,
+        quotationFooter: settings.quotationFooter,
+      },
     };
   }
 
@@ -182,7 +252,8 @@ export class PdfService {
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
-    doc.text(`Cotización ${input.number}`, margin, y);
+    const docLabel = input.kind === 'sale' ? 'Nota de venta' : 'Cotización';
+    doc.text(`${docLabel} ${input.number}`, margin, y);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
     y += 16;
@@ -196,6 +267,13 @@ export class PdfService {
     }
     y += 14;
     doc.text(`Estado: ${translateStatus(input.status)}`, margin, y);
+    if (input.kind === 'sale' && input.paymentMethod) {
+      doc.text(
+        `Pago: ${translatePaymentMethod(input.paymentMethod)}`,
+        margin + 200,
+        y,
+      );
+    }
     y += 18;
 
     // Cliente box
@@ -333,7 +411,8 @@ export class PdfService {
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
-    doc.text(`Cotización ${input.number}`, widthPt / 2, y, { align: 'center' });
+    const docLabel = input.kind === 'sale' ? 'Nota de venta' : 'Cotización';
+    doc.text(`${docLabel} ${input.number}`, widthPt / 2, y, { align: 'center' });
     y += 12;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
@@ -341,6 +420,14 @@ export class PdfService {
     y += 9;
     if (input.validUntil) {
       doc.text(`Válida hasta: ${formatDate(input.validUntil)}`, margin, y);
+      y += 9;
+    }
+    if (input.kind === 'sale' && input.paymentMethod) {
+      doc.text(
+        `Pago: ${translatePaymentMethod(input.paymentMethod)}`,
+        margin,
+        y,
+      );
       y += 9;
     }
     y += 4;
@@ -444,7 +531,7 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString('es-CL');
 }
 
-function translateStatus(s: QuotationStatusDto): string {
+function translateStatus(s: QuotationStatusDto | SaleStatusDto): string {
   switch (s) {
     case 'DRAFT':
       return 'Borrador';
@@ -458,8 +545,27 @@ function translateStatus(s: QuotationStatusDto): string {
       return 'Convertida en venta';
     case 'EXPIRED':
       return 'Vencida';
+    case 'PENDING':
+      return 'Pendiente';
+    case 'PAID':
+      return 'Pagada';
+    case 'CANCELLED':
+      return 'Cancelada';
     default:
       return s;
+  }
+}
+
+function translatePaymentMethod(m: PaymentMethodDto): string {
+  switch (m) {
+    case 'CASH':
+      return 'Efectivo';
+    case 'TRANSFER':
+      return 'Transferencia';
+    case 'CARD':
+      return 'Tarjeta';
+    default:
+      return m;
   }
 }
 

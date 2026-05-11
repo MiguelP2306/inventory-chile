@@ -1,17 +1,66 @@
-Vamos con la siguiente fase que seria la fase 7. Analiza mi @PLAN.md  y mi @README.md  para que tengas mas contexto de la fase 7 que sera la a desarrollar, documenta todo en el @README.md para yo tener contexto de lo que es esta fase y que se hizo y cambia el status de "pendiente" a "✅" .
+Prompt: 
+    Perfecto! Ahora tengo una duda que debi de hacer antes de empezar la fase 7 pero ya que estamos te preguntare de una.
 
-Hazme todas las preguntas necesarias para que puedas hacer un mejor trabajo, las quiero en una en una con elecciones para yo eligir
+    Necesito integrar que se pueda generar automaticamente la etiqueta para cada producto con su descripcion y codigo en tamano 50mm y ancho de 30mm alto en impresora termica
 
+    Las bodegas tienen productos y cada producto dentro de una bodega va a tener un codigo de ubicacion para que el cliente cuando necesite conseguir un producto dentro de una bodega en especifico ir hacia la ubicacion del codigo
 
-===================================================================================================================================
+    Esto estaria correcto agregarlo en esta fase o lo correcto seria a esperar a tal fase?
 
-Cotizacion > 
-	El input de search tiene un problema que antes tenian todos los search de todas las pestanas y al parecer "cotizacion" es la unica pagina que se quedo con ese error. Si el usuario escribe rápidamente, algunos caracteres no se registran. El input parece tener un delay o lag en la captura de texto. El usuario se ve obligado a escribir lentamente para evitar errores.
+AI:
+    Buena pregunta para revisar antes de seguir. Te respondo con lo que está planificado y mi recomendación, así decidís sin que arranque a programar.
 
-	En el modal de crear/editar cotizacion al agregar producto en el tab de items hay una opcion para poder escoger si hacer el descuento en dolares o en porcentaje ($/%) pero tiene un problema de responsive ya que solo se ve bien para escoger dolar ($) pero para escoger porcentaje (%) se ve mal aun punto en el que apenas puedo escoger porcentaje
+    Estado actual en el plan
+    1. Etiquetas térmicas con código + descripción — Ya está planificado en Fase 11 (PLAN.md, sección "Códigos de barras y refinamiento de plantillas"):
 
-	En algunas ocaciones cuando tengo un error al crear/editar cotizacion y le doy a "guardar y enviar" y tengo un error como por ejemplo el siguiente "Falta el teléfono del cliente para enviar por WhatsApp." me notifica el error y despues me cierra el modal perdiendo la informacion que tenia, que me notifique cual y donde esta el error es correcto, pero no deberia de cerrarme el modal si hay un error porque pierdo la informacion, no tengo claro si pasa lo mismo en el caso de que presione el boton "Guardar borrador" revisalo y arreglalo en el caso de que funcione igual
+    Generación de etiquetas: PDF imprimible con barcode CODE128 + SKU + nombre + precio (bwip-js).
+    La librería ya está decidida (bwip-js). Tu requerimiento de 50×30 mm es una variación de formato concreta sobre eso.
 
-	En el caso de que todo salga satisfactorio y me crea mi link de cotizacion con whastapp por ejemplo, la fecha limite de esta cotizacion es Fecha: 9 de mayo de 2026 · Vence: 31 de julio de 2026 pero cuando quiero imprimir la carta con size normal o 80mm cuando veo el texto de abajo me dice "Esta cotización tiene una validez de 15 días desde su emisión." lo cual no tiene sentido, no esta agarrando la fecha limite correcta. Lo mismo pasa cuando creo el link de cotizacion me dice abajo "Esta cotización tiene una validez de 15 días desde su emisión." y la fecha de esta cotizacion es de "Fecha: 9 de mayo de 2026" y "Válida hasta: 31 de julio de 2026"
+    2. Código de ubicación por bodega — NO está en el plan. Lo más cercano es el campo Product.location que existe hoy (sale.entity hermana, product.entity) como texto libre global del producto. No es por bodega.
 
-	Cuando genero el PDF y la cotizacion tiene una "nota" esta nota no se ve en el pdf tampoco se ve en el link "http://localhost:3000/p/cotizacion/bcc701da3c8fdd4bbf799c03b47e71ec821ba8328264c550". La nota solo se ve en la ruta que detalla la cotizacion "cotizaciones/6a8ec2a5-462b-4b98-b6db-20f5960f7dcf"
+    Mi recomendación
+    Mejor no meter esto en Fase 7. La fase ya cerró su scope (ventas + caja + cancelación) y se probó end-to-end. Mezclar features nuevas ahora dificulta el QA del cliente y agranda el diff.
+
+    Lo separaría así:
+
+    Feature	Mejor encaje	Por qué
+    Etiquetas 50×30 mm térmicas	Fase 11 (ya planificada) o mini-fase 7.4 aparte si la querés ya	Es self-contained. No bloquea ni depende de nada. Se hace en aislado: endpoint GET /products/:id/label?format=50x30 que devuelve PDF + botón "Imprimir etiqueta" en /productos/[id].
+    Código de ubicación por bodega	Fase 7.5 (multi-bodega)	Hoy hay 1 sola bodega ("Principal"). Una ubicación "por bodega" cuando solo hay una es lo mismo que el Product.location global que ya existe. El valor real aparece cuando entren ML Full y otras bodegas en 7.5 — ahí cada producto puede estar en lugares físicos distintos por bodega.
+    Si querés acelerar
+    Si te urge tener etiquetas YA (antes de Fase 11), lo puedo hacer como una mini-fase 7.4 independiente — son ~150 líneas backend + 1 botón en /productos/[id]. Las etiquetas no dependen de ubicación por bodega, así que se pueden hacer aisladas.
+
+    Si te urge la ubicación por bodega antes de 7.5, hay dos caminos:
+
+    Camino rápido: usar el campo existente Product.location (texto libre, global) y exponerlo más visiblemente. Cuando llegue 7.5 lo migramos a Stock.locationCode (per-bodega).
+    Camino "hacelo bien ya": adelantar parte de 7.5 — agregar Stock.locationCode (varchar 30, nullable) ahora con migración chica, dejar el form de Stock para editarlo, y ya queda preparado. Cuando entre multi-bodega en 7.5, este campo ya está poblado por bodega y solo agregamos el selector de bodega.
+    AskUserQuestion
+    OUT
+    User has answered your questions: "Sobre las etiquetas térmicas 50×30 mm: ¿cuándo las querés?"="Esperar Fase 11 como está planificado (Recomendado)". You can now continue with the user's answers in mind.
+    AskUserQuestion
+    OUT
+    User has answered your questions: "Sobre el código de ubicación por bodega: ¿qué hacemos?"="Esperar Fase 7.5 (Recomendado)". You can now continue with the user's answers in mind.
+    Perfecto. Decisión tomada:
+
+    Etiquetas térmicas 50×30 mm → quedan en Fase 11 como ya estaba planificado. Anotaré tu requerimiento del formato específico (50×30) para que cuando lleguemos allá no tengamos que volver a discutirlo.
+    Código de ubicación por bodega → Fase 7.5 (multi-bodega). Ahí agrego Stock.locationCode y el form para editarlo, junto con el activado real de multi-bodega.
+    Voy a dejar registro de las dos decisiones en PLAN.md para que no se pierdan:
+
+    Read c:\Users\Valeria\OneDrive\Escritorio\Nueva carpeta\inventory-chile\PLAN.md (lines 419-448)
+    Edit c:\Users\Valeria\OneDrive\Escritorio\Nueva carpeta\inventory-chile\PLAN.md
+    Added 1 line
+    Y anoto el formato 50×30 mm en Fase 11:
+
+    Grep "Generación de etiquetas|bwip-js" (in c:\Users\Valeria\OneDrive\Escritorio\Nueva carpeta\inventory-chile\PLAN.md)
+    7 lines of output
+    Edit c:\Users\Valeria\OneDrive\Escritorio\Nueva carpeta\inventory-chile\PLAN.md
+    Modified
+    Listo. Quedaron documentadas las dos decisiones para que no se pierdan cuando lleguemos a las fases correspondientes:
+
+    Resumen de decisiones
+
+    Etiquetas térmicas 50×30 mm → Fase 11 (ya planificada). Formato confirmado y anotado en PLAN.md:506.
+    Código de ubicación por bodega → Fase 7.5. Schema (Stock.locationCode), UI y migración del campo viejo Product.location documentados en PLAN.md:425 como ítem 7 de la fase.
+    Lo que sigue naturalmente
+    La próxima fase que toca es la 7.5 (multi-bodega + Mercado Libre Full). Cuando arranquemos esa, también entra el código de ubicación por bodega como parte del scope. Las etiquetas vienen después en Fase 11.
+
+    Si querés, también puedo dejar una nota en el README en la sección de "Decisiones pendientes con el cliente" para que el cliente vea que el requerimiento quedó registrado pero pospuesto a su fase natural — avisame si te suma o lo dejamos solo en el PLAN.

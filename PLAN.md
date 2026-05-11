@@ -398,7 +398,7 @@ inventory-management/
 11. **Acción "Convertir a venta"** → en Fase 6 abre `/ventas/nueva?fromQuotation=<id>` que en Fase 7 prellena el form de venta. La cotización solo pasa a CONVERTED cuando la venta se confirma (Fase 7).
 12. Pantallas: `/cotizaciones` (listado), `/cotizaciones/nueva`, `/cotizaciones/[id]` (detalle + acciones), `/cotizaciones/[id]/imprimir` (vista imprimible Carta/80mm), `/p/cotizacion/[token]` (público sin auth).
 
-### Fase 7 — Ventas con caja integrada
+### Fase 7 — Ventas con caja integrada ✅
 
 1. CRUD de `Sale` + items, con:
   - **Selector de bodega** (`warehouseId`) — clave para la integración Mercado Libre Full (Fase 7.5). Si solo hay una bodega activa, se preselecciona.
@@ -428,7 +428,8 @@ inventory-management/
   - **No** genera `CashTransaction` — no es venta ni gasto.
 5. Pantalla "Transferencias entre bodegas" con listado + nuevo + filtros por bodega/fecha.
 6. Vista de stock con selector de bodega (hoy implícita la `Principal`).
-7. **Decisión a confirmar con cliente:** integración real con API de Mercado Libre vs. registro manual. **Asunción del MVP: manual** — el operador registra la transferencia y la venta posterior en ML Full a mano.
+7. **Código de ubicación por bodega** (requerimiento agregado en Fase 7): migración que agrega `Stock.locationCode` (varchar 30, nullable). Cada producto puede tener una ubicación física distinta en cada bodega (pasillo/estante/posición). Editable inline desde `/inventario` con la bodega seleccionada. Búsqueda por código de ubicación. Reemplaza al campo global `Product.location` — durante esta fase se migran los valores existentes del campo viejo al nuevo y se deja el viejo como deprecated.
+8. **Decisión a confirmar con cliente:** integración real con API de Mercado Libre vs. registro manual. **Asunción del MVP: manual** — el operador registra la transferencia y la venta posterior en ML Full a mano.
 
 ### Fase 7.6 — Devoluciones y garantías
 
@@ -502,7 +503,7 @@ inventory-management/
 
 1. **Lector USB:** input `autoFocus` + handler `Enter` — funciona out-of-the-box.
 2. **Cámara:** componente con `@zxing/browser` para móviles/laptops.
-3. **Generación de etiquetas:** PDF imprimible con barcode CODE128 + SKU + nombre + precio (`bwip-js`).
+3. **Generación de etiquetas:** PDF imprimible con barcode CODE128 + SKU + nombre + precio (`bwip-js`). **Formato confirmado con cliente: 50 mm de ancho × 30 mm de alto** para impresora térmica. Endpoint `GET /products/:id/label?format=50x30` y botón "Imprimir etiqueta" en el detalle del producto. Opcional: incluir el `Stock.locationCode` (Fase 7.5) si está definido en la bodega seleccionada — permite que el equipo pegue la etiqueta y se sepa dónde va.
 4. Refinar plantillas de cotización, nota de venta y guía de despacho con branding final del cliente (logo, colores, footer legal). Las plantillas funcionales 80mm + carta ya viven desde Fases 6/7/7.7 — esta fase es solo pulido.
 
 ### Fase 12 — Deploy

@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { QuotationFormDialog } from '@/components/forms/quotation-form-dialog';
+import { SaleFormDialog } from '@/components/forms/sale-form-dialog';
 import { OperationModal } from '@/components/operation-modal';
 import { cn } from '@/lib/utils';
 
@@ -19,6 +20,7 @@ export function OperationFab() {
   const qc = useQueryClient();
   const [chooserOpen, setChooserOpen] = useState(false);
   const [quotationOpen, setQuotationOpen] = useState(false);
+  const [saleOpen, setSaleOpen] = useState(false);
 
   if (pathname && HIDDEN_PREFIXES.some((p) => pathname.startsWith(p))) {
     return null;
@@ -46,6 +48,7 @@ export function OperationFab() {
         open={chooserOpen}
         onOpenChange={setChooserOpen}
         onPickQuotation={() => setQuotationOpen(true)}
+        onPickSale={() => setSaleOpen(true)}
       />
 
       <QuotationFormDialog
@@ -58,6 +61,22 @@ export function OperationFab() {
             action: {
               label: 'Ver detalle',
               onClick: () => router.push(`/cotizaciones/${saved.id}`),
+            },
+          });
+        }}
+      />
+
+      <SaleFormDialog
+        open={saleOpen}
+        onOpenChange={setSaleOpen}
+        onSaved={(saved) => {
+          qc.invalidateQueries({ queryKey: ['sales'] });
+          qc.invalidateQueries({ queryKey: ['stock'] });
+          qc.invalidateQueries({ queryKey: ['cashbox-balance'] });
+          toast.success(`Venta ${saved.number} registrada`, {
+            action: {
+              label: 'Ver detalle',
+              onClick: () => router.push(`/ventas/${saved.id}`),
             },
           });
         }}

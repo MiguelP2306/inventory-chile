@@ -14,6 +14,7 @@ import { Customer } from './customer.entity';
 import { Quotation } from './quotation.entity';
 import { SaleItem } from './sale-item.entity';
 import { User } from './user.entity';
+import { Warehouse } from './warehouse.entity';
 
 @Entity('sales')
 export class Sale {
@@ -31,6 +32,16 @@ export class Sale {
   @Index('idx_sales_customer')
   @Column({ type: 'char', length: 36 })
   customerId!: string;
+
+  // Bodega de la que sale el stock. Por ahora siempre "Principal" (única
+  // bodega activa hasta Fase 7.5). Schema queda preparado para multi-bodega.
+  @ManyToOne(() => Warehouse, { onDelete: 'RESTRICT', nullable: false })
+  @JoinColumn({ name: 'warehouseId' })
+  warehouse?: Warehouse;
+
+  @Index('idx_sales_warehouse')
+  @Column({ type: 'char', length: 36 })
+  warehouseId!: string;
 
   @Index('idx_sales_date')
   @Column({ type: 'datetime', precision: 6 })
@@ -76,6 +87,24 @@ export class Sale {
 
   @OneToMany(() => SaleItem, (item) => item.sale, { cascade: false })
   items?: SaleItem[];
+
+  // Observaciones / notas. Se imprimen al final del PDF de la nota de venta.
+  @Column({ type: 'text', nullable: true })
+  notes!: string | null;
+
+  // Datos de cancelación (status === 'CANCELLED').
+  @Column({ type: 'datetime', precision: 6, nullable: true })
+  cancelledAt!: Date | null;
+
+  @Column({ type: 'text', nullable: true })
+  cancelReason!: string | null;
+
+  @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'cancelledById' })
+  cancelledBy?: User | null;
+
+  @Column({ type: 'char', length: 36, nullable: true })
+  cancelledById!: string | null;
 
   @CreateDateColumn({ type: 'datetime', precision: 6 })
   createdAt!: Date;

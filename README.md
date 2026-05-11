@@ -19,7 +19,7 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 | 4B | Catálogo extendido: código universal + códigos compatibles + galería de fotos + ORIGINAL/ALTERNATIVO + uploads infrastructure | ✅ |
 | 5 | Caja, gastos, IVA, comisiones por tarjeta + factura adjunta en compras | ✅ |
 | 6 | Cotizaciones + modal venta/cotización + impresión 80mm/carta + WhatsApp/email | ✅ |
-| 7 | Ventas con caja integrada (selector de bodega + comisión tarjeta + impresión) | pendiente |
+| 7 | Ventas con caja integrada (warehouseId + método de pago + comisión tarjeta + cancelación atómica + PDF carta/80mm) | ✅ |
 | 7.5 | Multi-bodega + transferencias (flujo Mercado Libre Full manual) | pendiente |
 | 7.6 | Devoluciones + Garantías | pendiente |
 | 7.7 | Guía de despacho con número correlativo | pendiente |
@@ -723,6 +723,144 @@ A pedido del cliente: toda la creación y edición de cotizaciones ahora vive en
 **Pendiente para usar en producción de la fase**
 
 - Configurar `RESEND_API_KEY` en `.env.local` para enviar emails reales — sin la key, todo lo demás funciona y el envío por WhatsApp arma `wa.me` sin depender de Resend.
+
+---
+
+## Fase 7 — Ventas con caja integrada
+
+Cierra el ciclo operativo del MVP: el operador registra la venta, el sistema descuenta stock, registra el ingreso en caja y (si fue tarjeta) registra el egreso por comisión bancaria — todo en una sola transacción atómica. La cancelación revierte simétricamente. Las cotizaciones de Fase 6 pueden convertirse directamente en ventas.
+
+### Decisiones de negocio acordadas
+
+| Tema | Decisión |
+| --- | --- |
+| Estado inicial | **PAID directo** al confirmar el form. No hay flujo PENDING separado — para "pedido pendiente de cobro" existe Cotización. Esto simplifica la UX administrativa (sin POS) y deja una sola acción significativa: confirmar. |
+| Cliente | **Solo del catálogo, obligatorio**. RUT requerido (regla del cliente). Si el cliente no existe, el operador lo crea en `/clientes/nuevo` y vuelve — no hay snapshot inline. La entidad `Sale.customerId` queda `NOT NULL`. |
+| Bodega | `Sale.warehouseId` agregado a la entidad desde Fase 7 (preparado para 7.5). **Sin selector visible** mientras solo exista la bodega "Principal" — el backend la asigna automáticamente. Cuando 7.5 active multi-bodega, agregamos el selector en el form sin tocar schema. |
+| Método de pago | Selector visual con 3 opciones: **Efectivo** / **Transferencia** / **Tarjeta**. Tarjeta muestra el % de comisión que se calculará. La comisión se descompone en un `CashTransaction(EXPENSE)` separado para auditoría. |
+| Stock validation | **Defensa en profundidad**: el form muestra "Stock: X" debajo de cada cantidad y bloquea el botón "Confirmar" si alguna línea excede el disponible. El backend revalida en `applyMovement` y devuelve 409 si una race condition pasa la validación del front. |
+| Cancelación | **Cualquier venta no-cancelada puede cancelarse**, con motivo obligatorio (min 5 chars). Sin ventana de tiempo. En una transacción atómica: revierte stock vía `RETURN_IN`, anula transacciones de caja vía `voidTransaction` (genera compensaciones), y marca `cancelledAt + cancelReason + cancelledById`. No se puede reactivar — quien quiera "rehacer" debe crear una venta nueva. |
+| Costo congelado | `SaleItem.unitCost` se persiste al confirmar la venta usando `products.cost` del momento. Si el costo del producto cambia después, los reportes de rentabilidad históricos siguen siendo correctos. |
+| Convert desde cotización | El botón "Convertir a venta" del detalle de cotización navega a `/ventas/nueva?fromQuotation=<id>` con el form pre-llenado (cliente, items, descuentos, notas). El operador puede ajustar antes de confirmar. Al confirmar, el backend marca la cotización como `CONVERTED` en la **misma transacción** del create de venta. Si el operador cancela el form, la cotización queda intacta. |
+| PDF "Nota de venta" | Reutiliza la infraestructura de Fase 6 (`PdfService` con jsPDF + jspdf-autotable). Mismas dos formas: **Carta (A4)** y **Térmica 80mm**. Encabezado dice "Nota de venta" en vez de "Cotización". Muestra método de pago en el encabezado. Sin "Válida hasta". Sin link público (la venta es interna). |
+| Notas | Campo opcional `Sale.notes`. Visible en el PDF al final, en el bloque "Notas". Útil para plazo de entrega u observaciones hasta que tengamos Guía de Despacho (Fase 7.7). |
+| Numeración | Correlativo `VTA-AAAA-NNNNN` (ej: `VTA-2026-00001`) generado atómicamente con `CountersService` (kind `'SALE'`). El reset es anual: cada año vuelve a `00001`. |
+
+### Schema
+
+#### Migración [`1778800000000-SalesPhase7.ts`](apps/api/src/database/migrations/1778800000000-SalesPhase7.ts)
+
+| Cambio | Tabla | Notas |
+| --- | --- | --- |
+| `warehouseId` | `sales` | NOT NULL, FK a `warehouses` ON DELETE RESTRICT. **Backfill**: copia la bodega "Principal" (o la primera por orden alfabético) en filas existentes antes de pasar a NOT NULL. Si no hay ninguna bodega, la migración aborta con mensaje claro. |
+| `cancelledAt` | `sales` | `datetime(6) NULL`. Timestamp de la cancelación. |
+| `cancelReason` | `sales` | `text NULL`. Motivo guardado tal cual lo escribe el operador (sin sanitizar). |
+| `cancelledById` | `sales` | `char(36) NULL`, FK a `users` ON DELETE SET NULL. Quién cancela. |
+| `notes` | `sales` | `text NULL`. Notas visibles en el PDF. |
+| `discountPercent` | `sale_items` | `decimal(5,2) NULL`. Espejo del campo en `quotation_items`: persiste el % original si el operador eligió "%" en el toggle, para reimprimir el documento con la misma representación. El campo `discount` siempre guarda el monto resuelto. |
+
+> El `down` revierte en orden inverso e incluye drop de FKs e índices. Probar `db:migrate:revert` localmente antes de hacer rollback en producción.
+
+#### Entidades actualizadas
+
+- [`Sale`](apps/api/src/database/entities/sale.entity.ts) — agrega `warehouse?: Warehouse`, `warehouseId`, `notes`, `cancelledAt`, `cancelReason`, `cancelledBy?`, `cancelledById`.
+- [`SaleItem`](apps/api/src/database/entities/sale-item.entity.ts) — agrega `discountPercent`.
+
+### Backend
+
+#### Módulo nuevo [`apps/api/src/sales/`](apps/api/src/sales/)
+
+- **`SalesService.create(dto, userId)`** — única forma de crear una venta. Todo en `dataSource.transaction()`:
+  1. Valida cliente, productos (existencia + sin duplicados), settings, comisión categoría si es tarjeta.
+  2. Calcula totales con `computeSaleTotals` (descompone bruto → neto + IVA usando `companySettings.taxRate`).
+  3. Genera `VTA-AAAA-NNNNN` con `CountersService` (mismo lock pesimista que cotizaciones).
+  4. Persiste `Sale` (status=PAID) + cada `SaleItem` con `unitCost = product.cost` congelado.
+  5. Por cada item llama `InventoryService.applyMovement(manager, { type: SALE_OUT, qty: -qty, ... })`. Si el stock queda negativo, `applyMovement` tira `ConflictException` y aborta la transacción.
+  6. Registra `CashTransaction(INCOME, source=SALE)` por el total bruto.
+  7. Si `paymentMethod=CARD`, registra adicionalmente `CashTransaction(EXPENSE, source=SALE, expenseCategoryId=Comisión Tarjeta)` por `total × cardCommissionRate`.
+  8. Si `dto.quotationId` viene, marca la cotización como `CONVERTED` en la misma transacción (validando que no esté ya cerrada).
+- **`SalesService.cancel(id, dto, userId)`** — única forma de cancelar. En una transacción:
+  1. Por cada item, `applyMovement(RETURN_IN, qty=+qty)` para devolver stock.
+  2. Busca todas las `CashTransaction` con `source=SALE, sourceId=id, isVoided=false` y llama `cashbox.voidTransaction(id, userId, manager)` — que marca la original como `isVoided=true` y crea la compensación (INCOME→EXPENSE o viceversa). Si fue tarjeta, anula tanto el ingreso como el egreso de comisión.
+  3. Marca la venta como `CANCELLED` con `cancelledAt`, `cancelReason`, `cancelledById`.
+- **`SalesService.availableStock(productIds, warehouseId?)`** — endpoint helper para el form: devuelve el stock disponible de cada producto en la bodega seleccionada. El frontend lo consume para el badge "Stock: X" en cada línea.
+- **`SalesService.list(query)`** — listado paginado con filtros: estado, método de pago, cliente, rango de fechas, búsqueda libre `q` (número, nombre o RUT del cliente). Carga items en batch (sin N+1).
+- **`SalesService.getOne(id)`** — detalle con customer, warehouse, user, cancelledBy, quotation, items.
+- **`SalesController`** — endpoints:
+  - `GET /sales` (list paginado)
+  - `GET /sales/available-stock?productIds=a,b,c[&warehouseId=...]` (helper para el form)
+  - `GET /sales/:id` (detalle)
+  - `POST /sales` (create atómico)
+  - `POST /sales/:id/cancel` (cancel atómico)
+  - `GET /sales/:id/pdf?format=letter|thermal80` (PDF de la nota de venta)
+- **`SalesModule`** — importa `CountersModule`, `InventoryModule`, `CashboxModule`, `NotificationsModule` y registra el repositorio de las entidades necesarias. Wireado en `AppModule`.
+
+#### PdfService extendido — [`apps/api/src/notifications/pdf.service.ts`](apps/api/src/notifications/pdf.service.ts)
+
+El `PdfInput` ahora tiene un campo `kind: 'quotation' | 'sale'` y campos opcionales `paymentMethod` + `commissionAmount`. Diferencias en el render:
+
+- **Título**: "Cotización N°…" vs **"Nota de venta N°…"**.
+- **Encabezado**: si es venta, no se muestra "Válida hasta" y se agrega una línea "Pago: Efectivo / Transferencia / Tarjeta".
+- **Estado**: traduce los 3 estados de venta (Pagada, Pendiente, Cancelada) además de los de cotización.
+- Helper nuevo: `fromSaleDto(s, settings)` arma el `PdfInput` desde un `SaleDto`.
+
+### Frontend
+
+#### Componentes y pantallas nuevas
+
+- [`SaleForm`](apps/web/components/forms/sale-form.tsx) — form de venta con 3 tabs:
+  - **Cliente y pago**: selector de cliente (combobox con búsqueda, solo catálogo) + 3 cards visuales de método de pago (con ícono y hint sobre comisión).
+  - **Items**: tabla con SKU, producto, cantidad + badge de stock disponible debajo, precio unitario, descuento (toggle $/% adosado al input — mismo patrón que cotizaciones tras la Ronda 2), subtotal por línea. Botón "Agregar producto" que abre `ProductPicker`. Si alguna línea excede stock, la fila se pinta rojo y el botón "Confirmar" queda deshabilitado.
+  - **Notas**: textarea libre.
+- [`SaleFormDialog`](apps/web/components/forms/sale-form-dialog.tsx) — wrapper en `<Dialog>` con `key` para remount limpio al abrir.
+- [`CancelSaleDialog`](apps/web/components/forms/cancel-sale-dialog.tsx) — pide motivo obligatorio (min 5 chars), confirma cancelación e invalida queries de stock, caja y movimientos para que toda la UI se refresque.
+- [`SaleStatusBadge`](apps/web/components/sale-status-badge.tsx) — badge coloreado por estado: PAID (verde), PENDING (ámbar), CANCELLED (rojo + line-through).
+- [`/ventas`](apps/web/app/(dashboard)/ventas/page.tsx) — listado paginado con filtros (estado, método, búsqueda, rango fechas). Botón directo "Nueva venta" que abre el `SaleFormDialog` (sin pasar por el modal de elección). Filtros sincronizados con URL vía `useUrlFilters` + `useDebouncedUrlFilter` (búsqueda fluida, 300 ms).
+- [`/ventas/[id]`](apps/web/app/(dashboard)/ventas/[id]/page.tsx) — detalle con header (número + badge + auditoría), bloques de Cliente y Pago, tabla de items, totales, notas, banner rojo si está cancelada (mostrando motivo + quién + cuándo). Acciones: **Cancelar venta** (si no está cancelada) y dropdown **Imprimir** con Carta y Térmica 80mm.
+- [`/ventas/nueva`](apps/web/app/(dashboard)/ventas/nueva/page.tsx) — pantalla full-width usada principalmente para el flujo "Convertir desde cotización". Si llega `?fromQuotation=<id>`, carga la cotización y pre-llena el `SaleForm`. Al confirmar, redirige a `/ventas/<saleId>`.
+
+#### Wiring del FAB
+
+- [`OperationFab`](apps/web/components/operation-fab.tsx) — el botón flotante ahora maneja también la apertura de `SaleFormDialog`. Pasa `onPickSale` al `OperationModal`, lo cual habilita el botón "Venta" (antes deshabilitado con badge "Próximamente"). Al guardar la venta, toast con acción "Ver detalle" que navega al detalle.
+- [`Sidebar`](apps/web/components/sidebar.tsx) — item "Ventas" agregado bajo la sección "Operación", justo después de "Cotizaciones".
+
+#### API client — [`apps/web/lib/sales-api.ts`](apps/web/lib/sales-api.ts)
+
+Wrappers tipados de axios: `listSales`, `getSale`, `createSale`, `cancelSale`, `getAvailableStock`, `getSalePdfUrl`. Tipos vienen de `@inventory/shared`.
+
+### DTOs compartidos — [`packages/shared/src/types.ts`](packages/shared/src/types.ts)
+
+Agregados:
+
+- `SaleStatusDto = 'PENDING' | 'PAID' | 'CANCELLED'`.
+- `SaleItemDto` — incluye `unitCost` congelado.
+- `SaleDto` — incluye `warehouse?`, `quotation?` (opcional, si vino de una cotización), `cancelledAt`, `cancelReason`, `cancelledBy?`.
+- `CreateSaleInput`, `CreateSaleItemInput`, `CancelSaleInput`.
+
+### Verificación end-to-end de la fase
+
+| Caso | Resultado esperado |
+| --- | --- |
+| Crear venta con efectivo | Stock baja de la bodega Principal, caja sube por el total, libro de caja muestra ingreso con `source=SALE`. |
+| Crear venta con transferencia | Igual que efectivo pero `paymentMethod=TRANSFER`. Saldo por método: aumenta el de transferencia. |
+| Crear venta con tarjeta | Caja sube por el total bruto; caja baja por la comisión (≈2.5% del total) en una transacción adicional con `expenseCategoryId=Comisión Tarjeta`. |
+| Cancelar una venta confirmada | Stock vuelve (movimiento `RETURN_IN`), caja se compensa (la del INCOME pasa a `isVoided=true` + compensación EXPENSE; si hubo comisión, también). Venta queda CANCELLED con motivo y auditoría. |
+| Convertir cotización a venta | Click en "Convertir a venta" desde el detalle de cotización → navega a `/ventas/nueva?fromQuotation=<id>` con el form pre-llenado → al confirmar, se crea la venta y la cotización pasa a CONVERTED **en la misma transacción**. |
+| Stock insuficiente | Form bloquea botón "Confirmar" si alguna línea excede. Si pasa la validación pero stock cambió en otra pestaña, backend devuelve 409 en `applyMovement` y aborta toda la transacción (nada se persiste). |
+| PDF "Nota de venta" | Carta (A4) y Térmica 80mm descargan correctamente. Encabezado dice "Nota de venta VTA-2026-NNNNN", incluye método de pago, notas al final, footer de empresa. |
+| Quotación ya convertida → reintento | Backend devuelve `ConflictException` desde la transacción. Frontend muestra el error y la cotización no cambia. |
+
+### Tests / health
+
+- `pnpm --filter @inventory/api typecheck` ✅
+- `pnpm --filter @inventory/web typecheck` ✅
+- `pnpm --filter @inventory/shared build` ✅
+
+### Pendientes para fases futuras
+
+- **Multi-bodega (Fase 7.5)**: el schema ya tiene `warehouseId` en `Sale`. Solo hace falta exponer el selector en `SaleForm` cuando haya más de una bodega activa.
+- **Devoluciones formales (Fase 7.6)**: hoy si el cliente devuelve un producto sin cancelar la venta entera, no hay un flujo dedicado — se usa cancelación o ajuste manual. La fase 7.6 introduce `RETURN_IN` desde una venta específica con motivo y trazabilidad.
+- **Guía de despacho (Fase 7.7)**: documento separado para el despacho físico. Hasta entonces, el campo `notes` de la venta cumple parcialmente esa función (plazo de entrega, transportista).
 
 ---
 
@@ -1673,6 +1811,18 @@ Si el admin ya existe, **el seed no lo recrea** — borralo manualmente primero 
 | 46 | Sidebar — ubicación de Cotizaciones | 6 | ✅ Sección "Operación" → "Cotizaciones" |
 | 47 | Transición APPROVED / REJECTED | 6 | ✅ Botones manuales en el detalle interno |
 | 48 | Columnas del PDF de cotización | 6 | ✅ Código + Descripción + Cant + P.Unit + Desc + Subtotal |
+| 49 | Estado inicial al confirmar la venta | 7 | ✅ Directo a `PAID` (sin paso intermedio `PENDING`). Para registrar pedidos no cobrados existe Cotización. |
+| 50 | Cliente en venta: catálogo o libre | 7 | ✅ Solo del catálogo (RUT obligatorio). Si no existe, el operador lo crea en `/clientes/nuevo` y vuelve — sin snapshot inline para preservar la regla "RUT obligatorio en ventas mostrador". |
+| 51 | Forma del form de venta | 7 | ✅ `SaleForm` separado de `QuotationForm`. Comparte building blocks (ProductPicker, CustomerCombobox, toggle $/%) pero NO el shell — diferencias clave (método de pago, stock por línea, sin envío) justifican componentes propios. |
+| 52 | Convertir cotización → venta: flujo | 6 / 7 | ✅ El backend marca `Quotation.status = CONVERTED` en la **misma transacción** del create de venta cuando llega `quotationId`. El operador puede ajustar items/pago antes de confirmar; si cancela el form, la cotización queda intacta. |
+| 53 | Cancelación de venta: reglas | 7 | ✅ Cualquier venta no-cancelada puede cancelarse, sin ventana de tiempo. Motivo obligatorio (mínimo 5 chars). Revierte stock vía `RETURN_IN` + anula transacciones de caja con compensación, todo atómico. No reactivable. |
+| 54 | UX de stock disponible en venta | 7 | ✅ Badge "Stock: X" debajo del input de cantidad. Si la cantidad excede el disponible, la fila se pinta rojo y el botón "Confirmar" queda deshabilitado. Backend revalida en `applyMovement` (defensa en profundidad). |
+| 55 | Notas en venta | 7 | ✅ Campo opcional visible en el PDF de la nota de venta. Cubre observaciones de despacho hasta que llegue Guía de Despacho en Fase 7.7. |
+| 56 | Salida del PDF de venta | 7 | ✅ Botón "Imprimir" en el detalle con dropdown Carta (A4) + Térmica 80mm. Sin link público — la venta es documento interno, no se envía al cliente vía WhatsApp/email. |
+| 57 | Selector de bodega en venta | 7 | ✅ Schema preparado (`Sale.warehouseId NOT NULL`) pero **sin selector visible** mientras solo exista "Principal". El backend asigna automáticamente. En Fase 7.5 aparece el selector sin tocar schema. |
+| 58 | Acceso al form de venta | 7 | ✅ Item "Ventas" en sidebar (sección Operación). Botón directo "Nueva venta" en `/ventas` que abre el dialog. El FAB global también lo abre vía el modal "Venta o Cotización". |
+| 59 | Etiquetas térmicas para productos | 11 | ✅ **Confirmado: formato 50 mm ancho × 30 mm alto** para impresora térmica. Se entrega en Fase 11 junto con scanners USB/cámara como un bloque coherente. Endpoint `GET /products/:id/label?format=50x30` + botón "Imprimir etiqueta" en el detalle. Usa `bwip-js` para el barcode CODE128. |
+| 60 | Código de ubicación de producto por bodega | 7.5 | ✅ **Confirmado: por bodega**, no global. Se agrega `Stock.locationCode` (varchar 30, nullable) en Fase 7.5 cuando multi-bodega se active de verdad. Durante esta fase se migran los valores existentes del campo global `Product.location` al nuevo, y queda deprecated. Editable inline desde `/inventario` con la bodega seleccionada. Búsqueda por código de ubicación. |
 
 ---
 
@@ -1684,11 +1834,15 @@ Cada fase es un PR independiente con verificación end-to-end al cierre. Ver [PL
 
 **Fase 6:** ✅ Cotizaciones + modal "venta o cotización" + impresión 80mm/Carta + WhatsApp/email — ver sección "Fase 6" arriba.
 
-**Fase 7 (siguiente):** Ventas con caja integrada, selector de bodega, comisión tarjeta automática, impresión 80mm/Carta. Habilita la opción "Venta" del modal y reemplaza el placeholder de `/ventas/nueva`. La conversión cotización → venta queda funcional al confirmar la venta (cotización pasa a CONVERTED + items consumen stock + caja registra ingreso).
+**Fase 7:** ✅ Ventas con caja integrada (warehouseId + método de pago + comisión tarjeta atómica + cancelación con motivo + PDF Carta/80mm + convertir desde cotización) — ver sección "Fase 7" arriba.
 
-**Fases 7.5 / 7.6 / 7.7:** Multi-bodega + transferencias (flujo Mercado Libre Full); Devoluciones (suman stock) y Garantías (no afectan stock); Guía de despacho con número correlativo.
+**Fase 7.5 (siguiente):** Multi-bodega + transferencias (flujo Mercado Libre Full manual). Incluye también **código de ubicación por bodega** (`Stock.locationCode`) — requerimiento agregado durante Fase 7. Al activarse multi-bodega aparecen: selector de bodega en el form de venta, pantalla `/almacenes`, pantalla de transferencias entre bodegas, y la columna "Ubicación" en `/inventario` por bodega.
+
+**Fases 7.6 / 7.7:** Devoluciones (suman stock) y Garantías (no afectan stock); Guía de despacho con número correlativo.
 
 **Fase 8:** Reportes + **Proyección de stock** con lista de productos críticos exportable a CSV/Excel (importante por el lead time de 2-3 meses de las importaciones del cliente).
+
+**Fase 11:** Códigos de barras (lector USB + cámara `@zxing/browser`) + **etiquetas térmicas 50×30 mm con barcode CODE128** (`bwip-js`) + refinamiento de plantillas con branding final.
 
 ---
 

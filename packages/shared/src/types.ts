@@ -364,3 +364,84 @@ export interface QuotationSendResultDto {
   // (el envío ya se hizo server-side).
   whatsappUrl?: string;
 }
+
+// ---------- Ventas (Fase 7) ----------
+
+export type SaleStatusDto = 'PENDING' | 'PAID' | 'CANCELLED';
+
+export interface SaleItemDto {
+  id: string;
+  productId: string;
+  qty: number;
+  unitPrice: string;
+  discount: string;
+  // Si el operador ingresó el descuento como %, lo persistimos para reimprimir
+  // la nota con la misma representación. `discount` siempre tiene el monto.
+  discountPercent: string | null;
+  subtotal: string;
+  // Costo unitario CONGELADO al confirmar la venta (para reportes de
+  // rentabilidad históricos cuando el costo del producto cambia luego).
+  unitCost: string;
+  product?: {
+    id: string;
+    sku: string;
+    name: string;
+    partNumber: string | null;
+    universalCode: string | null;
+  };
+}
+
+export interface SaleDto {
+  id: string;
+  number: string;
+  customerId: string;
+  customer?: CustomerDto;
+  warehouseId: string;
+  warehouse?: { id: string; name: string };
+  date: string;
+  subtotal: string;
+  taxAmount: string;
+  commissionAmount: string;
+  total: string;
+  paymentMethod: PaymentMethodDto;
+  status: SaleStatusDto;
+  notes: string | null;
+  quotationId: string | null;
+  quotation?: {
+    id: string;
+    number: string;
+  } | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  cancelledBy?: { id: string; name: string; email: string } | null;
+  user?: { id: string; name: string; email: string };
+  items?: SaleItemDto[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateSaleItemInput {
+  productId: string;
+  qty: number;
+  unitPrice: string;
+  // Monto fijo de descuento. Si `discountPercent` viene, se calcula a partir
+  // del % y se ignora este campo en el cómputo (pero se guarda igual).
+  discount?: string;
+  discountPercent?: string | null;
+}
+
+export interface CreateSaleInput {
+  customerId: string;
+  warehouseId?: string;
+  paymentMethod: PaymentMethodDto;
+  date?: string;
+  notes?: string | null;
+  // Si se está convirtiendo desde una cotización, mandar su id para que el
+  // backend marque la cotización como CONVERTED en la misma transacción.
+  quotationId?: string | null;
+  items: CreateSaleItemInput[];
+}
+
+export interface CancelSaleInput {
+  reason: string;
+}
