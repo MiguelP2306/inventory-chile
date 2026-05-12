@@ -24,11 +24,13 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 | 7.6 | Devoluciones + Garantías | pendiente |
 | 7.7 | Guía de despacho con número correlativo | pendiente |
 | 8 | Reportes + proyección de stock + lista de productos críticos (CSV/Excel) | pendiente |
-| 9 | Dashboard (KPIs + alertas + gráficos) | pendiente |
+| 8.5 | **Lead lifecycle + Seguimiento comercial + HubSpot push** (WhatsApp como identificador, lifecycle automático `NEW`/`QUOTED`/`FOLLOW_UP`/`WON`/`LOST`, bandeja `/seguimiento`, sync one-way a HubSpot) | pendiente |
+| — | **Ronda 4** (transversal antes de Fase 9): responsive móvil — sidebar drawer + tablas optimizadas + revisión de forms en mobile | pendiente |
+| 9 | Dashboard mobile-first con KPIs **clicables** del día + alertas + gráficos (depende de Fase 8.5 para "Pendientes de seguimiento") | pendiente |
 | 10 | Carga masiva Excel | pendiente |
 | 11 | Códigos de barras + etiquetas + refinamiento de plantillas | pendiente |
 | 12 | Deploy (Railway + Vercel + Resend) | pendiente |
-| 13 | Integración HubSpot (alcance a confirmar) | pendiente |
+| 13 | HubSpot refinamientos post-MVP (webhook inverso + Deals + sync histórico) — base ya en Fase 8.5 | pendiente |
 | 14 | Manual + video + soporte post-entrega | pendiente |
 
 ---
@@ -1994,6 +1996,16 @@ Si el admin ya existe, **el seed no lo recrea** — borralo manualmente primero 
 | 60 | Código de ubicación de producto por bodega | 7.5 | ✅ **Confirmado: por bodega**, no global. Se agrega `Stock.locationCode` (varchar 30, nullable) en Fase 7.5 cuando multi-bodega se active de verdad. Durante esta fase se migran los valores existentes del campo global `Product.location` al nuevo, y queda deprecated. Editable inline desde `/inventario` con la bodega seleccionada. Búsqueda por código de ubicación. |
 | 61 | Conversión de cotización libre → venta | 6/7 (Ronda 3) | ✅ **Registrar al cliente antes de continuar**: el SaleForm muestra el snapshot en un banner readonly y un dialog inline registra al cliente en el catálogo (pre-llenado, con búsqueda anti-duplicados por RUT). Tras registrar, la cotización origen queda linkeada al nuevo cliente (`Quotation.customerId` setteado) y los snapshots se mantienen como histórico. Respeta la regla #14 "RUT obligatorio para ventas mostrador" sin tocar el schema de `sales`. |
 | 62 | Control de stock en items de cotización | 6 (Ronda 3) | ✅ **Warning informativo, no bloqueante**. Badge "Stock: X" siempre visible bajo cada input de cantidad; cuando se excede, la fila se pinta ámbar y el badge muestra "Stock: 5 (faltan 3)". Banner ámbar al final de la tabla con la lista completa de items afectados. Diferencia con venta (donde el exceso bloquea con rojo): cotización permite exceso porque puede haber importaciones en tránsito (lead time 2-3 meses). El stock se revalida en duro al convertir a venta. |
+| 63 | Alcance de HubSpot (dirección del sync) | 8.5 | ✅ **Confirmado mayo 2026: push desde el sistema** (sistema = fuente de verdad). El sistema empuja contactos + lifecycle a HubSpot vía `@hubspot/api-client`. Bidireccional (webhook inverso, Deals, embeds) queda para Fase 13 si el cliente lo necesita tras usar el MVP. |
+| 64 | Identificador primario del lead | 8.5 | ✅ **Confirmado mayo 2026: WhatsApp en E.164** (`customer.whatsappPhone`). Email queda como fallback de upsert. La mayoría de los contactos comerciales empiezan por WhatsApp. |
+| 65 | Estados del lifecycle | 8.5 | ✅ **Confirmado mayo 2026**: `NEW` (crear contacto/cotización) → `QUOTED` (al enviar cotización) → `FOLLOW_UP` (cron tras N horas sin respuesta) → `WON` (al confirmar venta) o `LOST` (manual con motivo). Solo `LOST` es transición manual; el resto se calcula desde eventos del sistema. |
+| 66 | Bandeja `/seguimiento` con tabs | 8.5 | ✅ **Confirmado mayo 2026**: 4 tabs — Pendientes / Sin respuesta / Vencidos / Último contacto. Botones rápidos WhatsApp + "Marcar contacto" + "Marcar como perdido" + link a cotizaciones del cliente. |
+| 67 | Horas para `FOLLOW_UP` | 8.5 | Pendiente. Asunción: **48h** default. Configurable desde `/configuracion` vía `companySettings.followUpHoursDefault`. |
+| 68 | Lifecycle en `Customer` extendido vs entidad `Lead` separada | 8.5 | Pendiente. Asunción: **extensión de `Customer`** (simplicidad + RUT obligatorio para venta). Si aparecen contactos sin RUT que nunca compran, evaluar `Lead` aparte. |
+| 69 | Hooks lifecycle: sync vs async | 8.5 | Pendiente. Asunción: **async vía queue** para que HubSpot caído no rompa el create de venta. |
+| 70 | Plantilla mensaje WhatsApp en `/seguimiento` | 8.5 | Pendiente. Asunción: **texto editable** desde `/configuracion` con tokens `{cliente}`, `{cotizacion}`, `{total}`. |
+| 71 | KPIs del día en el dashboard | 9 | ✅ **Confirmado mayo 2026**: agregar Ventas del día, Cotizaciones del día, Pendientes de seguimiento, Vencidos, Ventas ganadas, Rotación de inventario. **Todos clicables** — cada card navega al detalle filtrado. Vista **mobile-first** desde la primera entrega. |
+| 72 | Responsive móvil prioritario | Transversal | ✅ **Confirmado mayo 2026**: operación comercial frecuente desde teléfono. **Ronda 4** transversal antes de Fase 9 cierra brechas: sidebar drawer, tablas con scroll horizontal + primera columna sticky o vista de cards, revisión de forms en mobile. |
 
 ---
 
@@ -2015,7 +2027,15 @@ Cada fase es un PR independiente con verificación end-to-end al cierre. Ver [PL
 
 **Fase 8:** Reportes + **Proyección de stock** con lista de productos críticos exportable a CSV/Excel (importante por el lead time de 2-3 meses de las importaciones del cliente).
 
+**Fase 8.5 (nueva — pedida en mayo 2026):** **Lead lifecycle + Seguimiento comercial + HubSpot push**. Formaliza el flujo comercial real: WhatsApp como identificador del lead, lifecycle automático (`NEW` → `QUOTED` → `FOLLOW_UP` → `WON` / `LOST`) calculado desde eventos del sistema, cron diario para detectar follow-ups vencidos, bandeja `/seguimiento` con tabs Pendientes/Sin respuesta/Vencidos/Último contacto + botones rápidos WhatsApp, sync one-way a HubSpot vía `@hubspot/api-client` (sistema como fuente de verdad). Bloquea Fase 9 porque el dashboard depende del concepto de "pendientes de seguimiento".
+
+**Ronda 4 (transversal, antes de Fase 9):** Responsive móvil — sidebar pasa a drawer (`<Sheet>` de shadcn) en `<md`, tablas grandes con scroll horizontal + primera columna sticky o vista de cards, revisión de SaleForm/QuotationForm/TransferForm en mobile, FAB ajustado.
+
+**Fase 9:** Dashboard **mobile-first** con KPIs **clicables**. KPIs nuevos respecto del PLAN original: Ventas del día, Cotizaciones del día, Pendientes de seguimiento, Vencidos, Ventas ganadas, Rotación de inventario. Iteración 9.2 agrega embudo del lifecycle (NEW → QUOTED → WON / LOST).
+
 **Fase 11:** Códigos de barras (lector USB + cámara `@zxing/browser`) + **etiquetas térmicas 50×30 mm con barcode CODE128** (`bwip-js`) + refinamiento de plantillas con branding final.
+
+**Fase 13:** HubSpot refinamientos post-MVP — webhook inverso (HubSpot → sistema), sync de Deals, embed de formularios HubSpot, sync histórico inicial. Solo se ejecuta si el cliente lo pide tras usar Fase 8.5 en producción.
 
 ---
 

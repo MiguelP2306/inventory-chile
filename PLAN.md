@@ -34,9 +34,11 @@ El resultado debe ser un MVP utilizable y desplegable rápido, con arquitectura 
 | Código de barras           | Esencial: soporte para lector USB y cámara                                                                                                                                                                 |
 | Caja                       | Una sola caja consolidada con campo `paymentMethod` (efectivo/transferencia/tarjeta). IVA compra, IVA venta y comisión por tarjeta como categorías predefinidas + auto-registro al cobrar con tarjeta.     |
 | Mercado Libre              | Modelado como bodega aparte. Movimientos `TRANSFER_OUT/IN` entre bodegas (no es venta). Integración API real fuera de alcance del MVP — flujo manual.                                                      |
-| Envío cotizaciones         | WhatsApp vía `wa.me` + Email vía **Resend**. Botón directo desde la cotización.                                                                                                                            |
-| Dashboard                  | Iterativo: KPIs textuales y alertas primero, gráficos en fase posterior                                                                                                                                    |
-| HubSpot                    | Pendiente de confirmar alcance con el cliente — fase final                                                                                                                                                 |
+| Envío cotizaciones         | WhatsApp vía `wa.me` + Email vía **Resend**. Botón directo desde la cotización. WhatsApp es el canal primario de contacto comercial — Fase 8.5 lo formaliza como identificador del lead.                  |
+| Dashboard                  | Iterativo: KPIs textuales y alertas primero, gráficos en fase posterior. **KPIs clicables** desde Fase 9 (cada card linkea al detalle). Incluye granularidad de día además de mes.                        |
+| HubSpot                    | **Sync bidireccional, sistema como fuente de verdad**. El sistema empuja a HubSpot vía API (`@hubspot/api-client`). Identificador primario: WhatsApp (E.164). Lifecycle automático: `NEW` al crear, `QUOTED` al enviar cotización, `FOLLOW_UP` si pasan N horas sin respuesta (configurable), `WON` al confirmar venta, `LOST` manual. Implementación en Fase 8.5. Refinamientos posteriores (webhook inverso, embeds de marketing) en Fase 13. |
+| Seguimiento comercial      | Bandeja `/seguimiento` con tabs **Pendientes** / **Sin respuesta** / **Vencidos** / **Último contacto**. Botones rápidos para abrir WhatsApp y continuar conversación. Lifecycle del lead se calcula automáticamente desde eventos del sistema (crear cotización, enviar, confirmar venta) + cron diario para `FOLLOW_UP` por timeout. Fase 8.5. |
+| Responsive móvil           | La operación comercial frecuente se hace desde teléfono (seguimiento, ver stock crítico, registrar venta mostrador). Sidebar pasa a drawer (`<Sheet>` de shadcn) en `<md`, tablas grandes usan scroll horizontal con primera columna sticky o vista de cards. **Ronda 4** transversal cierra brechas antes de Fase 9 (dashboard mobile-first). |
 | Auth                       | JWT propio en NestJS                                                                                                                                                                                       |
 | Hosting                    | Next.js → Vercel · NestJS + MySQL → Railway                                                                                                                                                                |
 | UI                         | Tema neutro shadcn/ui · semáforo verde/amarillo/rojo en alertas                                                                                                                                            |
@@ -69,8 +71,25 @@ Supplier (id, name, taxId, email, phone, address, notes)
    -- taxId con unicidad validada en servicio (no índice DB todavía)
 Customer (id, name, taxId, email, phone,
           addressStreet, addressNumber, addressCommune,    -- (ampliado, Fase 4)
-          internalNotes)
+          internalNotes,
+          source,                                          -- (ampliado, Fase 8.5)
+          whatsappPhone,                                   -- (ampliado, Fase 8.5)
+          lifecycleStatus,                                 -- (ampliado, Fase 8.5)
+          lastContactAt,                                   -- (ampliado, Fase 8.5)
+          nextFollowUpAt,                                  -- (ampliado, Fase 8.5)
+          lostReason,                                      -- (ampliado, Fase 8.5)
+          hubspotContactId)                                -- (ampliado, Fase 8.5)
    -- taxId = RUT, con unicidad
+   -- source: WHATSAPP | EMAIL | PHONE | IN_PERSON | OTHER
+   -- whatsappPhone: E.164 indexado, usable como upsert key contra HubSpot
+   -- lifecycleStatus: NEW | QUOTED | FOLLOW_UP | WON | LOST (Fase 8.5)
+   -- hubspotContactId: id del contacto en HubSpot, null si nunca se sincronizó
+
+LeadEvent (id, customerId, type, refType?, refId?, occurredAt, userId?)   -- (nuevo, Fase 8.5)
+   -- Bitácora de eventos comerciales que mueven el lifecycle.
+   -- type: QUOTATION_CREATED | QUOTATION_SENT | SALE_CONFIRMED | LOST_MARKED
+   --        | FOLLOW_UP_TRIGGERED | MANUAL_CONTACT
+   -- refType+refId apuntan al documento que disparó el evento (cotización, venta, etc.)
 
 Category (id, name, parentId)
 Brand   (id, name)            -- marca del repuesto (Bosch, NGK)
@@ -141,7 +160,11 @@ CompanySettings (id, name, address, phone, email, logoUrl, currency,
                  quotationFooter, defaultValidityDays,
                  taxRate,                                    -- (ampliado, Fase 5) ej. 0.19 para IVA Chile
                  cardCommissionRate,                         -- (ampliado, Fase 5) ej. 0.025
-                 defaultLeadTimeDays)                        -- (ampliado, Fase 8) ej. 75 días para importación
+                 defaultLeadTimeDays,                        -- (ampliado, Fase 8) ej. 75 días para importación
+                 followUpHoursDefault,                       -- (ampliado, Fase 8.5) ej. 48 horas
+                 hubspotEnabled,                             -- (ampliado, Fase 8.5) on/off del sync
+                 hubspotDefaultOwnerId)                      -- (ampliado, Fase 8.5) owner asignado a leads nuevos en HubSpot
+   -- HUBSPOT_API_KEY vive en .env, NUNCA en DB
 ```
 
 **Reglas críticas de integridad:**
@@ -153,6 +176,12 @@ CompanySettings (id, name, address, phone, email, logoUrl, currency,
 - **Garantías** (Fase 7.6): `WarrantyClaim` es puramente informativo — **no** dispara movimientos de stock. Si la garantía termina en cambio de producto se gestiona como devolución (`RETURN_IN`) + nueva salida.
 - **Devoluciones** (Fase 7.6): `RETURN_IN` suma stock, `RETURN_OUT` lo resta. Decisión de qué tipo aplicar según el flujo (devolución de cliente vs. devolución a proveedor).
 - **Comisión por tarjeta**: cuando una venta se cobra con `CARD`, el sistema calcula `commissionAmount = total * companySettings.cardCommissionRate` y registra en la misma transacción un `CashTransaction(EXPENSE, source=SALE, expenseCategoryId=Comisión Tarjeta)` ligado al `sale.id`.
+- **Lifecycle del lead** (Fase 8.5): los estados se calculan a partir de eventos del sistema, NO se setean manualmente (excepto `LOST`).
+  - Crear cotización → `lifecycleStatus = QUOTED`, `lastContactAt = NOW()`, `nextFollowUpAt = NOW() + followUpHoursDefault`. Inserta `LeadEvent(QUOTATION_CREATED)`.
+  - Confirmar venta → `lifecycleStatus = WON`. Inserta `LeadEvent(SALE_CONFIRMED)`. El cliente queda fuera de la bandeja de seguimiento.
+  - Cron diario (00:30 hora local): detecta clientes con `nextFollowUpAt < NOW()` y `lifecycleStatus IN (QUOTED, FOLLOW_UP)` → si no hay venta confirmada desde el último contacto, marca `FOLLOW_UP` y dispara push a HubSpot. Inserta `LeadEvent(FOLLOW_UP_TRIGGERED)`.
+  - Botón manual "Marcar como perdido" → `lifecycleStatus = LOST` + `lostReason`. Inserta `LeadEvent(LOST_MARKED)`.
+- **HubSpot push** (Fase 8.5): cada cambio de `lifecycleStatus` o `lastContactAt` encola un job que llama a `PATCH /crm/v3/objects/contacts/<id>` con la propiedad `lifecyclestage` mapeada. Si el contacto no existe (upsert por `whatsappPhone` o `email`), crea el contact y guarda `hubspotContactId`. Idempotente — un retry no duplica.
 
 ## Estructura del repo
 
@@ -175,6 +204,7 @@ inventory-management/
 │   │   │       ├── devoluciones/           # Fase 7.6
 │   │   │       ├── garantias/              # Fase 7.6
 │   │   │       ├── guias/                  # guías de despacho (Fase 7.7)
+│   │   │       ├── seguimiento/            # bandeja comercial (Fase 8.5)
 │   │   │       ├── caja/
 │   │   │       ├── reportes/
 │   │   │       ├── proyeccion/             # proyección de stock + críticos (Fase 8)
@@ -182,9 +212,11 @@ inventory-management/
 │   │   ├── components/ui/      # shadcn
 │   │   ├── components/forms/
 │   │   ├── components/print/   # plantillas imprimibles 80mm + carta (Fases 6/7/7.7)
+│   │   ├── components/mobile-nav.tsx  # drawer responsive (Ronda 4)
 │   │   ├── lib/api.ts
 │   │   ├── lib/format.ts       # ✅ formatCurrency
 │   │   ├── lib/use-url-filters.ts  # ✅ filtros sincronizados con URL
+│   │   ├── lib/whatsapp.ts     # builder de URLs wa.me reusado en /seguimiento (Fase 8.5)
 │   │   └── lib/auth.ts
 │   └── api/                    # NestJS
 │       ├── src/
@@ -204,6 +236,8 @@ inventory-management/
 │       │   ├── cashbox/        # Caja
 │       │   ├── reports/
 │       │   ├── projection/     # proyección de stock + export críticos (Fase 8)
+│       │   ├── lifecycle/      # estados del lead + cron de follow-up (Fase 8.5)
+│       │   ├── hubspot/        # cliente API HubSpot + queue + mapping (Fase 8.5)
 │       │   ├── dashboard/      # KPIs agregados
 │       │   ├── imports/        # carga Excel
 │       │   ├── uploads/        # multer: foto producto + factura compra (Fases 4B/5)
@@ -476,13 +510,98 @@ inventory-management/
     - **Botón "Descargar lista de críticos"** que genera un archivo CSV (vía `csv-stringify`) con SKU, nombre, stock, días de cobertura, sugerencia de pedido. Excel (`exceljs`) si el cliente prefiere `.xlsx`.
 12. Exportación CSV y PDF en cada reporte.
 
+### Fase 8.5 — Lead lifecycle + Seguimiento comercial + HubSpot
+
+> Formaliza el flujo comercial real del cliente: la mayoría de las ventas arrancan por WhatsApp y necesitan seguimiento. El sistema lleva la **fuente de verdad** del estado del lead y empuja cambios a HubSpot automáticamente. La operación diaria de seguimiento vive en una bandeja dedicada con botones rápidos de WhatsApp.
+>
+> Bloquea: Fase 9 (el dashboard depende del concepto de "lead" y "pendientes de seguimiento").
+
+**1. Schema — extensión de `Customer` + entidad nueva `LeadEvent`**
+
+- **Migración** que agrega a `customers`:
+  - `source` (enum `WHATSAPP | EMAIL | PHONE | IN_PERSON | OTHER`, default `OTHER`) — canal de primer contacto.
+  - `whatsappPhone` (varchar 32 nullable, E.164). Indexado (no único — el mismo número puede aparecer en clientes distintos en casos de error, lo validamos a nivel UI/servicio).
+  - `lifecycleStatus` (enum `NEW | QUOTED | FOLLOW_UP | WON | LOST`, default `NEW`). Indexado.
+  - `lastContactAt` (datetime nullable).
+  - `nextFollowUpAt` (datetime nullable).
+  - `lostReason` (text nullable) — solo se llena en `LOST`.
+  - `hubspotContactId` (varchar 64 nullable) — id en HubSpot. Se popula al primer sync.
+  - Backfill: todos los clientes existentes quedan en `lifecycleStatus = NEW`. Los que ya tienen ventas confirmadas pasan a `WON`. Los que tienen cotizaciones pendientes pasan a `QUOTED` con `lastContactAt = quotation.createdAt` más reciente.
+- Tabla nueva `lead_events` (id, customerId FK CASCADE, type enum, refType nullable, refId nullable, occurredAt, userId nullable FK SET NULL).
+- `company_settings` agrega `followUpHoursDefault` (int, default 48), `hubspotEnabled` (boolean, default false), `hubspotDefaultOwnerId` (varchar 64, nullable).
+- `.env`: `HUBSPOT_API_KEY` (private app token de HubSpot).
+
+**2. Lifecycle automático**
+
+- **Hook en `QuotationsService.create()`**: tras persistir, busca el `customerId` (catálogo) o crea/encuentra cliente desde `customerView` (libre con phone E.164 como upsert key). Setea `lifecycleStatus = QUOTED`, `lastContactAt = NOW()`, `nextFollowUpAt = NOW() + followUpHoursDefault`. Inserta `LeadEvent(QUOTATION_CREATED, refType='quotation', refId)`.
+- **Hook en `QuotationsService.markSent()`**: actualiza `lastContactAt = NOW()`, reagenda `nextFollowUpAt`. Inserta `LeadEvent(QUOTATION_SENT)`.
+- **Hook en `SalesService.create()`**: tras commit, setea cliente a `lifecycleStatus = WON`, limpia `nextFollowUpAt = NULL`. Inserta `LeadEvent(SALE_CONFIRMED, refType='sale', refId)`. El cliente sale de la bandeja de seguimiento.
+- **Cron job diario** ([`apps/api/src/lifecycle/lifecycle-cron.service.ts`](apps/api/src/lifecycle/lifecycle-cron.service.ts)) a las 00:30 hora local: detecta clientes con `nextFollowUpAt < NOW()` y `lifecycleStatus IN (QUOTED, FOLLOW_UP)` y sin venta confirmada desde el último contacto → marca `FOLLOW_UP`. Inserta `LeadEvent(FOLLOW_UP_TRIGGERED)` y encola push a HubSpot.
+- **Endpoint `POST /customers/:id/mark-lost`**: marca `LOST` con `lostReason` obligatorio. Inserta `LeadEvent(LOST_MARKED)`. Único cambio manual de estado permitido.
+- **Endpoint `POST /customers/:id/touch`**: el operador hace click en "Marcar contacto" tras hablar por WhatsApp → setea `lastContactAt = NOW()`, reagenda `nextFollowUpAt`. Inserta `LeadEvent(MANUAL_CONTACT)`. Vuelve a `QUOTED` si estaba en `FOLLOW_UP`.
+
+**3. Bandeja `/seguimiento`**
+
+- 4 tabs (todas con filtros + búsqueda + paginación):
+  - **Pendientes**: `lifecycleStatus IN (QUOTED, FOLLOW_UP)`, `nextFollowUpAt > NOW()`. Orden por `nextFollowUpAt` ASC (más próximos primero).
+  - **Sin respuesta**: `lifecycleStatus = QUOTED` y `lastContactAt < NOW() - 24h` (sin haber respondido todavía pero aún no vencido).
+  - **Vencidos**: `lifecycleStatus = FOLLOW_UP` (cron ya los marcó). Orden por `nextFollowUpAt` ASC.
+  - **Último contacto**: todos los clientes con `lifecycleStatus IN (QUOTED, FOLLOW_UP)` ordenados por `lastContactAt` DESC.
+- Columnas por fila: Cliente, último contacto (relativo: "hace 3h"), próximo follow-up, última cotización, estado.
+- **Acciones rápidas por fila**:
+  - **Botón WhatsApp** (verde) → abre `wa.me/<whatsappPhone>?text=<plantilla>`. La plantilla viene de Settings (texto editable con tokens `{cliente}`, `{cotizacion}`, `{total}`).
+  - **Marcar contacto** → `POST /customers/:id/touch`.
+  - **Ver cotizaciones del cliente** → navega a `/cotizaciones?customer=<id>`.
+  - **Marcar como perdido** → dialog con motivo.
+
+**4. HubSpot push** ([`apps/api/src/hubspot/`](apps/api/src/hubspot/))
+
+- Cliente API via `@hubspot/api-client`.
+- **Mapping**:
+  - `customer.whatsappPhone` → `phone` en HubSpot.
+  - `customer.email` → `email`.
+  - `customer.name` → `firstname` + `lastname` (split básico).
+  - `customer.lifecycleStatus` → propiedad custom `inventory_lifecycle_status` (creada manualmente en HubSpot por el cliente). El estandar `lifecyclestage` de HubSpot tiene sus propios valores (`subscriber`, `lead`, `customer`, etc.) que no mapean 1:1 — mejor una propiedad propia con nuestros 5 valores.
+- **Sync push** vía queue: cada cambio inserta un job. Worker procesa con retries (3 intentos, backoff exponencial). Idempotente: usa `hubspotContactId` si existe, sino upserta por `whatsappPhone` → `email`.
+- **Activación**: si `companySettings.hubspotEnabled = false` o `HUBSPOT_API_KEY` no está set, los jobs se descartan silenciosamente (loggea warning). El sistema funciona sin HubSpot.
+
+**5. Configuración**
+
+- Pantalla `/configuracion` (sección nueva "Seguimiento y HubSpot"):
+  - Toggle "Activar sincronización con HubSpot".
+  - Input `HUBSPOT_API_KEY` (solo write, nunca read — se guarda en `.env` o secrets manager, no en DB).
+  - Owner ID por defecto (input texto).
+  - "Horas para marcar follow-up" (default 48).
+  - Plantilla de mensaje WhatsApp con tokens.
+  - Botón "Test sync" que upserta un contacto dummy y reporta el resultado.
+
+**6. Decisiones a confirmar con cliente** (ver "Decisiones pendientes" más abajo):
+- Si el lifecycle vive en `Customer` (extensión) o en una entidad `Lead` separada que opcionalmente se promueve a Customer al ganar la venta. Para el MVP de esta fase recomiendo **extensión de Customer** — más simple y suficiente.
+- Si los hooks se disparan en transacción atómica (con el create de cotización/venta) o vía queue async. Recomiendo **async vía queue** para no bloquear el response del usuario si HubSpot está caído.
+
 ### Fase 9 — Dashboard (iterativo)
+
+> Refinado en respuesta al feedback del cliente (mayo 2026): se prioriza la vista mobile-first, KPIs clicables, granularidad de día además de mes, y la conexión con el lifecycle de Fase 8.5.
 
 **Iteración 9.1 — KPIs textuales y alertas (MVP del dashboard):**
 
-- Ventas del mes, utilidad del mes, caja disponible, valor total del inventario.
-- Tarjetas con códigos de color: stock crítico (rojo), bajo stock (amarillo), OK (verde).
-- Lista de alertas: stock crítico, productos sin rotación 30+ días, gastos del mes vs promedio.
+Cards en grid responsive (`grid-cols-1` en mobile, `grid-cols-2` md, `grid-cols-4` lg). **Todos los cards son clicables** — navegan al detalle correspondiente.
+
+- **Operación del día** (granularidad nueva, importante para gestión diaria):
+  - **Ventas del día** (count + monto) → click navega a `/ventas?dateFrom=hoy&dateTo=hoy`.
+  - **Cotizaciones del día** (count + monto) → click a `/cotizaciones?dateFrom=hoy&dateTo=hoy`.
+  - **Caja disponible** (total + por método) → click a `/caja`.
+- **Lifecycle / Comercial** (depende de Fase 8.5):
+  - **Pendientes de seguimiento** (count de clientes con `lifecycleStatus IN (QUOTED, FOLLOW_UP)`) → click a `/seguimiento` tab "Pendientes".
+  - **Vencidos** (count con `lifecycleStatus = FOLLOW_UP`) — destacado en ámbar si > 0 → click a `/seguimiento` tab "Vencidos".
+  - **Ventas ganadas del mes** (count de `WON` con `lastContactAt` del mes) → click a `/ventas?status=PAID&dateFrom=mes`.
+- **Mes**:
+  - Utilidad del mes (ventas - costo de venta - gastos), valor total del inventario, gastos del mes.
+- **Alertas (stock + rotación)**:
+  - **Stock crítico** (count de productos `out`) — rojo si > 0 → click a `/inventario?status=out`.
+  - **Bajo stock** (count `low`) — amarillo si > 0 → click a `/inventario?status=low`.
+  - **Productos sin movimiento 30+ días** — click a `/reportes/sin-rotacion` (Fase 8).
+  - **Rotación de inventario** (cálculo: COGS / inventario promedio del período) — vínculo a reporte detallado.
 
 **Iteración 9.2 — Gráficos (después):**
 
@@ -490,6 +609,7 @@ inventory-management/
 - Top 10 productos vendidos del mes.
 - Margen promedio y productos más/menos rentables.
 - Ticket promedio, crecimiento de ventas vs mes anterior.
+- **Embudo del lifecycle** (NEW → QUOTED → WON / LOST) con porcentajes — visualiza la performance comercial.
 
 ### Fase 10 — Carga masiva Excel
 
@@ -515,15 +635,16 @@ inventory-management/
 5. Dominio + HTTPS.
 6. Configurar Resend (dominio verificado para email).
 
-### Fase 13 — Integración HubSpot (alcance a confirmar)
+### Fase 13 — HubSpot refinamientos (post-MVP)
 
-> Pendiente: confirmar con el cliente qué datos sincronizar. Opciones evaluadas:
+> La integración base (push de contactos + lifecycle automático desde nuestro sistema) ya se entrega en **Fase 8.5**. Esta fase agrega los refinamientos que el cliente acepte después de usar la versión 1.0 en producción.
 >
-> - Sync de contactos (clientes ↔ HubSpot Contacts).
-> - Sync de cotizaciones/ventas como Deals.
-> - Solo embed de un formulario HubSpot en el sistema.
+> Opciones evaluadas (a confirmar según el uso real):
 >
-> Una vez confirmado, implementar con la API de HubSpot (`@hubspot/api-client`), webhook bidireccional si es necesario, y mapeo de campos en Settings.
+> - **Webhook inverso**: HubSpot avisa al sistema cuando alguien edita el contacto desde el CRM. Útil si el equipo de marketing/ventas toca propiedades fuera del sistema. Requiere endpoint público + verificación de firma.
+> - **Sync de Deals**: además de Contacts, exportar Cotizaciones como Deals de HubSpot con su monto y stage propio. Útil para reporting comercial dentro de HubSpot.
+> - **Embed de formularios HubSpot**: insertar el formulario de captura de leads de la página pública del cliente en el sistema (pantalla landing pública).
+> - **Sync histórico inicial**: cuando el cliente conecta HubSpot, ofrecer un "import inicial" que dispara push de todos los clientes existentes en batch.
 
 ### Fase 14 — Entregables finales
 
@@ -583,11 +704,13 @@ Al cierre de cada fase:
 - **Fase 7.6:** desde una venta abrir devolución de 1 ítem → `RETURN_IN` se registra y stock sube. Abrir reclamo de garantía → aparece en listado, no toca stock; cambiar status a RESOLVED se persiste.
 - **Fase 7.7:** generar guía de despacho de una venta → número correlativo asignado; impresión 80mm y carta abren la vista correcta.
 - **Fase 8:** cada reporte exporta CSV y PDF abribles. Estado de resultados cuadra contra movimientos. **Pantalla "Proyección"** muestra productos críticos correctamente y la descarga CSV se abre en Excel con datos coherentes.
-- **Fase 9:** dashboard muestra valores coherentes con los reportes; alertas semáforo cambian al producir condiciones.
+- **Fase 8.5:** crear cotización para un cliente → su `lifecycleStatus` pasa a `QUOTED`, aparece en `/seguimiento` tab "Pendientes" con `nextFollowUpAt` calculado. Esperar > `followUpHoursDefault` → cron lo mueve a `FOLLOW_UP`, aparece en tab "Vencidos". Click en botón WhatsApp de la fila → abre `wa.me/<phone>` con el mensaje plantilla. Confirmar una venta → `lifecycleStatus = WON`, sale de las bandejas. Marcar manualmente como `LOST` → motivo guardado, fuera de la bandeja. Con `hubspotEnabled=true` y `HUBSPOT_API_KEY` configurada: el contacto aparece o se actualiza en HubSpot con propiedad `inventory_lifecycle_status` correcta.
+- **Ronda 4 (responsive):** abrir el sistema en un teléfono → el sidebar desktop desaparece y aparece un botón hamburger arriba a la izquierda que abre un drawer con la misma navegación. Tablas grandes (productos, inventario, ventas, transferencias) hacen scroll horizontal cómodo con primera columna sticky o se transforman en cards en `<md`. Forms (SaleForm, QuotationForm, TransferForm) son operables sin scroll horizontal. FAB de operaciones no se solapa con contenido en mobile.
+- **Fase 9:** dashboard muestra valores coherentes con los reportes; alertas semáforo cambian al producir condiciones. **Cada card es clicable** y navega al detalle filtrado. **Vista mobile** sin scroll horizontal — cards se apilan en una columna. Cotizaciones del día y Ventas del día reflejan los registros del día actual. Click en "Pendientes de seguimiento" abre `/seguimiento` tab correcto.
 - **Fase 10:** subir Excel de 50 productos con códigos múltiples y `productKind`, ver preview, confirmar; Excel con errores muestra fila/motivo.
 - **Fase 11:** lector USB y cámara identifican producto; etiqueta imprime con barcode legible.
 - **Fase 12:** producción accesible vía dominio, login funciona, datos persisten tras redeploy, email de Resend llega desde dominio verificado.
-- **Fase 13:** (al confirmar alcance) cliente creado en sistema aparece en HubSpot.
+- **Fase 13:** refinamientos de HubSpot — al confirmarse alcance — webhook inverso edita un contacto desde HubSpot y se refleja en el sistema; o Deals aparecen sincronizados.
 - **Fase 14:** manual cubre todos los flujos clave; video reproducible; soporte activo durante el período acordado.
 
 ## Decisiones pendientes con el cliente
@@ -645,6 +768,15 @@ Al cierre de cada fase:
 | 46  | Sidebar — ubicación de Cotizaciones                                                                                                                              | 6              | ✅ Confirmado: **sección "Operación" → item "Cotizaciones"**. |
 | 47  | Transición a APPROVED / REJECTED                                                                                                                                 | 6              | ✅ Confirmado: **botones manuales en el detalle** (operador marca después de hablar con cliente). Sin acciones públicas en el link del cliente. |
 | 48  | Columnas del PDF de cotización                                                                                                                                   | 6              | ✅ Confirmado: **Código + Descripción + Cant + P.Unit + Desc + Subtotal**. |
+| 49  | HubSpot — dirección del sync                                                                                                                                     | 8.5            | ✅ Confirmado: **push desde el sistema** (sistema como fuente de verdad). Bidireccional queda para Fase 13 si el cliente lo necesita post-uso. |
+| 50  | Identificador primario del lead                                                                                                                                  | 8.5            | ✅ Confirmado: **WhatsApp en E.164** (`customer.whatsappPhone`). Email queda como fallback de upsert. |
+| 51  | Estados del lifecycle                                                                                                                                            | 8.5            | ✅ Confirmado: **`NEW` / `QUOTED` / `FOLLOW_UP` / `WON` / `LOST`**. Solo `LOST` es manual; el resto se calcula desde eventos. |
+| 52  | Horas para marcar follow-up                                                                                                                                      | 8.5            | Pendiente. Asunción: **48h** default, configurable desde `/configuracion`. |
+| 53  | Lifecycle en `Customer` extendido vs entidad `Lead` separada                                                                                                     | 8.5            | Pendiente. Asunción: **extensión de `Customer`** (simplicidad, ventas requieren RUT igual). Si aparecen contactos sin RUT que nunca compran, evaluar entidad aparte. |
+| 54  | Hooks lifecycle: sync vs async                                                                                                                                   | 8.5            | Pendiente. Asunción: **async vía queue** para que HubSpot caído no rompa el flujo. |
+| 55  | Plantilla de mensaje WhatsApp en la bandeja                                                                                                                      | 8.5            | Pendiente. Asunción: **texto editable** desde `/configuracion` con tokens `{cliente}`, `{cotizacion}`, `{total}`. |
+| 56  | KPIs del día en el dashboard                                                                                                                                     | 9              | ✅ Confirmado (mayo 2026): **agregar Ventas del día, Cotizaciones del día, Pendientes de seguimiento, Vencidos, Ventas ganadas, Rotación de inventario**. Todos clicables. |
+| 57  | Responsive móvil prioritario                                                                                                                                     | Transversal    | ✅ Confirmado: **operación móvil esperada** (seguimiento desde teléfono, stock crítico, ventas mostrador). Ronda 4 transversal antes de Fase 9 cierra brechas (sidebar drawer, tablas optimizadas). |
 
 
 ## Suposiciones tomadas (avísame si alguna no aplica)
@@ -657,11 +789,14 @@ Al cierre de cada fase:
 6. **Email** se envía desde un dominio verificado en Resend (debes proveer un dominio o usaremos un subdominio del proyecto); plan gratuito de Resend cubre 3.000 emails/mes.
 7. **WhatsApp** vía `wa.me`: abre WhatsApp Web/app del operador con mensaje + link al detalle público prellenados; el operador hace click en "enviar". No usa la API oficial (sin costo, sin verificación Meta).
 8. **Detalles públicos** de cotización accesibles vía URL firmada con expiración (ej. 30 días) para que el cliente final pueda abrir el link sin login. El detalle es HTML imprimible; un PDF descargable es evolución posterior.
-9. **HubSpot** queda como Fase 13 con alcance a definir; el resto del sistema funciona sin esa integración.
-10. **Dashboard iterativo:** la versión 9.1 (KPIs+alertas textuales) es funcional desde Fase 9; los gráficos llegan en 9.2 sin bloquear la entrega del MVP.
+9. **HubSpot — push desde el sistema** (Fase 8.5): nuestro sistema es la fuente de verdad del estado del lead. El sync es one-way (system → HubSpot) en el MVP. El sistema funciona sin HubSpot — si `hubspotEnabled=false` o falta `HUBSPOT_API_KEY`, los jobs de sync se descartan silenciosamente. Refinamientos bidireccionales (webhook inverso, Deals) van en Fase 13 post-uso.
+10. **Dashboard iterativo:** la versión 9.1 (KPIs+alertas textuales) es funcional desde Fase 9; los gráficos llegan en 9.2 sin bloquear la entrega del MVP. **Todos los KPIs son clicables** y la vista es mobile-first desde la primera entrega.
 11. **Multi-bodega** se activa en Fase 7.5; antes de eso todas las operaciones implícitamente usan la bodega `Principal`.
 12. **Garantías no afectan stock**: si la resolución termina en cambio de producto, el operador hace una devolución (`RETURN_IN`) + nueva venta o salida manualmente.
 13. **Proyección de stock** usa los últimos 90 días de `SALE_OUT` para calcular consumo promedio. Si el cliente quiere otro rango (ej. 180 días para mitigar estacionalidad), se vuelve configurable.
 14. **Mercado Libre Full** se gestiona con flujo manual: transferencia de mi bodega a la bodega ML y luego venta desde la bodega ML. Si más adelante el cliente quiere sincronización automática, se evalúa como integración aparte.
 15. **Impresión 80mm + carta** vía HTML con CSS `@page`, sin generar PDF en el servidor en el MVP. Si el cliente final reporta problemas con la impresión desde el navegador, se evalúa pasar a `puppeteer` o `@react-pdf/renderer`.
+16. **Lifecycle del lead** (Fase 8.5) vive en `Customer` extendido (no en una entidad `Lead` separada). Decisión motivada por simplicidad y por el hecho de que la mayoría de los clientes terminan siendo Customers reales (con RUT obligatorio para ventas, Fase 7). Si en el futuro hace falta separar contactos sin RUT que nunca llegan a comprar, se puede agregar tabla `Lead` aparte.
+17. **Hooks de lifecycle** (Fase 8.5) se disparan **async vía queue** (no en la misma transacción del create de cotización/venta). Razón: el push a HubSpot puede fallar (timeout, API caída) y no queremos abortar la venta del operador por un problema del CRM. La fuente de verdad sigue siendo nuestra DB.
+18. **Responsive mobile** (Ronda 4 + transversal): el sistema debe ser operable desde teléfono en flujos comerciales frecuentes (seguimiento, ver stock, registrar venta mostrador). Tablets quedan cubiertas por el mismo breakpoint (`md+` ya muestra layout desktop).
 
