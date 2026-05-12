@@ -185,11 +185,13 @@ export class InventoryService {
         wid: warehouseId,
       })
       .addSelect('COALESCE(s.quantity, 0)', 'qty')
+      .addSelect('s.id', 'stockId')
+      .addSelect('s.locationCode', 'locationCode')
       .where('p.isActive = TRUE');
 
     if (query.q) {
       qb.andWhere(
-        '(p.sku LIKE :q OR p.partNumber LIKE :q OR p.barcode LIKE :q OR p.name LIKE :q)',
+        '(p.sku LIKE :q OR p.partNumber LIKE :q OR p.barcode LIKE :q OR p.name LIKE :q OR s.locationCode LIKE :q)',
         { q: `%${query.q}%` },
       );
     }
@@ -210,6 +212,8 @@ export class InventoryService {
           barcode: p.barcode,
           minStock: p.minStock,
           maxStock: p.maxStock,
+          // `Product.location` queda deprecated desde Fase 7.5 — la fuente
+          // de verdad ahora es `Stock.locationCode` per bodega.
           location: p.location,
           cost: p.cost,
           price: p.price,
@@ -219,6 +223,8 @@ export class InventoryService {
         warehouseId,
         quantity: qty,
         status,
+        locationCode: (raw.raw[idx]?.locationCode as string | null) ?? null,
+        stockId: (raw.raw[idx]?.stockId as string | null) ?? null,
       };
     });
 
@@ -238,9 +244,56 @@ export class InventoryService {
     };
   }
 
+  /**
+   * Setea el `locationCode` de un producto en una bodega específica. Si la
+   * fila de Stock no existe todavía (caso: producto nunca tuvo movimiento
+   * en esa bodega), se crea con qty=0 y el code seteado.
+   *
+   * Esto soporta la edición inline de "Ubicación" en `/inventario` desde
+   * Fase 7.5. Acepta `null` o string vacío para limpiar la ubicación.
+   */
+  async setLocationCode(
+    productId: string,
+    warehouseId: string,
+    locationCode: string | null,
+  ): Promise<{ stockId: string; locationCode: string | null }> {
+    const product = await this.products.findOne({ where: { id: productId } });
+    if (!product) throw new NotFoundException('Producto no encontrado');
+    const warehouse = await this.warehouses.findOne({ where: { id: warehouseId } });
+    if (!warehouse) throw new NotFoundException('Bodega no encontrada');
+
+    const value = locationCode && locationCode.trim() !== '' ? locationCode.trim() : null;
+    if (value && value.length > 30) {
+      throw new BadRequestException(
+        'El código de ubicación no puede tener más de 30 caracteres',
+      );
+    }
+
+    let row = await this.stocks.findOne({
+      where: { productId, warehouseId },
+    });
+    if (!row) {
+      row = this.stocks.create({
+        productId,
+        warehouseId,
+        quantity: 0,
+        locationCode: value,
+      });
+    } else {
+      row.locationCode = value;
+    }
+    const saved = await this.stocks.save(row);
+    return { stockId: saved.id, locationCode: saved.locationCode };
+  }
+
   private async defaultWarehouseId(): Promise<string> {
-    const w = await this.warehouses.findOne({ where: {}, order: { name: 'ASC' } });
-    if (!w) throw new NotFoundException('No hay ningún almacén configurado.');
+    // Primera bodega ACTIVA por orden alfabético. Si no hay activas, falla
+    // con mensaje claro (caso patológico — el seed garantiza Principal activa).
+    const w = await this.warehouses.findOne({
+      where: { isActive: true },
+      order: { name: 'ASC' },
+    });
+    if (!w) throw new NotFoundException('No hay ningún almacén activo configurado.');
     return w.id;
   }
 }

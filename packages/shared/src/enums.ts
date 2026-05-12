@@ -4,9 +4,18 @@ export const InventoryMovementType = {
   ADJUSTMENT: 'ADJUSTMENT',
   RETURN_IN: 'RETURN_IN',
   RETURN_OUT: 'RETURN_OUT',
+  // Fase 7.5 — transferencias entre bodegas. No tocan caja.
+  TRANSFER_OUT: 'TRANSFER_OUT',
+  TRANSFER_IN: 'TRANSFER_IN',
 } as const;
 export type InventoryMovementType =
   (typeof InventoryMovementType)[keyof typeof InventoryMovementType];
+
+export const TransferStatus = {
+  COMPLETED: 'COMPLETED',
+  CANCELLED: 'CANCELLED',
+} as const;
+export type TransferStatus = (typeof TransferStatus)[keyof typeof TransferStatus];
 
 export const QuotationStatus = {
   DRAFT: 'DRAFT',

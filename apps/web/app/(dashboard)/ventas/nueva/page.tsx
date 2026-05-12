@@ -34,9 +34,27 @@ export default function NuevaVentaPage() {
   const prefill = useMemo(() => {
     if (!fromQuotationId || !quotation.data) return undefined;
     const q = quotation.data;
+    // Si la cotización era libre (sin customerId), construimos el snapshot
+    // para que SaleForm muestre el banner de "registrá al cliente". El
+    // snapshot puede tener todos los campos en null si la cotización se emitió
+    // sin datos — el FreeCustomerPrompt lo maneja.
+    const customerSnapshot =
+      !q.customerId &&
+      (q.customerNameSnapshot ||
+        q.customerTaxIdSnapshot ||
+        q.customerEmailSnapshot ||
+        q.customerPhoneSnapshot)
+        ? {
+            name: q.customerNameSnapshot,
+            taxId: q.customerTaxIdSnapshot,
+            email: q.customerEmailSnapshot,
+            phone: q.customerPhoneSnapshot,
+          }
+        : null;
     return {
       quotationId: q.id,
       customer: q.customer ?? null,
+      customerSnapshot,
       items: (q.items ?? []).map((it) => ({
         productId: it.productId,
         sku: it.product?.sku ?? '',

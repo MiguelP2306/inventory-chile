@@ -19,6 +19,8 @@ export { Sale } from './sale.entity';
 export { SaleItem } from './sale-item.entity';
 export { Stock } from './stock.entity';
 export { Supplier } from './supplier.entity';
+export { Transfer } from './transfer.entity';
+export { TransferItem } from './transfer-item.entity';
 export { User } from './user.entity';
 export { VehicleFitment } from './vehicle-fitment.entity';
 export { VehicleMake } from './vehicle-make.entity';

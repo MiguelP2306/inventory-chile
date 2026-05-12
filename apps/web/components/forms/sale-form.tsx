@@ -5,6 +5,10 @@ import { Banknote, CreditCard, Receipt, Search, Send, Trash2 } from 'lucide-reac
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { ProductPicker } from '@/components/product-picker';
+import {
+  RegisterCustomerFromSnapshotDialog,
+  type CustomerSnapshot,
+} from '@/components/forms/register-customer-from-snapshot-dialog';
 import { Button } from '@/components/ui/button';
 import {
   Command,
@@ -21,6 +25,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table,
@@ -41,11 +52,13 @@ import {
   type AvailableStockRow,
 } from '@/lib/sales-api';
 import { cn } from '@/lib/utils';
+import { listWarehouses } from '@/lib/warehouses-api';
 import type {
   CreateSaleInput,
   CustomerDto,
   PaymentMethodDto,
   SaleDto,
+  WarehouseDto,
 } from '@inventory/shared';
 
 type DiscountKind = '$' | '%';
@@ -66,7 +79,13 @@ interface Props {
   // cotización se marque CONVERTED en la misma transacción.
   prefillFromQuotation?: {
     quotationId: string;
+    // Si la cotización tenía cliente del catálogo, viene acá. Si era libre,
+    // este campo es null y `customerSnapshot` trae los datos del snapshot.
     customer: CustomerDto | null;
+    // Snapshot de cliente libre. Si está presente, el form muestra el banner
+    // de "Registrá al cliente para continuar" hasta que el operador resuelva
+    // (creando uno nuevo o usando uno existente del catálogo).
+    customerSnapshot?: CustomerSnapshot | null;
     items: Array<{
       productId: string;
       sku: string;
@@ -91,7 +110,38 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
   const [customer, setCustomer] = useState<CustomerDto | null>(
     prefillFromQuotation?.customer ?? null,
   );
+
+  // Si la cotización venía con cliente libre, mostramos un banner con el
+  // snapshot y un CTA "Registrar y continuar". `snapshotPending` controla
+  // si el banner sigue visible — se oculta cuando:
+  //   - El operador registra (o reusa) un cliente vía el dialog → `customer` setea.
+  //   - El operador hace click en "Elegir otro cliente del catálogo" → libera
+  //     el combobox normal sin perder el snapshot por si quiere volver.
+  const [snapshotPending, setSnapshotPending] = useState<boolean>(
+    !!prefillFromQuotation?.customerSnapshot && !prefillFromQuotation.customer,
+  );
+  const [registerOpen, setRegisterOpen] = useState(false);
+
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethodDto>('CASH');
+
+  // Bodega de la venta. Default = "Principal" si existe, sino la primera
+  // activa. El selector solo se muestra cuando hay 2+ bodegas activas.
+  const [warehouseId, setWarehouseId] = useState<string>('');
+  const warehouses = useQuery({
+    queryKey: ['warehouses', 'active'],
+    queryFn: () => listWarehouses({ active: 'true' }),
+  });
+  const activeWarehouses =
+    (Array.isArray(warehouses.data)
+      ? warehouses.data
+      : warehouses.data?.items ?? []) as WarehouseDto[];
+
+  useEffect(() => {
+    if (warehouseId || activeWarehouses.length === 0) return;
+    const principal = activeWarehouses.find((w) => w.name === 'Principal');
+    setWarehouseId((principal ?? activeWarehouses[0]!).id);
+  }, [warehouseId, activeWarehouses]);
+
   const [items, setItems] = useState<ItemRow[]>(() =>
     (prefillFromQuotation?.items ?? []).map((it) => ({
       productId: it.productId,
@@ -120,9 +170,9 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
     [items],
   );
   const stockQuery = useQuery({
-    queryKey: ['sales-available-stock', productIds.join(',')],
-    queryFn: () => getAvailableStock(productIds),
-    enabled: productIds.length > 0,
+    queryKey: ['sales-available-stock', warehouseId, productIds.join(',')],
+    queryFn: () => getAvailableStock(productIds, warehouseId),
+    enabled: !!warehouseId && productIds.length > 0,
   });
   const stockMap = useMemo(() => {
     const m = new Map<string, number>();
@@ -211,6 +261,7 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
 
     return {
       customerId: customer.id,
+      warehouseId: warehouseId || undefined,
       paymentMethod,
       notes: notes.trim() || null,
       quotationId: prefillFromQuotation?.quotationId ?? null,
@@ -271,17 +322,60 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
           <div className="rounded-md border bg-card p-6 space-y-4">
             <div className="space-y-2">
               <Label>Cliente</Label>
-              <CustomerCombobox
-                value={customer?.id ?? null}
-                onChange={(c) => setCustomer(c)}
-                initialCustomer={customer}
-              />
-              {!customer && (
-                <p className="text-xs text-muted-foreground">
-                  El cliente es obligatorio y debe estar en el catálogo (RUT).
-                </p>
+
+              {snapshotPending && prefillFromQuotation?.customerSnapshot ? (
+                <FreeCustomerPrompt
+                  snapshot={prefillFromQuotation.customerSnapshot}
+                  onRegisterClick={() => setRegisterOpen(true)}
+                  onUseCatalogClick={() => setSnapshotPending(false)}
+                />
+              ) : (
+                <>
+                  <CustomerCombobox
+                    value={customer?.id ?? null}
+                    onChange={(c) => setCustomer(c)}
+                    initialCustomer={customer}
+                  />
+                  {!customer && (
+                    <p className="text-xs text-muted-foreground">
+                      El cliente es obligatorio y debe estar en el catálogo (RUT).
+                    </p>
+                  )}
+                  {prefillFromQuotation?.customerSnapshot && !snapshotPending && !customer && (
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      className="px-0"
+                      onClick={() => setSnapshotPending(true)}
+                    >
+                      ← Volver al snapshot de la cotización
+                    </Button>
+                  )}
+                </>
               )}
             </div>
+
+            {activeWarehouses.length > 1 && (
+              <div className="space-y-2">
+                <Label>Bodega</Label>
+                <Select value={warehouseId} onValueChange={setWarehouseId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccioná bodega" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeWarehouses.map((w) => (
+                      <SelectItem key={w.id} value={w.id}>
+                        {w.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  El stock se descuenta de esta bodega al confirmar.
+                </p>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label>Método de pago</Label>
@@ -548,7 +642,98 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
           {createMut.isPending ? 'Confirmando...' : 'Confirmar venta'}
         </Button>
       </div>
+
+      {prefillFromQuotation?.customerSnapshot && (
+        <RegisterCustomerFromSnapshotDialog
+          open={registerOpen}
+          onOpenChange={setRegisterOpen}
+          snapshot={prefillFromQuotation.customerSnapshot}
+          onResolved={(c) => {
+            setCustomer(c);
+            setSnapshotPending(false);
+          }}
+        />
+      )}
     </form>
+  );
+}
+
+/**
+ * Banner + card readonly que se muestra cuando la cotización origen tenía
+ * cliente libre. El operador puede registrar al cliente (CTA primario) o
+ * elegir uno distinto del catálogo (link secundario).
+ */
+function FreeCustomerPrompt({
+  snapshot,
+  onRegisterClick,
+  onUseCatalogClick,
+}: {
+  snapshot: CustomerSnapshot;
+  onRegisterClick: () => void;
+  onUseCatalogClick: () => void;
+}) {
+  const hasAnyData =
+    snapshot.name || snapshot.taxId || snapshot.email || snapshot.phone;
+  return (
+    <div className="space-y-3">
+      <div className="rounded-md border border-amber-500/40 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+        Esta cotización fue creada con <strong>cliente libre</strong>.
+        Registrá al cliente en el catálogo para poder confirmar la venta.
+      </div>
+
+      <div className="rounded-md border bg-muted/30 p-4">
+        <div className="text-xs uppercase tracking-wider text-muted-foreground">
+          Datos del snapshot
+        </div>
+        {hasAnyData ? (
+          <dl className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+            <SnapshotField label="Nombre" value={snapshot.name} />
+            <SnapshotField label="RUT" value={snapshot.taxId} mono />
+            <SnapshotField label="Email" value={snapshot.email} />
+            <SnapshotField label="Teléfono" value={snapshot.phone} mono />
+          </dl>
+        ) : (
+          <p className="mt-2 text-sm text-muted-foreground">
+            La cotización no tenía datos del cliente. Cargalos manualmente al
+            registrar.
+          </p>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="button" onClick={onRegisterClick}>
+          Registrar y continuar
+        </Button>
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          className="px-0"
+          onClick={onUseCatalogClick}
+        >
+          Elegir otro cliente del catálogo
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function SnapshotField({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string | null;
+  mono?: boolean;
+}) {
+  return (
+    <div>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className={cn('text-sm', mono && 'font-mono')}>
+        {value && value.trim() ? value : <span className="text-muted-foreground italic">—</span>}
+      </dd>
+    </div>
   );
 }
 

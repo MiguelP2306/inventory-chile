@@ -415,7 +415,7 @@ inventory-management/
 6. **Plantillas de impresión 80mm + carta** para la nota de venta (HTML con `@page`, mismo enfoque que cotización).
 7. Compras también disparan `CashTransaction(EXPENSE, source=PURCHASE)` automáticamente al guardar `PurchaseEntry` (gancho ya preparado en Fase 5).
 
-### Fase 7.5 — Multi-bodega y Mercado Libre Full
+### Fase 7.5 — Multi-bodega y Mercado Libre Full ✅
 
 > Esta fase habilita el flujo "saco mercadería de mi bodega y la mando a la bodega de Mercado Libre Full" como una **transferencia** (no venta). Cuando ML Full vende, el stock baja de la bodega ML, no de la mía.
 

@@ -21,9 +21,11 @@ import { QuotationsModule } from './quotations/quotations.module';
 import { SalesModule } from './sales/sales.module';
 import { SettingsModule } from './settings/settings.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
+import { TransfersModule } from './transfers/transfers.module';
 import { UPLOADS_ROOT } from './uploads/upload-config';
 import { UploadsModule } from './uploads/uploads.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
+import { WarehousesModule } from './warehouses/warehouses.module';
 
 @Module({
   imports: [
@@ -59,6 +61,8 @@ import { VehiclesModule } from './vehicles/vehicles.module';
     NotificationsModule,
     QuotationsModule,
     SalesModule,
+    WarehousesModule,
+    TransfersModule,
   ],
   controllers: [HealthController],
   providers: [],

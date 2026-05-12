@@ -20,7 +20,7 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 | 5 | Caja, gastos, IVA, comisiones por tarjeta + factura adjunta en compras | ✅ |
 | 6 | Cotizaciones + modal venta/cotización + impresión 80mm/carta + WhatsApp/email | ✅ |
 | 7 | Ventas con caja integrada (warehouseId + método de pago + comisión tarjeta + cancelación atómica + PDF carta/80mm) | ✅ |
-| 7.5 | Multi-bodega + transferencias (flujo Mercado Libre Full manual) | pendiente |
+| 7.5 | Multi-bodega + transferencias entre bodegas + código de ubicación por bodega (flujo Mercado Libre Full manual) | ✅ |
 | 7.6 | Devoluciones + Garantías | pendiente |
 | 7.7 | Guía de despacho con número correlativo | pendiente |
 | 8 | Reportes + proyección de stock + lista de productos críticos (CSV/Excel) | pendiente |
@@ -36,6 +36,49 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 ## Historial de correcciones (feedback del cliente)
 
 > Bitácora de fixes de UX y bugs reportados por el cliente sobre módulos ya entregados. Cada entrada describe el problema, la solución aplicada y los archivos tocados, para no perder el contexto cuando vuelvan a aparecer dudas o se quiera auditar el motivo de un cambio.
+
+### Ronda 3 — 2026-05-11 (conversión cotización libre → venta)
+
+#### 1. Cliente libre se perdía al convertir cotización en venta
+
+- **Síntoma reportado:** al hacer "Convertir a venta" desde una cotización que había sido creada con **cliente libre** (sin selección del catálogo, solo snapshot de nombre/RUT/email/tel), el formulario de venta en `/ventas/nueva?fromQuotation=<id>` mostraba el tab "Cliente y pago" vacío. El operador no veía los datos del snapshot y solo podía elegir clientes del catálogo, perdiendo la información original.
+- **Causa raíz:** decisión de Fase 7 (`Sale.customerId NOT NULL`, solo catálogo) chocaba con la flexibilidad de Fase 6 que permitía cotizaciones libres. La pantalla `/ventas/nueva` mapeaba `customer: q.customer ?? null` sin pasar los `customerNameSnapshot`, `customerTaxIdSnapshot`, etc. al `SaleForm`. El operador tenía que recrear el cliente manualmente en otra pantalla y memorizar los datos.
+- **Solución:** flujo de **registrar al cliente antes de continuar** (respeta la regla "RUT obligatorio para ventas mostrador" de la decisión #14). Cuando la cotización origen es libre:
+  - `/ventas/nueva` ahora arma un `customerSnapshot` con los campos del snapshot de la cotización y lo pasa al `SaleForm`.
+  - El `SaleForm` detecta el snapshot y reemplaza el combobox del tab "Cliente y pago" por un **banner amarillo + card readonly** con los datos del snapshot. Botón primario "Registrar y continuar" abre un dialog. Link secundario "Elegir otro cliente del catálogo" descarta el snapshot y muestra el combobox normal (con un atajo "← Volver al snapshot" por si el operador se arrepiente).
+  - El dialog [`RegisterCustomerFromSnapshotDialog`](apps/web/components/forms/register-customer-from-snapshot-dialog.tsx) pre-llena los campos del snapshot, todos editables. Si el snapshot trae un RUT válido, hace una **búsqueda silenciosa por RUT** y si encuentra un cliente existente muestra un banner verde "Ya existe un cliente con este RUT: {nombre}" con dos botones: "Usar este cliente" (selecciona el existente, no crea) o "Crear uno nuevo" (sigue con el flujo de creación). La unicidad del RUT en DB sigue como red de seguridad.
+  - Tras registrar (o reusar), el SaleForm cierra el banner y prosigue normalmente con el cliente seleccionado.
+- **Trazabilidad del lado backend:** [`SalesService.create`](apps/api/src/sales/sales.service.ts) ahora, además de marcar la cotización como CONVERTED, **setea `Quotation.customerId = sale.customerId`** cuando la cotización venía sin cliente del catálogo. Los snapshots se mantienen intactos como histórico de cómo se le envió originalmente al cliente. Esto se hace en la misma transacción atómica del create.
+- **Edge cases manejados:**
+  - Snapshot sin RUT → el campo queda vacío en el dialog y la validación de `CustomerForm` bloquea hasta que sea válido.
+  - Snapshot sin ningún dato (cotización emitida vacía) → el card readonly dice "La cotización no tenía datos del cliente. Cargalos manualmente al registrar."
+  - Snapshot con RUT que ya existe en el catálogo → banner verde permite reusar el cliente existente (en lugar de fallar con 409 al guardar).
+  - Operador prefiere usar otro cliente del catálogo → el link "Elegir otro cliente del catálogo" libera el combobox sin perder el snapshot por si quiere volver.
+
+**Archivos nuevos**
+- [`apps/web/components/forms/register-customer-from-snapshot-dialog.tsx`](apps/web/components/forms/register-customer-from-snapshot-dialog.tsx) — dialog con form + búsqueda de duplicados por RUT.
+
+**Archivos modificados**
+- [`apps/api/src/sales/sales.service.ts`](apps/api/src/sales/sales.service.ts) — propaga `customerId` a la cotización origen cuando era libre.
+- [`apps/web/components/forms/sale-form.tsx`](apps/web/components/forms/sale-form.tsx) — `prefillFromQuotation.customerSnapshot` agregado, render condicional del tab Cliente, sub-componente `FreeCustomerPrompt`.
+- [`apps/web/components/forms/sale-form-dialog.tsx`](apps/web/components/forms/sale-form-dialog.tsx) — tipo de props sincronizado.
+- [`apps/web/app/(dashboard)/ventas/nueva/page.tsx`](apps/web/app/(dashboard)/ventas/nueva/page.tsx) — construye el `customerSnapshot` desde los campos `customerNameSnapshot/PhoneSnapshot/EmailSnapshot/TaxIdSnapshot` de la cotización.
+
+#### 2. Sin visibilidad del stock disponible en items de cotización
+
+- **Síntoma reportado:** al armar una cotización, el operador podía pedir cualquier cantidad de un producto sin ver el stock real. Si el producto tenía 5 unidades disponibles y se cargaba qty=20, no había ninguna señal — el problema recién aparecía al convertir a venta, cuando el backend rechazaba el `applyMovement`.
+- **Decisión clave:** en cotización el warning **NO bloquea** la acción (a diferencia de venta donde sí). El operador puede emitir una cotización por más unidades de las disponibles porque la importación puede estar en camino. Solo se le tiene que avisar de forma clara para que tome decisiones informadas.
+- **Solución:**
+  - **Badge "Stock: X" siempre visible** debajo del input de cantidad en cada item del tab Items (no solo cuando se excede). Cumple con "el administrador debe tener visibilidad en todo momento del stock real".
+  - **Highlight ámbar de la fila** y borde ámbar del input cuando `cantidad > stockDisponible`. El badge cambia a "Stock: 5 (faltan 3)" en tono ámbar fuerte.
+  - **Banner ámbar agregado** debajo de la tabla cuando hay 1+ items con exceso. Lista cada SKU afectado con "pidiendo X, disponible Y (faltan Z)" y aclara "Podés guardar la cotización igualmente. El stock se vuelve a validar al convertir a venta."
+  - **Color: ámbar** (no rojo, que es el color de error/bloqueo en ventas). Diferencia semántica clara: ámbar = warning informativo, rojo = bloqueo.
+  - **Reuso del endpoint** `GET /sales/available-stock?productIds=...` existente desde Fase 7 (consultado vía `getAvailableStock` de [`sales-api.ts`](apps/web/lib/sales-api.ts)). El endpoint es genéricamente "stock disponible por producto en bodega" — su URL en `/sales/...` es legacy del primer uso. Cuando llegue Fase 7.5 con multi-bodega o aparezcan más consumidores (devoluciones, garantías), se puede mover a `/inventory/available-stock` sin cambio funcional.
+- **Por qué no bloquear:** una cotización es un compromiso comercial previo a la venta. El operador puede cotizar productos que están en camino (lead time 2-3 meses para importaciones, ya documentado en el plan). El stock se revalida en `SalesService.create` cuando se convierte a venta — ahí sí se bloquea con 409 si el stock no alcanza.
+- **Archivos modificados**
+  - [`apps/web/components/forms/quotation-form.tsx`](apps/web/components/forms/quotation-form.tsx) — query nueva `quotation-available-stock` con TanStack, cálculo de `stockShortages`, badge por línea, highlight ámbar, banner resumen.
+
+---
 
 ### Ronda 2 — 2026-05-10 (módulo Cotizaciones)
 
@@ -858,9 +901,135 @@ Agregados:
 
 ### Pendientes para fases futuras
 
-- **Multi-bodega (Fase 7.5)**: el schema ya tiene `warehouseId` en `Sale`. Solo hace falta exponer el selector en `SaleForm` cuando haya más de una bodega activa.
 - **Devoluciones formales (Fase 7.6)**: hoy si el cliente devuelve un producto sin cancelar la venta entera, no hay un flujo dedicado — se usa cancelación o ajuste manual. La fase 7.6 introduce `RETURN_IN` desde una venta específica con motivo y trazabilidad.
 - **Guía de despacho (Fase 7.7)**: documento separado para el despacho físico. Hasta entonces, el campo `notes` de la venta cumple parcialmente esa función (plazo de entrega, transportista).
+
+---
+
+## Fase 7.5 — Multi-bodega y Mercado Libre Full
+
+Habilita la operación con múltiples bodegas físicas o virtuales. El caso de uso disparador es **Mercado Libre Full**: el cliente envía mercadería al depósito de ML como una "transferencia" interna (no es una venta), y cuando ML vende, el stock baja de la bodega ML, no de la "Principal". Incluye también el código de ubicación por bodega (decisión #60).
+
+### Decisiones de negocio acordadas
+
+| Tema | Decisión |
+| --- | --- |
+| Soft-delete de bodegas | `Warehouse.isActive` (boolean, default `true`). Eliminar desde `/almacenes` intenta hard delete; si la bodega tiene movimientos/stock/ventas asociados, el FK RESTRICT falla y caemos a soft delete (marcamos `isActive=false`). Las inactivas no aparecen en selectores de venta o transferencia, pero sí en filtros de historial y se pueden reactivar. |
+| Vista de stock | `/inventario` con **selector de bodega arriba** + tabla por bodega. Filtro sincronizado con URL (`?warehouse=<id>`) para compartir links. Default = primera bodega activa por orden alfabético (típicamente "Principal"). Vista matriz multi-bodega queda para reportes en Fase 8. |
+| Bodega default en SaleForm | **"Principal"** preseleccionada cuando hay 2+ bodegas activas. Predecible (la mayoría de ventas salen del local físico). El selector solo aparece visible cuando hay >1 activa — con una sola se asigna automáticamente sin UI. |
+| Cancelación de transferencias | Permitida con motivo obligatorio (min 5 chars). Genera movimientos compensatorios: `TRANSFER_IN` en origen (devuelve) + `TRANSFER_OUT` en destino (saca). Si el stock destino ya se consumió en una venta posterior, la cancelación falla con 409 — comportamiento deliberado: la cancelación no puede dejar stock negativo silenciosamente. |
+| Stock en form de transferencia | **Bloquea** si la cantidad excede stock origen (rojo, como SaleForm). Una transferencia es una operación contable real — no se puede mover más mercadería que la que hay. Si el stock está mal contado, primero se hace ajuste. |
+| Edición de ubicación por bodega | **Inline en `/inventario`** — nueva columna "Ubicación", click para editar, Enter/blur guarda. Max 30 chars. Si la fila Stock no existe todavía, se crea con qty=0 y la ubicación seteada. |
+| Migración de `Product.location` | Los valores existentes se copian a `Stock.locationCode` para los stocks de la bodega "Principal" en la migración. El campo `Product.location` queda **deprecated** (no se edita ni se muestra desde la UI) pero no se dropea — una futura migración lo elimina cuando sea seguro. |
+| Bodega "Mercado Libre Full" | **Seedeada con `isActive=false`** (idempotente entre migración y seed). Aparece en `/almacenes` como deshabilitada; el cliente la activa cuando empieza a operar con ML. Cuando se decida la integración API ML real (decisión #5 pendiente), la bodega ya existe con el id correcto. |
+
+### Schema
+
+#### Migración [`1778900000000-MultiWarehousePhase75.ts`](apps/api/src/database/migrations/1778900000000-MultiWarehousePhase75.ts)
+
+| Cambio | Tabla / Enum | Notas |
+| --- | --- | --- |
+| Enum extendido | `inventory_movements.type` | Agrega `TRANSFER_OUT` y `TRANSFER_IN`. Se reescribe la columna con `MODIFY COLUMN` (MySQL no soporta `ALTER ... ADD VALUE` para enums). |
+| `isActive` | `warehouses` | Boolean, default `true`. Backfill: todas las filas existentes quedan activas. |
+| `locationCode` | `stocks` | `varchar(30)` nullable. **Backfill**: copia `products.location` a `stocks.locationCode` para los stocks de la bodega "Principal" en una sola query `UPDATE ... INNER JOIN`. |
+| Tabla nueva | `transfers` | `id`, `number` (correlativo `TRF-AAAA-NNNNN`, único), `fromWarehouseId`, `toWarehouseId` (FK RESTRICT), `date`, `notes`, `status` (`COMPLETED`/`CANCELLED`, default `COMPLETED`), `cancelledAt`, `cancelReason`, `cancelledById` (FK SET NULL a `users`), `userId` (FK RESTRICT), timestamps. |
+| Tabla nueva | `transfer_items` | `id`, `transferId` (FK CASCADE), `productId` (FK RESTRICT), `qty`, `unitCost` nullable. |
+| Seed idempotente | `warehouses` | INSERT de "Mercado Libre Full" con `isActive=false` si no existe. |
+
+> El `down` revierte en orden inverso. Drop tablas → restaurar enum a 5 valores → drop `isActive` y `locationCode`. El delete de "Mercado Libre Full" en down verifica que no tenga movimientos/stocks/ventas asociados antes de borrarla (defensa contra pérdida de datos).
+
+### Backend
+
+#### Módulo nuevo [`apps/api/src/warehouses/`](apps/api/src/warehouses/)
+
+- **`WarehousesService`** — CRUD con búsqueda libre `q`, filtro `active=true|false` y paginación opcional. El `remove` intenta hard delete y cae a soft delete si la FK rechaza (sin pasar por el helper `rethrowFkAsConflict` — la lógica está inline para distinguir FK errors de otros errores de DB).
+- **`WarehousesController`** — endpoints estándar: `GET /warehouses`, `GET /warehouses/:id`, `POST`, `PATCH /:id` (incluye `isActive` para toggle), `DELETE /:id` (devuelve `{ok, softDeleted: boolean}` para que el frontend muestre el toast correcto).
+
+#### Módulo nuevo [`apps/api/src/transfers/`](apps/api/src/transfers/)
+
+- **`TransfersService.create(dto, userId)`** — único punto de creación. Valida: bodegas distintas, ambas activas, items sin duplicados, productos existentes. En una transacción atómica:
+  1. Genera correlativo `TRF-AAAA-NNNNN` vía `CountersService.nextNumber('TRANSFER', ...)`.
+  2. Persiste `Transfer` (status `COMPLETED`) + cada `TransferItem` con `unitCost` copiado del costo actual del producto.
+  3. Por cada item: `applyMovement(TRANSFER_OUT, qty=-x)` en origen + `applyMovement(TRANSFER_IN, qty=+x)` en destino. Si el stock origen no alcanza, `applyMovement` tira 409 y aborta toda la transacción.
+- **`TransfersService.cancel(id, dto, userId)`** — en una transacción: por cada item emite `TRANSFER_IN` en origen + `TRANSFER_OUT` en destino (compensación simétrica), luego marca `status=CANCELLED` con `cancelledAt`, `cancelReason`, `cancelledById`. Si el stock destino ya se consumió, la segunda `applyMovement` falla con 409 — correcto.
+- **`TransfersController`** — `GET /transfers` (paginado con filtros), `GET /transfers/:id`, `POST`, `POST /:id/cancel`.
+
+#### InventoryService extendido — [`apps/api/src/inventory/inventory.service.ts`](apps/api/src/inventory/inventory.service.ts)
+
+- `listStock` ahora devuelve `locationCode` y `stockId` por fila. Búsqueda libre `q` también matchea contra `locationCode` (`s.locationCode LIKE :q`).
+- `defaultWarehouseId` ahora filtra `where: { isActive: true }` — nunca devuelve una bodega inactiva.
+- **Método nuevo** `setLocationCode(productId, warehouseId, value)` — upsert: si la fila Stock no existe, la crea con `qty=0` y el code. Validación: max 30 chars. Endpoint: `PATCH /inventory/stock/location`.
+
+### Frontend
+
+#### API clients nuevos
+
+- [`warehouses-api.ts`](apps/web/lib/warehouses-api.ts) — `listWarehouses`, `getWarehouse`, `createWarehouse`, `updateWarehouse`, `deleteWarehouse`.
+- [`transfers-api.ts`](apps/web/lib/transfers-api.ts) — `listTransfers`, `getTransfer`, `createTransfer`, `cancelTransfer`.
+- [`inventory-api.ts`](apps/web/lib/inventory-api.ts) extendido — `setStockLocation` para la edición inline.
+
+#### Pantallas nuevas
+
+- [`/almacenes`](apps/web/app/(dashboard)/almacenes/page.tsx) — listado con todas las bodegas (activas e inactivas). Filas inactivas en gris. Acciones por fila: **Toggle Activo/Inactivo**, **Editar** (dialog con nombre + dirección), **Eliminar** (intenta hard delete, fallback a soft).
+- [`/transferencias`](apps/web/app/(dashboard)/transferencias/page.tsx) — listado paginado con filtros: estado, bodega origen, bodega destino, fechas, búsqueda libre (matchea número o nombre de bodega). Bodegas inactivas aparecen en los selectores de filtro con sufijo "(inactiva)" para poder filtrar historial.
+- [`/transferencias/nueva`](apps/web/app/(dashboard)/transferencias/nueva/page.tsx) — wrapper de [`TransferForm`](apps/web/components/forms/transfer-form.tsx). Selectores origen → destino (con valores cruzados deshabilitados para evitar misma=misma), tabla de items con stock origen visible, bloqueo si excede, textarea de notas.
+- [`/transferencias/[id]`](apps/web/app/(dashboard)/transferencias/[id]/page.tsx) — detalle con flecha visual origen → destino, tabla de items, banner rojo cuando está cancelada (motivo + auditoría), botón **Cancelar transferencia** que abre [`CancelTransferDialog`](apps/web/components/forms/cancel-transfer-dialog.tsx).
+
+#### Pantallas actualizadas
+
+- [`/inventario`](apps/web/app/(dashboard)/inventario/page.tsx) — **selector de bodega** al tope (sincronizado con URL en `?warehouse=<id>`). Nueva columna **"Ubicación"** con edición inline (click → input → Enter/blur guarda, Escape cancela). Búsqueda libre extendida para matchear contra `locationCode`. Default a la primera bodega activa.
+- [`/inventario/movimientos`](apps/web/app/(dashboard)/inventario/movimientos/page.tsx) — tipos `TRANSFER_IN` y `TRANSFER_OUT` agregados al selector + al renderer de badge (color violeta para diferenciar de compras/ventas).
+- [`SaleForm`](apps/web/components/forms/sale-form.tsx) — **selector de bodega** ahora visible cuando hay 2+ bodegas activas (preselecciona "Principal"). El `warehouseId` viaja en el payload del create. El stock disponible se consulta para la bodega elegida.
+- [`Sidebar`](apps/web/components/sidebar.tsx) — items "Almacenes" y "Transferencias" agregados a la sección Operación.
+
+### DTOs compartidos — [`packages/shared/src/types.ts`](packages/shared/src/types.ts)
+
+Agregados:
+- `WarehouseDto`, `CreateWarehouseInput`, `UpdateWarehouseInput`.
+- `TransferStatusDto = 'COMPLETED' | 'CANCELLED'`.
+- `TransferDto`, `TransferItemDto`, `CreateTransferInput`, `CreateTransferItemInput`, `CancelTransferInput`.
+
+Modificados:
+- `StockSummary` ahora incluye `locationCode: string | null` y `stockId: string | null`.
+- `MovementDto.type` ahora incluye `'TRANSFER_OUT' | 'TRANSFER_IN'`.
+- `StockSummary.product.location` marcado `@deprecated` (sigue presente para retrocompatibilidad).
+
+Y en [`packages/shared/src/enums.ts`](packages/shared/src/enums.ts):
+- `InventoryMovementType` extendido con `TRANSFER_OUT` y `TRANSFER_IN`.
+- `TransferStatus` agregado.
+
+### Seed
+
+[`run-seeds.ts`](apps/api/src/database/seeds/run-seeds.ts) actualizado para crear ambas bodegas idempotentemente: "Principal" (activa) y "Mercado Libre Full" (inactiva). La migración 1778900000000 también la crea idempotentemente — la duplicación es deliberada para que instalaciones nuevas que corren `db:seed` antes que las migraciones igual queden con ambas bodegas.
+
+### Verificación end-to-end de la fase
+
+| Caso | Resultado esperado |
+| --- | --- |
+| Crear bodega nueva | Aparece en `/almacenes` activa, disponible en selectores de venta y transferencia. |
+| Eliminar bodega virgen | Hard delete: desaparece de la lista. Toast: "Bodega eliminada". |
+| Eliminar bodega con historial | Soft delete: queda en la lista en gris con badge "Inactiva". Toast: "Bodega desactivada (tenía movimientos asociados)". |
+| Reactivar bodega | Click ⚡ → queda activa, vuelve a aparecer en selectores. |
+| Transferir 10 unidades de Principal → ML Full | Movimientos: `TRANSFER_OUT -10` en Principal + `TRANSFER_IN +10` en ML Full. Visibles en `/inventario/movimientos` con badge violeta. Stock baja en Principal, sube en ML. |
+| Transferir excediendo stock | Botón "Confirmar" deshabilitado. Banner rojo "Hay items que exceden el stock disponible". Backend revalida igual con 409. |
+| Cancelar transferencia | Stock vuelve a Principal, baja de ML. Compensación visible en movimientos. Si ML ya vendió ese stock → 409 al cancelar. |
+| Editar ubicación inline | Click en celda Ubicación → input → escribir "A-12-3" → Enter → guarda. Si producto nunca tuvo stock en esa bodega, se crea el row Stock con qty=0 + locationCode. |
+| Cambiar bodega en `/inventario` | Tabla se actualiza con el stock de la otra bodega. URL incluye `?warehouse=<id>`. |
+| Venta desde Principal o ML Full | Selector de bodega visible (hay 2 activas). Stock baja de la bodega elegida. |
+| Quotación de un producto vacío en Principal pero con stock en ML | El warning ámbar de Fase 6 usa la bodega "Principal" por defecto. Para vender desde ML, el operador convierte y elige la bodega en el SaleForm. |
+
+### Tests / health
+
+- `pnpm --filter @inventory/api typecheck` ✅
+- `pnpm --filter @inventory/web typecheck` ✅
+- `pnpm --filter @inventory/shared build` ✅
+- Migración aplicable (`db:migrate`) — verificar antes de deployar a entornos con datos existentes.
+
+### Pendientes para fases futuras
+
+- **Integración API Mercado Libre Full** (decisión #5 pendiente): hoy el flujo es 100% manual — el operador registra la transferencia desde Principal a ML Full y, cuando ML vende, registra una venta eligiendo bodega ML. Cuando se confirme el alcance con el cliente, agregar sincronización automática vía API ML.
+- **Etiquetas con código de ubicación** (Fase 11): el endpoint de generación de etiquetas térmicas 50×30 mm podrá incluir el `Stock.locationCode` de la bodega seleccionada — útil para que el equipo sepa dónde pegar cada etiqueta.
+- **Drop `Product.location`**: futura migración que elimina la columna deprecada una vez confirmado que ningún consumidor la lee.
 
 ---
 
@@ -1823,6 +1992,8 @@ Si el admin ya existe, **el seed no lo recrea** — borralo manualmente primero 
 | 58 | Acceso al form de venta | 7 | ✅ Item "Ventas" en sidebar (sección Operación). Botón directo "Nueva venta" en `/ventas` que abre el dialog. El FAB global también lo abre vía el modal "Venta o Cotización". |
 | 59 | Etiquetas térmicas para productos | 11 | ✅ **Confirmado: formato 50 mm ancho × 30 mm alto** para impresora térmica. Se entrega en Fase 11 junto con scanners USB/cámara como un bloque coherente. Endpoint `GET /products/:id/label?format=50x30` + botón "Imprimir etiqueta" en el detalle. Usa `bwip-js` para el barcode CODE128. |
 | 60 | Código de ubicación de producto por bodega | 7.5 | ✅ **Confirmado: por bodega**, no global. Se agrega `Stock.locationCode` (varchar 30, nullable) en Fase 7.5 cuando multi-bodega se active de verdad. Durante esta fase se migran los valores existentes del campo global `Product.location` al nuevo, y queda deprecated. Editable inline desde `/inventario` con la bodega seleccionada. Búsqueda por código de ubicación. |
+| 61 | Conversión de cotización libre → venta | 6/7 (Ronda 3) | ✅ **Registrar al cliente antes de continuar**: el SaleForm muestra el snapshot en un banner readonly y un dialog inline registra al cliente en el catálogo (pre-llenado, con búsqueda anti-duplicados por RUT). Tras registrar, la cotización origen queda linkeada al nuevo cliente (`Quotation.customerId` setteado) y los snapshots se mantienen como histórico. Respeta la regla #14 "RUT obligatorio para ventas mostrador" sin tocar el schema de `sales`. |
+| 62 | Control de stock en items de cotización | 6 (Ronda 3) | ✅ **Warning informativo, no bloqueante**. Badge "Stock: X" siempre visible bajo cada input de cantidad; cuando se excede, la fila se pinta ámbar y el badge muestra "Stock: 5 (faltan 3)". Banner ámbar al final de la tabla con la lista completa de items afectados. Diferencia con venta (donde el exceso bloquea con rojo): cotización permite exceso porque puede haber importaciones en tránsito (lead time 2-3 meses). El stock se revalida en duro al convertir a venta. |
 
 ---
 
@@ -1836,9 +2007,11 @@ Cada fase es un PR independiente con verificación end-to-end al cierre. Ver [PL
 
 **Fase 7:** ✅ Ventas con caja integrada (warehouseId + método de pago + comisión tarjeta atómica + cancelación con motivo + PDF Carta/80mm + convertir desde cotización) — ver sección "Fase 7" arriba.
 
-**Fase 7.5 (siguiente):** Multi-bodega + transferencias (flujo Mercado Libre Full manual). Incluye también **código de ubicación por bodega** (`Stock.locationCode`) — requerimiento agregado durante Fase 7. Al activarse multi-bodega aparecen: selector de bodega en el form de venta, pantalla `/almacenes`, pantalla de transferencias entre bodegas, y la columna "Ubicación" en `/inventario` por bodega.
+**Fase 7.5:** ✅ Multi-bodega + transferencias entre bodegas + código de ubicación por bodega + bodega "Mercado Libre Full" seedeada (inactiva por defecto) — ver sección "Fase 7.5" arriba.
 
-**Fases 7.6 / 7.7:** Devoluciones (suman stock) y Garantías (no afectan stock); Guía de despacho con número correlativo.
+**Fase 7.6 (siguiente):** Devoluciones (suman stock) y Garantías (no afectan stock).
+
+**Fase 7.7:** Guía de despacho con número correlativo.
 
 **Fase 8:** Reportes + **Proyección de stock** con lista de productos críticos exportable a CSV/Excel (importante por el lead time de 2-3 meses de las importaciones del cliente).
 

@@ -1,8 +1,9 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Settings2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import { AdjustStockDialog } from '@/components/adjust-stock-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,38 +24,65 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { listStockPaginated } from '@/lib/inventory-api';
+import { apiErrorMessage } from '@/lib/catalog-api';
+import { listStockPaginated, setStockLocation } from '@/lib/inventory-api';
 import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
-import type { StockStatus, StockSummary } from '@inventory/shared';
+import { listWarehouses } from '@/lib/warehouses-api';
+import type { StockStatus, StockSummary, WarehouseDto } from '@inventory/shared';
 
 const ALL = '__all__';
 const PAGE_SIZE = 50;
 
 export default function InventarioPage() {
+  const qc = useQueryClient();
+
   const filters = useUrlFilters({
     q: '',
     status: '',
+    warehouse: '',
     page: '',
   });
   const { values, setFilters, setFilter } = filters;
   const search = useDebouncedUrlFilter(filters, 'q', { resetKeys: ['page'] });
   const status = values.status || ALL;
+  const warehouseId = values.warehouse || '';
   const page = Number(values.page || '1');
-
   const debouncedQ = (values.q ?? '').trim();
+
+  // Bodegas activas para el selector.
+  const warehouses = useQuery({
+    queryKey: ['warehouses', 'active'],
+    queryFn: () => listWarehouses({ active: 'true' }),
+  });
+  const activeWarehouses =
+    (Array.isArray(warehouses.data)
+      ? warehouses.data
+      : warehouses.data?.items ?? []) as WarehouseDto[];
+
+  // Si el filtro `warehouse` está vacío y ya tenemos bodegas, seteamos
+  // automáticamente la primera. Esto preserva URL compartibles: si llega un
+  // link con `?warehouse=<id>`, lo respetamos.
+  useEffect(() => {
+    if (!warehouseId && activeWarehouses.length > 0) {
+      setFilter('warehouse', activeWarehouses[0]!.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [warehouseId, activeWarehouses.length]);
 
   const [adjustTarget, setAdjustTarget] = useState<StockSummary | null>(null);
 
   const stock = useQuery({
-    queryKey: ['stock', { q: debouncedQ, status, page }],
+    queryKey: ['stock', { q: debouncedQ, status, warehouseId, page }],
     queryFn: () =>
       listStockPaginated({
         q: debouncedQ || undefined,
         status: status === ALL ? undefined : (status as StockStatus),
+        warehouseId: warehouseId || undefined,
         page,
         pageSize: PAGE_SIZE,
       }),
+    enabled: !!warehouseId,
   });
 
   const items = stock.data?.items ?? [];
@@ -69,10 +97,33 @@ export default function InventarioPage() {
     { ok: 0, low: 0, out: 0 } as Record<StockStatus, number>,
   );
 
+  const currentWarehouse = useMemo(
+    () => activeWarehouses.find((w) => w.id === warehouseId) ?? null,
+    [activeWarehouses, warehouseId],
+  );
+
+  // Mutación para edición inline de locationCode.
+  const locationMut = useMutation({
+    mutationFn: (input: { productId: string; warehouseId: string; locationCode: string | null }) =>
+      setStockLocation(input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['stock'] });
+      toast.success('Ubicación actualizada');
+    },
+    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo actualizar')),
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Inventario</h1>
+        <div>
+          <h1 className="text-2xl font-semibold">Inventario</h1>
+          {currentWarehouse && (
+            <p className="text-sm text-muted-foreground">
+              Mostrando stock de <strong>{currentWarehouse.name}</strong>
+            </p>
+          )}
+        </div>
         <div className="flex gap-2 text-sm">
           <Badge variant="ok">{counts.ok} OK</Badge>
           <Badge variant="low">{counts.low} bajo stock</Badge>
@@ -80,9 +131,24 @@ export default function InventarioPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <Select
+          value={warehouseId || ''}
+          onValueChange={(v) => setFilters({ warehouse: v, page: null })}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Bodega" />
+          </SelectTrigger>
+          <SelectContent>
+            {activeWarehouses.map((w) => (
+              <SelectItem key={w.id} value={w.id}>
+                {w.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Input
-          placeholder="Buscar por SKU, número de parte, código de barras o nombre"
+          placeholder="Buscar por SKU, código de barras, nombre o ubicación"
           value={search.value}
           onChange={(e) => search.setValue(e.target.value)}
           className="md:col-span-2"
@@ -109,6 +175,7 @@ export default function InventarioPage() {
             <TableRow>
               <TableHead>SKU</TableHead>
               <TableHead>Producto</TableHead>
+              <TableHead>Ubicación</TableHead>
               <TableHead>Categoría</TableHead>
               <TableHead className="text-right">Stock</TableHead>
               <TableHead className="text-right">Mín</TableHead>
@@ -121,7 +188,7 @@ export default function InventarioPage() {
               <>
                 {Array.from({ length: 6 }).map((_, i) => (
                   <TableRow key={i}>
-                    <TableCell colSpan={7}>
+                    <TableCell colSpan={8}>
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
                   </TableRow>
@@ -130,7 +197,7 @@ export default function InventarioPage() {
             )}
             {!stock.isLoading && items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={8} className="text-center text-muted-foreground">
                   Sin productos.
                 </TableCell>
               </TableRow>
@@ -139,6 +206,19 @@ export default function InventarioPage() {
               <TableRow key={row.product.id}>
                 <TableCell className="font-mono text-xs">{row.product.sku}</TableCell>
                 <TableCell>{row.product.name}</TableCell>
+                <TableCell>
+                  <LocationCell
+                    initialValue={row.locationCode}
+                    onSave={(value) =>
+                      locationMut.mutate({
+                        productId: row.product.id,
+                        warehouseId: row.warehouseId,
+                        locationCode: value,
+                      })
+                    }
+                    pending={locationMut.isPending}
+                  />
+                </TableCell>
                 <TableCell className="text-muted-foreground">
                   {row.product.category?.name ?? '—'}
                 </TableCell>
@@ -209,4 +289,72 @@ function StatusBadge({ status }: { status: StockStatus }) {
   if (status === 'ok') return <Badge variant="ok">OK</Badge>;
   if (status === 'low') return <Badge variant="low">Bajo stock</Badge>;
   return <Badge variant="out">Sin stock</Badge>;
+}
+
+/**
+ * Celda editable inline para `locationCode`. Click → modo edición con input.
+ * Enter/blur guarda. Escape cancela. Persiste en backend vía PATCH del padre.
+ *
+ * Si la fila no tenía valor todavía muestra "—" en gris, click muestra input
+ * vacío.
+ */
+function LocationCell({
+  initialValue,
+  onSave,
+  pending,
+}: {
+  initialValue: string | null;
+  onSave: (value: string | null) => void;
+  pending: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(initialValue ?? '');
+
+  useEffect(() => {
+    if (!editing) setDraft(initialValue ?? '');
+  }, [initialValue, editing]);
+
+  function commit() {
+    setEditing(false);
+    const next = draft.trim() === '' ? null : draft.trim().slice(0, 30);
+    const previous = initialValue ?? '';
+    if (next === previous) return; // sin cambios
+    if (next === '' && previous === '') return;
+    onSave(next);
+  }
+
+  if (editing) {
+    return (
+      <Input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            commit();
+          } else if (e.key === 'Escape') {
+            setEditing(false);
+            setDraft(initialValue ?? '');
+          }
+        }}
+        maxLength={30}
+        placeholder="ej: A-12-3"
+        className="h-7 text-xs font-mono"
+        disabled={pending}
+      />
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      className="rounded px-1 py-0.5 font-mono text-xs hover:bg-accent"
+      title="Click para editar"
+    >
+      {initialValue ?? <span className="text-muted-foreground">—</span>}
+    </button>
+  );
 }

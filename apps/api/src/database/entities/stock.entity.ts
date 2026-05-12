@@ -36,6 +36,12 @@ export class Stock {
   @Column({ type: 'int', default: 0 })
   quantity!: number;
 
+  // Código de ubicación física DENTRO de esta bodega (pasillo/estante/posición).
+  // Reemplaza al campo deprecado `Product.location` (que era global) — cada
+  // producto puede tener una ubicación distinta en cada bodega.
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  locationCode!: string | null;
+
   @UpdateDateColumn({ type: 'datetime', precision: 6 })
   updatedAt!: Date;
 }

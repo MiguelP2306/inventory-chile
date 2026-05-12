@@ -293,6 +293,14 @@ export class SalesService {
           );
         }
         q.status = QuotationStatus.CONVERTED;
+        // Si la cotización venía con cliente libre (snapshot) y la venta se
+        // confirmó contra un cliente del catálogo (recién registrado o no),
+        // linkeamos la cotización al cliente real para que reportes futuros
+        // por cliente la encuentren. Los snapshots se mantienen intactos como
+        // histórico de cómo se le envió originalmente al cliente.
+        if (!q.customerId) {
+          q.customerId = dto.customerId;
+        }
         await qRepo.save(q);
       }
 

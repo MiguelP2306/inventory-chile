@@ -92,6 +92,7 @@ export interface StockSummary {
     barcode: string | null;
     minStock: number;
     maxStock: number | null;
+    /** @deprecated Desde Fase 7.5, ver `locationCode` per-bodega. */
     location: string | null;
     cost: string;
     price: string;
@@ -101,11 +102,25 @@ export interface StockSummary {
   warehouseId: string;
   quantity: number;
   status: StockStatus;
+  // Ubicación física dentro de la bodega seleccionada (Fase 7.5).
+  // Distinta del `product.location` (global, deprecated).
+  locationCode: string | null;
+  // Id del row `stocks` — útil para `PATCH /inventory/stock/:id/location`.
+  // Puede ser null si el producto nunca tuvo movimientos en esta bodega
+  // (caso: producto recién creado en una bodega vacía).
+  stockId: string | null;
 }
 
 export interface MovementDto {
   id: string;
-  type: 'PURCHASE_IN' | 'SALE_OUT' | 'ADJUSTMENT' | 'RETURN_IN' | 'RETURN_OUT';
+  type:
+    | 'PURCHASE_IN'
+    | 'SALE_OUT'
+    | 'ADJUSTMENT'
+    | 'RETURN_IN'
+    | 'RETURN_OUT'
+    | 'TRANSFER_OUT'
+    | 'TRANSFER_IN';
   qty: number;
   unitCost: string | null;
   reference: string | null;
@@ -443,5 +458,78 @@ export interface CreateSaleInput {
 }
 
 export interface CancelSaleInput {
+  reason: string;
+}
+
+// ---------- Bodegas y transferencias (Fase 7.5) ----------
+
+export interface WarehouseDto {
+  id: string;
+  name: string;
+  address: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateWarehouseInput {
+  name: string;
+  address?: string | null;
+}
+
+export interface UpdateWarehouseInput {
+  name?: string;
+  address?: string | null;
+  isActive?: boolean;
+}
+
+export type TransferStatusDto = 'COMPLETED' | 'CANCELLED';
+
+export interface TransferItemDto {
+  id: string;
+  productId: string;
+  qty: number;
+  unitCost: string | null;
+  product?: {
+    id: string;
+    sku: string;
+    name: string;
+    partNumber: string | null;
+  };
+}
+
+export interface TransferDto {
+  id: string;
+  number: string;
+  fromWarehouseId: string;
+  fromWarehouse?: { id: string; name: string };
+  toWarehouseId: string;
+  toWarehouse?: { id: string; name: string };
+  date: string;
+  notes: string | null;
+  status: TransferStatusDto;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  cancelledBy?: { id: string; name: string; email: string } | null;
+  user?: { id: string; name: string; email: string };
+  items?: TransferItemDto[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateTransferItemInput {
+  productId: string;
+  qty: number;
+}
+
+export interface CreateTransferInput {
+  fromWarehouseId: string;
+  toWarehouseId: string;
+  date?: string;
+  notes?: string | null;
+  items: CreateTransferItemInput[];
+}
+
+export interface CancelTransferInput {
   reason: string;
 }

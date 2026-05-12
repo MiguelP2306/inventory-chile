@@ -64,3 +64,8 @@ AI:
     La próxima fase que toca es la 7.5 (multi-bodega + Mercado Libre Full). Cuando arranquemos esa, también entra el código de ubicación por bodega como parte del scope. Las etiquetas vienen después en Fase 11.
 
     Si querés, también puedo dejar una nota en el README en la sección de "Decisiones pendientes con el cliente" para que el cliente vea que el requerimiento quedó registrado pero pospuesto a su fase natural — avisame si te suma o lo dejamos solo en el PLAN.
+
+
+==============================================================================================================
+
+Validar de forma correcta el RUT en toda la web

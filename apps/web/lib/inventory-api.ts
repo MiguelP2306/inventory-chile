@@ -96,6 +96,23 @@ export const adjustStock = (input: AdjustInput) =>
     .post<{ movement: MovementDto; reason: string }>('/inventory/adjust', input)
     .then((r) => r.data);
 
+// ---------- Location code (Fase 7.5) ----------
+
+export interface SetLocationInput {
+  productId: string;
+  warehouseId: string;
+  // null o string vacío para limpiar
+  locationCode: string | null;
+}
+
+export const setStockLocation = (input: SetLocationInput) =>
+  api
+    .patch<{ stockId: string; locationCode: string | null }>(
+      '/inventory/stock/location',
+      input,
+    )
+    .then((r) => r.data);
+
 // ---------- Purchases ----------
 export interface PurchaseItemInput {
   productId: string;

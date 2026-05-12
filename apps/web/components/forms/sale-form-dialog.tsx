@@ -18,6 +18,14 @@ interface Props {
   prefillFromQuotation?: {
     quotationId: string;
     customer: CustomerDto | null;
+    // Snapshot de cliente libre. Si está presente, el SaleForm muestra el
+    // banner "registrá al cliente para continuar" en el tab Cliente y pago.
+    customerSnapshot?: {
+      name: string | null;
+      taxId: string | null;
+      email: string | null;
+      phone: string | null;
+    } | null;
     items: Array<{
       productId: string;
       sku: string;

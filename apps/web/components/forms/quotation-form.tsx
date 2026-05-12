@@ -59,6 +59,7 @@ import {
   type CreateQuotationInput,
   type CreateQuotationItemInput,
 } from '@/lib/quotations-api';
+import { getAvailableStock, type AvailableStockRow } from '@/lib/sales-api';
 import { isValidPhone, normalizePhone } from '@/lib/validators/phone';
 import { cn } from '@/lib/utils';
 import type { CustomerDto, QuotationDto } from '@inventory/shared';
@@ -201,6 +202,27 @@ export function QuotationForm({
 
   const clientType = form.watch('clientType');
 
+  // Stock disponible por producto: se reconsulta cuando cambian los items.
+  // En cotizaciones es **informativo** (a diferencia de ventas, no bloquea).
+  // Si el operador agrega más cantidad que el disponible se muestra warning
+  // ámbar — el stock se vuelve a validar al convertir a venta.
+  const productIds = useMemo(
+    () => items.map((it) => it.productId).filter(Boolean),
+    [items],
+  );
+  const stockQuery = useQuery({
+    queryKey: ['quotation-available-stock', productIds.join(',')],
+    queryFn: () => getAvailableStock(productIds),
+    enabled: productIds.length > 0,
+  });
+  const stockMap = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const row of stockQuery.data ?? ([] as AvailableStockRow[])) {
+      m.set(row.productId, row.quantity);
+    }
+    return m;
+  }, [stockQuery.data]);
+
   // Cálculos en vivo
   const itemsForCalc = useMemo(
     () =>
@@ -222,6 +244,35 @@ export function QuotationForm({
   const totalBruto = itemsForCalc.reduce((acc, it) => acc + it.subtotal, 0);
   const subtotalNeto = totalBruto / (1 + taxRate);
   const taxAmount = totalBruto - subtotalNeto;
+
+  // Items que exceden el stock disponible. La validación NO bloquea el guardado
+  // — solo informa. El stock se vuelve a chequear al convertir a venta.
+  const stockShortages = items
+    .map((it) => {
+      const available = stockMap.get(it.productId);
+      if (available == null) return null;
+      if (it.qty > available) {
+        return {
+          productId: it.productId,
+          sku: it.sku,
+          name: it.name,
+          requested: it.qty,
+          available,
+        };
+      }
+      return null;
+    })
+    .filter(
+      (
+        x,
+      ): x is {
+        productId: string;
+        sku: string;
+        name: string;
+        requested: number;
+        available: number;
+      } => x !== null,
+    );
 
   const buildPayload = (): CreateQuotationInput | null => {
     const values = form.getValues();
@@ -728,24 +779,53 @@ export function QuotationForm({
                 )}
                 {items.map((it, idx) => {
                   const calc = itemsForCalc[idx];
+                  const available = stockMap.get(it.productId);
+                  const stockLoaded = available != null;
+                  const exceeds = stockLoaded && it.qty > available;
                   return (
-                    <TableRow key={`${it.productId}-${idx}`}>
+                    <TableRow
+                      key={`${it.productId}-${idx}`}
+                      className={
+                        exceeds
+                          ? 'bg-amber-500/5 hover:bg-amber-500/10'
+                          : undefined
+                      }
+                    >
                       <TableCell className="font-mono text-xs">{it.sku}</TableCell>
                       <TableCell className="max-w-[260px] truncate">
                         {it.name}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Input
-                          type="number"
-                          min={1}
-                          value={it.qty}
-                          onChange={(e) =>
-                            updateItem(idx, {
-                              qty: Math.max(1, Number(e.target.value) || 0),
-                            })
-                          }
-                          className="text-right"
-                        />
+                        <div className="space-y-1">
+                          <Input
+                            type="number"
+                            min={1}
+                            value={it.qty}
+                            onChange={(e) =>
+                              updateItem(idx, {
+                                qty: Math.max(1, Number(e.target.value) || 0),
+                              })
+                            }
+                            className={cn(
+                              'text-right',
+                              exceeds && 'border-amber-500 focus-visible:ring-amber-500',
+                            )}
+                          />
+                          {stockLoaded && (
+                            <div
+                              className={cn(
+                                'text-xs tabular-nums',
+                                exceeds
+                                  ? 'font-medium text-amber-700 dark:text-amber-300'
+                                  : 'text-muted-foreground',
+                              )}
+                            >
+                              {exceeds
+                                ? `Stock: ${available} (faltan ${it.qty - available})`
+                                : `Stock: ${available}`}
+                            </div>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="text-right">
                         <Input
@@ -814,6 +894,29 @@ export function QuotationForm({
               </TableBody>
             </Table>
           </div>
+
+          {stockShortages.length > 0 && (
+            <div className="rounded-md border border-amber-500/40 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+              <div className="font-medium">
+                {stockShortages.length === 1
+                  ? '1 item excede el stock disponible'
+                  : `${stockShortages.length} items exceden el stock disponible`}
+              </div>
+              <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
+                {stockShortages.map((s) => (
+                  <li key={s.productId}>
+                    <span className="font-mono">{s.sku}</span> — {s.name}:{' '}
+                    pidiendo {s.requested}, disponible {s.available} (faltan{' '}
+                    {s.requested - s.available})
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs">
+                Podés guardar la cotización igualmente. El stock se vuelve a
+                validar al convertir a venta.
+              </p>
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="notas" className="space-y-2">

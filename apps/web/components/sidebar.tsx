@@ -2,7 +2,9 @@
 
 import {
   ArrowDownToLine,
+  ArrowLeftRight,
   Boxes,
+  Building2,
   Car,
   ClipboardList,
   Factory,
@@ -58,6 +60,18 @@ const SECTIONS: NavSection[] = [
         label: 'Movimientos',
         icon: ArrowDownToLine,
         matchPrefix: ['/inventario/movimientos'],
+      },
+      {
+        href: '/almacenes',
+        label: 'Almacenes',
+        icon: Building2,
+        matchPrefix: ['/almacenes'],
+      },
+      {
+        href: '/transferencias',
+        label: 'Transferencias',
+        icon: ArrowLeftRight,
+        matchPrefix: ['/transferencias'],
       },
       { href: '/compras', label: 'Compras', icon: ArrowDownToLine, matchPrefix: ['/compras'] },
       {

@@ -73,6 +73,12 @@ export class Product {
   @Column({ type: 'int', nullable: true })
   maxStock!: number | null;
 
+  /**
+   * @deprecated Desde Fase 7.5 la ubicación es per-bodega vía `Stock.locationCode`.
+   * Este campo queda en la tabla para no perder datos históricos pero NO se
+   * edita ni se muestra desde la UI. Una futura migración lo dropea cuando
+   * sea seguro.
+   */
   @Column({ type: 'varchar', length: 120, nullable: true })
   location!: string | null;
 

@@ -99,3 +99,17 @@ export class ListStockQueryDto {
   @Max(200)
   pageSize?: number;
 }
+
+export class SetLocationCodeDto {
+  @IsUUID()
+  productId!: string;
+
+  @IsUUID()
+  warehouseId!: string;
+
+  // Acepta string vacío o null para limpiar. Si tiene contenido, max 30 chars
+  // — validado también en el service.
+  @IsOptional()
+  @IsString()
+  locationCode?: string | null;
+}

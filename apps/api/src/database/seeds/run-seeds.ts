@@ -42,7 +42,14 @@ async function run() {
     console.log(`[seed] Admin ya existe: ${adminEmail}`);
   }
 
-  // 2. Almacén único inicial
+  // 2. Almacenes iniciales
+  //    - "Principal": activo por default (es el que usa la operación diaria).
+  //    - "Mercado Libre Full": inactivo. Aparece deshabilitado en /almacenes;
+  //      el operador lo activa cuando empieza a operar con ML Full. Esto deja
+  //      preparado el id correcto cuando se decida la integración API ML real
+  //      (decisión #5 pendiente). La migración 1778900000000 también lo crea
+  //      idempotentemente — este seed cubre el caso de instalaciones nuevas
+  //      que corren `db:seed` antes de las migraciones.
   const existingWarehouse = await warehouseRepo.findOne({
     where: { name: 'Principal' },
   });
@@ -50,10 +57,25 @@ async function run() {
     await warehouseRepo.insert({
       name: 'Principal',
       address: null,
+      isActive: true,
     });
     console.log('[seed] Almacén "Principal" creado');
   } else {
     console.log('[seed] Almacén "Principal" ya existe');
+  }
+
+  const existingMlFull = await warehouseRepo.findOne({
+    where: { name: 'Mercado Libre Full' },
+  });
+  if (!existingMlFull) {
+    await warehouseRepo.insert({
+      name: 'Mercado Libre Full',
+      address: null,
+      isActive: false,
+    });
+    console.log('[seed] Almacén "Mercado Libre Full" creado (inactivo)');
+  } else {
+    console.log('[seed] Almacén "Mercado Libre Full" ya existe');
   }
 
   // 3. Categorías base de productos
