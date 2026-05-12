@@ -52,9 +52,54 @@ export const CashTransactionSource = {
   SALE: 'SALE',
   PURCHASE: 'PURCHASE',
   MANUAL: 'MANUAL',
+  // Fase 7.6 — reembolsos por devoluciones (no son cancelaciones de la venta/compra
+  // original, sino devoluciones parciales o totales con su propio registro de caja).
+  SALE_RETURN: 'SALE_RETURN',
+  PURCHASE_RETURN: 'PURCHASE_RETURN',
 } as const;
 export type CashTransactionSource =
   (typeof CashTransactionSource)[keyof typeof CashTransactionSource];
+
+export const ReturnType = {
+  CUSTOMER: 'CUSTOMER',
+  SUPPLIER: 'SUPPLIER',
+} as const;
+export type ReturnType = (typeof ReturnType)[keyof typeof ReturnType];
+
+export const ReturnStatus = {
+  COMPLETED: 'COMPLETED',
+  CANCELLED: 'CANCELLED',
+} as const;
+export type ReturnStatus = (typeof ReturnStatus)[keyof typeof ReturnStatus];
+
+// Estado del producto devuelto. RESELLABLE emite movimiento de stock;
+// DAMAGED no (queda como pérdida del negocio sin restock).
+export const ReturnItemCondition = {
+  RESELLABLE: 'RESELLABLE',
+  DAMAGED: 'DAMAGED',
+} as const;
+export type ReturnItemCondition =
+  (typeof ReturnItemCondition)[keyof typeof ReturnItemCondition];
+
+export const WarrantyStatus = {
+  OPEN: 'OPEN',
+  IN_REVIEW: 'IN_REVIEW',
+  APPROVED: 'APPROVED',
+  REJECTED: 'REJECTED',
+  RESOLVED: 'RESOLVED',
+} as const;
+export type WarrantyStatus =
+  (typeof WarrantyStatus)[keyof typeof WarrantyStatus];
+
+// Estado de la guía de despacho. Una venta puede tener varias guías a lo
+// largo del tiempo (si la primera tuvo error y se regeneró) pero solo UNA
+// activa simultáneamente. Las anuladas se preservan para auditoría.
+export const DispatchStatus = {
+  ACTIVE: 'ACTIVE',
+  VOIDED: 'VOIDED',
+} as const;
+export type DispatchStatus =
+  (typeof DispatchStatus)[keyof typeof DispatchStatus];
 
 export const UserRole = {
   ADMIN: 'ADMIN',

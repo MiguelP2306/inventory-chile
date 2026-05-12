@@ -533,3 +533,186 @@ export interface CreateTransferInput {
 export interface CancelTransferInput {
   reason: string;
 }
+
+// ---------- Devoluciones (Fase 7.6) ----------
+
+export type ReturnTypeDto = 'CUSTOMER' | 'SUPPLIER';
+export type ReturnStatusDto = 'COMPLETED' | 'CANCELLED';
+export type ReturnItemConditionDto = 'RESELLABLE' | 'DAMAGED';
+
+export interface ReturnItemDto {
+  id: string;
+  productId: string;
+  qty: number;
+  unitPrice: string;
+  unitCost: string;
+  subtotal: string;
+  itemCondition: ReturnItemConditionDto;
+  saleItemId: string | null;
+  purchaseEntryItemId: string | null;
+  product?: {
+    id: string;
+    sku: string;
+    name: string;
+    partNumber: string | null;
+  };
+}
+
+export interface ReturnDto {
+  id: string;
+  number: string;
+  type: ReturnTypeDto;
+  saleId: string | null;
+  sale?: { id: string; number: string; customerId: string } | null;
+  purchaseEntryId: string | null;
+  purchaseEntry?: { id: string; supplierId: string } | null;
+  warehouseId: string;
+  warehouse?: { id: string; name: string };
+  date: string;
+  reason: string;
+  notes: string | null;
+  refundAmount: string;
+  paymentMethod: PaymentMethodDto;
+  status: ReturnStatusDto;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  cancelledBy?: { id: string; name: string; email: string } | null;
+  user?: { id: string; name: string; email: string };
+  items?: ReturnItemDto[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateReturnItemInput {
+  productId: string;
+  // Si type=CUSTOMER, saleItemId es obligatorio para validar anti-doble-devolución.
+  saleItemId?: string | null;
+  // Si type=SUPPLIER, purchaseEntryItemId es obligatorio.
+  purchaseEntryItemId?: string | null;
+  qty: number;
+  unitPrice: string;
+  itemCondition: ReturnItemConditionDto;
+}
+
+export interface CreateReturnInput {
+  type: ReturnTypeDto;
+  saleId?: string | null;
+  purchaseEntryId?: string | null;
+  date?: string;
+  reason: string;
+  notes?: string | null;
+  paymentMethod: PaymentMethodDto;
+  items: CreateReturnItemInput[];
+}
+
+export interface CancelReturnInput {
+  reason: string;
+}
+
+/**
+ * Cantidad devuelta acumulada de cada SaleItem. Lo consume el form de
+ * devolución del cliente para limitar `qty` máxima permitida por línea.
+ */
+export interface ReturnedQtyDto {
+  saleItemId: string;
+  qty: number;
+}
+
+// ---------- Garantías (Fase 7.6) ----------
+
+export type WarrantyStatusDto =
+  | 'OPEN'
+  | 'IN_REVIEW'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'RESOLVED';
+
+export interface WarrantyClaimDto {
+  id: string;
+  number: string;
+  saleItemId: string;
+  productId: string;
+  customerId: string;
+  status: WarrantyStatusDto;
+  openedAt: string;
+  resolvedAt: string | null;
+  resolution: string | null;
+  notes: string | null;
+  linkedReturnId: string | null;
+  // Datos relacionados para listado/detalle (cuando se carga con joins):
+  sale?: { id: string; number: string } | null;
+  product?: { id: string; sku: string; name: string };
+  customer?: { id: string; name: string; taxId: string };
+  user?: { id: string; name: string; email: string };
+  linkedReturn?: { id: string; number: string } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateWarrantyClaimInput {
+  saleItemId: string;
+  notes?: string | null;
+}
+
+export interface UpdateWarrantyClaimStatusInput {
+  status: WarrantyStatusDto;
+  resolution?: string | null;
+  notes?: string | null;
+}
+
+// ---------- Guías de despacho (Fase 7.7) ----------
+
+export type DispatchStatusDto = 'ACTIVE' | 'VOIDED';
+
+export interface DispatchNoteDto {
+  id: string;
+  number: string;
+  saleId: string;
+  sale?: {
+    id: string;
+    number: string;
+    customerId: string;
+    customer?: { id: string; name: string; taxId: string };
+    items?: Array<{
+      id: string;
+      productId: string;
+      qty: number;
+      product?: { id: string; sku: string; name: string };
+    }>;
+  };
+  dispatchedAt: string;
+  carrier: string | null;
+  trackingNumber: string | null;
+  addressStreet: string | null;
+  addressNumber: string | null;
+  communeId: string | null;
+  commune?: { id: string; name: string; region: string } | null;
+  addressNotes: string | null;
+  notes: string | null;
+  status: DispatchStatusDto;
+  voidedAt: string | null;
+  voidReason: string | null;
+  voidedBy?: { id: string; name: string; email: string } | null;
+  user?: { id: string; name: string; email: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateDispatchNoteInput {
+  saleId: string;
+  // Si no se manda, el backend usa la fecha actual.
+  dispatchedAt?: string;
+  carrier?: string | null;
+  trackingNumber?: string | null;
+  // Dirección de entrega (snapshot). Por defecto el frontend la pre-llena con
+  // la del cliente, pero puede modificarse para esta guía.
+  addressStreet?: string | null;
+  addressNumber?: string | null;
+  communeId?: string | null;
+  addressNotes?: string | null;
+  notes?: string | null;
+}
+
+export interface VoidDispatchNoteInput {
+  reason: string;
+}

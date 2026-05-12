@@ -359,7 +359,20 @@ export class SalesService {
         await this.cashbox.voidTransaction(tx.id, userId, manager);
       }
 
-      // 3. Marcar la venta como CANCELLED con auditoría.
+      // 3. Anular en cascada la guía de despacho activa (si existe). Es
+      // raw SQL para evitar un import circular SalesModule ↔ DispatchModule.
+      // El motivo queda registrado y la guía pasa a status='VOIDED'.
+      await manager.query(
+        `UPDATE \`dispatch_notes\`
+         SET \`status\` = 'VOIDED',
+             \`voidedAt\` = NOW(6),
+             \`voidReason\` = ?,
+             \`voidedById\` = ?
+         WHERE \`saleId\` = ? AND \`status\` = 'ACTIVE'`,
+        [`Venta cancelada · ${dto.reason.trim()}`, userId, existing.id],
+      );
+
+      // 4. Marcar la venta como CANCELLED con auditoría.
       existing.status = SaleStatus.CANCELLED;
       existing.cancelledAt = new Date();
       existing.cancelReason = dto.reason.trim();

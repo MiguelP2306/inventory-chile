@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type {
+  DispatchNoteDto,
   PaymentMethodDto,
   PublicQuotationDto,
   QuotationDto,
@@ -514,6 +515,365 @@ export class PdfService {
     const arrayBuffer = doc.output('arraybuffer');
     return Buffer.from(arrayBuffer);
   }
+
+  // ============================================================
+  // GUÍAS DE DESPACHO (Fase 7.7)
+  //
+  // Estructura distinta a cotización/venta: sin totales, items con solo
+  // cantidad + producto, snapshot de dirección de entrega + carrier.
+  // Mantenemos un tipo `DispatchPdfInput` separado y dos renderers
+  // propios — más simple que extender el PdfInput existente con campos
+  // condicionales.
+  // ============================================================
+
+  fromDispatchNoteDto(
+    d: DispatchNoteDto,
+    settings: CompanySettings,
+  ): DispatchPdfInput {
+    const addressParts = [
+      d.addressStreet,
+      d.addressNumber,
+      d.commune ? `${d.commune.name}` : null,
+    ].filter(Boolean) as string[];
+    return {
+      number: d.number,
+      dispatchedAt: d.dispatchedAt,
+      saleNumber: d.sale?.number ?? '',
+      customer: {
+        name: d.sale?.customer?.name ?? 'Sin especificar',
+        taxId: d.sale?.customer?.taxId ?? null,
+      },
+      delivery: {
+        addressLine: addressParts.join(' ').trim() || null,
+        addressNotes: d.addressNotes,
+        carrier: d.carrier,
+        trackingNumber: d.trackingNumber,
+      },
+      items: (d.sale?.items ?? []).map((it) => ({
+        code: it.product?.sku ?? '',
+        description: it.product?.name ?? '',
+        qty: it.qty,
+      })),
+      notes: d.notes,
+      voided: d.status === 'VOIDED',
+      company: {
+        name: settings.name,
+        address: settings.address,
+        phone: settings.phone,
+        email: settings.email,
+        taxId: settings.taxId,
+        logoUrl: settings.logoUrl,
+        // No se renderea en la guía pero CompanyInfo lo requiere — la guía
+        // usa un layout distinto sin footer general.
+        quotationFooter: settings.quotationFooter,
+      },
+    };
+  }
+
+  async generateDispatch(
+    input: DispatchPdfInput,
+    format: PdfFormat = 'letter',
+  ): Promise<Buffer> {
+    if (format === 'thermal80') return this.generateDispatchThermal(input);
+    return this.generateDispatchLetter(input);
+  }
+
+  private async generateDispatchLetter(
+    input: DispatchPdfInput,
+  ): Promise<Buffer> {
+    const doc = new jsPDF({ unit: 'pt', format: 'letter' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 40;
+    let y = margin;
+
+    // Header empresa.
+    if (input.company.logoUrl) {
+      try {
+        const dataUrl = await fetchAsDataUrl(input.company.logoUrl);
+        if (dataUrl) doc.addImage(dataUrl, 'PNG', margin, y, 80, 40);
+      } catch (err) {
+        this.logger.warn(`No se pudo cargar el logo: ${(err as Error).message}`);
+      }
+    }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text(input.company.name, pageWidth - margin, y + 14, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    let rightY = y + 28;
+    if (input.company.taxId) {
+      doc.text(`RUT: ${input.company.taxId}`, pageWidth - margin, rightY, {
+        align: 'right',
+      });
+      rightY += 12;
+    }
+    if (input.company.address) {
+      doc.text(input.company.address, pageWidth - margin, rightY, {
+        align: 'right',
+      });
+      rightY += 12;
+    }
+    if (input.company.phone) {
+      doc.text(input.company.phone, pageWidth - margin, rightY, {
+        align: 'right',
+      });
+      rightY += 12;
+    }
+    y = Math.max(y + 60, rightY) + 10;
+
+    doc.setDrawColor(200);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 18;
+
+    // Título del documento.
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text(`Guía de despacho ${input.number}`, margin, y);
+    if (input.voided) {
+      doc.setTextColor(200, 0, 0);
+      doc.text('ANULADA', pageWidth - margin, y, { align: 'right' });
+      doc.setTextColor(0, 0, 0);
+    }
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    y += 16;
+    doc.text(`Fecha despacho: ${formatDate(input.dispatchedAt)}`, margin, y);
+    if (input.saleNumber) {
+      doc.text(
+        `Venta origen: ${input.saleNumber}`,
+        margin + 240,
+        y,
+      );
+    }
+    y += 18;
+
+    // Cliente + Entrega en dos columnas.
+    const colWidth = (pageWidth - margin * 2) / 2 - 10;
+    doc.setFont('helvetica', 'bold');
+    doc.text('Cliente', margin, y);
+    doc.text('Entrega', margin + colWidth + 20, y);
+    doc.setFont('helvetica', 'normal');
+    y += 14;
+
+    let colLeftY = y;
+    doc.text(input.customer.name, margin, colLeftY);
+    colLeftY += 12;
+    if (input.customer.taxId) {
+      doc.text(`RUT: ${input.customer.taxId}`, margin, colLeftY);
+      colLeftY += 12;
+    }
+
+    let colRightY = y;
+    const rx = margin + colWidth + 20;
+    if (input.delivery.addressLine) {
+      const wrapped = doc.splitTextToSize(input.delivery.addressLine, colWidth);
+      doc.text(wrapped, rx, colRightY);
+      colRightY += (Array.isArray(wrapped) ? wrapped.length : 1) * 12;
+    }
+    if (input.delivery.addressNotes) {
+      const wrapped = doc.splitTextToSize(
+        input.delivery.addressNotes,
+        colWidth,
+      );
+      doc.text(wrapped, rx, colRightY);
+      colRightY += (Array.isArray(wrapped) ? wrapped.length : 1) * 12;
+    }
+    if (input.delivery.carrier) {
+      doc.text(`Transportista: ${input.delivery.carrier}`, rx, colRightY);
+      colRightY += 12;
+    }
+    if (input.delivery.trackingNumber) {
+      doc.text(`N° seguimiento: ${input.delivery.trackingNumber}`, rx, colRightY);
+      colRightY += 12;
+    }
+
+    y = Math.max(colLeftY, colRightY) + 10;
+
+    // Tabla de items (sin precios — la guía es un documento operativo).
+    autoTable(doc, {
+      startY: y,
+      head: [['Código', 'Descripción', 'Cant.']],
+      body: input.items.map((it) => [
+        it.code,
+        it.description,
+        it.qty.toString(),
+      ]),
+      styles: { fontSize: 9, cellPadding: 4 },
+      headStyles: { fillColor: [40, 40, 40] },
+      columnStyles: {
+        2: { halign: 'right', cellWidth: 50 },
+      },
+      margin: { left: margin, right: margin },
+    });
+
+    // @ts-expect-error lastAutoTable es agregado por jspdf-autotable
+    let afterTableY = doc.lastAutoTable?.finalY ?? y;
+    afterTableY += 20;
+
+    if (input.notes && input.notes.trim()) {
+      doc.setFont('helvetica', 'bold');
+      doc.text('Observaciones', margin, afterTableY);
+      afterTableY += 14;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      const wrapped = doc.splitTextToSize(
+        input.notes.trim(),
+        pageWidth - margin * 2,
+      );
+      doc.text(wrapped, margin, afterTableY);
+    }
+
+    // Firma del receptor.
+    const sigY = doc.internal.pageSize.getHeight() - margin - 40;
+    doc.setDrawColor(0);
+    doc.line(margin, sigY, margin + 200, sigY);
+    doc.setFontSize(8);
+    doc.text('Firma y aclaración del receptor', margin, sigY + 12);
+
+    const arrayBuffer = doc.output('arraybuffer');
+    return Buffer.from(arrayBuffer);
+  }
+
+  private async generateDispatchThermal(
+    input: DispatchPdfInput,
+  ): Promise<Buffer> {
+    const widthPt = 226.77;
+    const doc = new jsPDF({ unit: 'pt', format: [widthPt, 800] });
+    const margin = 8;
+    let y = margin + 6;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text(input.company.name, widthPt / 2, y, { align: 'center' });
+    y += 12;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    if (input.company.taxId) {
+      doc.text(`RUT: ${input.company.taxId}`, widthPt / 2, y, {
+        align: 'center',
+      });
+      y += 9;
+    }
+    y += 4;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text(`Guía ${input.number}`, widthPt / 2, y, { align: 'center' });
+    y += 10;
+    if (input.voided) {
+      doc.setTextColor(200, 0, 0);
+      doc.text('ANULADA', widthPt / 2, y, { align: 'center' });
+      doc.setTextColor(0, 0, 0);
+      y += 10;
+    }
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.text(`Fecha: ${formatDate(input.dispatchedAt)}`, margin, y);
+    y += 9;
+    if (input.saleNumber) {
+      doc.text(`Venta: ${input.saleNumber}`, margin, y);
+      y += 9;
+    }
+    y += 4;
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('Cliente:', margin, y);
+    y += 9;
+    doc.setFont('helvetica', 'normal');
+    doc.text(input.customer.name, margin, y, {
+      maxWidth: widthPt - margin * 2,
+    });
+    y += 9;
+    if (input.customer.taxId) {
+      doc.text(`RUT: ${input.customer.taxId}`, margin, y);
+      y += 9;
+    }
+    y += 4;
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('Entrega:', margin, y);
+    y += 9;
+    doc.setFont('helvetica', 'normal');
+    if (input.delivery.addressLine) {
+      const wrapped = doc.splitTextToSize(
+        input.delivery.addressLine,
+        widthPt - margin * 2,
+      );
+      doc.text(wrapped, margin, y);
+      y += (Array.isArray(wrapped) ? wrapped.length : 1) * 9;
+    }
+    if (input.delivery.carrier) {
+      doc.text(`${input.delivery.carrier}`, margin, y);
+      y += 9;
+    }
+    if (input.delivery.trackingNumber) {
+      doc.text(`Tracking: ${input.delivery.trackingNumber}`, margin, y);
+      y += 9;
+    }
+
+    autoTable(doc, {
+      startY: y + 4,
+      head: [['Cant', 'Producto']],
+      body: input.items.map((it) => [
+        it.qty.toString(),
+        `${it.code ? it.code + ' · ' : ''}${it.description}`,
+      ]),
+      styles: { fontSize: 6, cellPadding: 2 },
+      headStyles: { fillColor: [40, 40, 40], fontSize: 6 },
+      columnStyles: { 0: { cellWidth: 20, halign: 'right' } },
+      margin: { left: margin, right: margin },
+      tableWidth: widthPt - margin * 2,
+    });
+
+    // @ts-expect-error lastAutoTable es agregado por jspdf-autotable
+    let tableEnd = doc.lastAutoTable?.finalY ?? y;
+    tableEnd += 8;
+
+    if (input.notes && input.notes.trim()) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7);
+      doc.text('Observaciones:', margin, tableEnd);
+      tableEnd += 9;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6);
+      const wrapped = doc.splitTextToSize(
+        input.notes.trim(),
+        widthPt - margin * 2,
+      );
+      doc.text(wrapped, margin, tableEnd);
+    }
+
+    const arrayBuffer = doc.output('arraybuffer');
+    return Buffer.from(arrayBuffer);
+  }
+}
+
+// ============================================================
+// Tipo separado para guías (estructura distinta a quotation/sale).
+// ============================================================
+
+export interface DispatchPdfInput {
+  number: string;
+  dispatchedAt: string;
+  saleNumber: string;
+  customer: {
+    name: string;
+    taxId: string | null;
+  };
+  delivery: {
+    addressLine: string | null;
+    addressNotes: string | null;
+    carrier: string | null;
+    trackingNumber: string | null;
+  };
+  items: Array<{
+    code: string;
+    description: string;
+    qty: number;
+  }>;
+  notes: string | null;
+  voided: boolean;
+  company: CompanyInfo;
 }
 
 function formatMoney(value: string): string {

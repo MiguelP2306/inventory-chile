@@ -465,7 +465,7 @@ inventory-management/
 7. **Código de ubicación por bodega** (requerimiento agregado en Fase 7): migración que agrega `Stock.locationCode` (varchar 30, nullable). Cada producto puede tener una ubicación física distinta en cada bodega (pasillo/estante/posición). Editable inline desde `/inventario` con la bodega seleccionada. Búsqueda por código de ubicación. Reemplaza al campo global `Product.location` — durante esta fase se migran los valores existentes del campo viejo al nuevo y se deja el viejo como deprecated.
 8. **Decisión a confirmar con cliente:** integración real con API de Mercado Libre vs. registro manual. **Asunción del MVP: manual** — el operador registra la transferencia y la venta posterior en ML Full a mano.
 
-### Fase 7.6 — Devoluciones y garantías
+### Fase 7.6 — Devoluciones y garantías ✅
 
 > Cubre el último bloque de requerimientos: devoluciones (suma stock) y garantías (no afectan stock).
 
@@ -480,7 +480,7 @@ inventory-management/
   - **No** dispara movimientos de inventario. Si la resolución es "cambio de producto" → operador hace la devolución + nueva salida manualmente.
   - Pantalla "Garantías" con listado, filtros por estado y cliente, detalle.
 
-### Fase 7.7 — Guía de despacho
+### Fase 7.7 — Guía de despacho ✅
 
 > Documento aparte de la nota de venta para el despacho físico.
 

@@ -8,11 +8,17 @@ import {
   ExternalLink,
   FileText,
   Printer,
+  RotateCcw,
+  ShieldAlert,
+  Truck,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
 import { CancelSaleDialog } from '@/components/forms/cancel-sale-dialog';
+import { CustomerReturnDialog } from '@/components/forms/customer-return-dialog';
+import { GenerateDispatchDialog } from '@/components/forms/generate-dispatch-dialog';
+import { OpenWarrantyDialog } from '@/components/forms/open-warranty-dialog';
 import { SaleStatusBadge } from '@/components/sale-status-badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -30,6 +36,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { getActiveDispatchBySale } from '@/lib/dispatch-api';
 import { formatCurrency } from '@/lib/format';
 import { getSale, getSalePdfUrl } from '@/lib/sales-api';
 
@@ -43,6 +50,19 @@ export default function VentaDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [returnOpen, setReturnOpen] = useState(false);
+  const [dispatchOpen, setDispatchOpen] = useState(false);
+  const [warrantyTargetItemId, setWarrantyTargetItemId] = useState<string | null>(
+    null,
+  );
+
+  // Si la venta ya tiene guía activa, mostramos "Ver guía DESP-XXX" en lugar
+  // de "Generar guía". El backend rechaza generar otra mientras haya activa.
+  const activeDispatch = useQuery({
+    queryKey: ['active-dispatch-by-sale', id],
+    queryFn: () => getActiveDispatchBySale(id),
+    enabled: !!id,
+  });
 
   const sale = useQuery({
     queryKey: ['sale', id],
@@ -90,14 +110,33 @@ export default function VentaDetailPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canCancel && (
-            <Button
-              variant="outline"
-              onClick={() => setCancelOpen(true)}
-              className="text-destructive hover:text-destructive"
-            >
-              <Ban className="h-4 w-4" />
-              Cancelar venta
-            </Button>
+            <>
+              {activeDispatch.data ? (
+                <Button asChild variant="outline">
+                  <Link href={`/guias/${activeDispatch.data.id}`}>
+                    <Truck className="h-4 w-4" />
+                    Ver guía {activeDispatch.data.number}
+                  </Link>
+                </Button>
+              ) : (
+                <Button variant="outline" onClick={() => setDispatchOpen(true)}>
+                  <Truck className="h-4 w-4" />
+                  Generar guía de despacho
+                </Button>
+              )}
+              <Button variant="outline" onClick={() => setReturnOpen(true)}>
+                <RotateCcw className="h-4 w-4" />
+                Crear devolución
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setCancelOpen(true)}
+                className="text-destructive hover:text-destructive"
+              >
+                <Ban className="h-4 w-4" />
+                Cancelar venta
+              </Button>
+            </>
           )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -224,6 +263,7 @@ export default function VentaDetailPage() {
               <TableHead className="text-right">P. Unit (bruto)</TableHead>
               <TableHead className="text-right">Desc.</TableHead>
               <TableHead className="text-right">Subtotal</TableHead>
+              <TableHead className="w-[60px]" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -248,6 +288,18 @@ export default function VentaDetailPage() {
                 </TableCell>
                 <TableCell className="text-right tabular-nums font-medium">
                   {formatCurrency(it.subtotal)}
+                </TableCell>
+                <TableCell className="text-right">
+                  {canCancel && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title="Abrir reclamo de garantía"
+                      onClick={() => setWarrantyTargetItemId(it.id)}
+                    >
+                      <ShieldAlert className="h-4 w-4" />
+                    </Button>
+                  )}
                 </TableCell>
               </TableRow>
             ))}
@@ -283,6 +335,33 @@ export default function VentaDetailPage() {
         open={cancelOpen}
         onOpenChange={setCancelOpen}
       />
+
+      <CustomerReturnDialog
+        sale={s}
+        open={returnOpen}
+        onOpenChange={setReturnOpen}
+      />
+
+      <GenerateDispatchDialog
+        sale={s}
+        open={dispatchOpen}
+        onOpenChange={setDispatchOpen}
+      />
+
+      {warrantyTargetItemId &&
+        (() => {
+          const item = (s.items ?? []).find(
+            (i) => i.id === warrantyTargetItemId,
+          );
+          if (!item) return null;
+          return (
+            <OpenWarrantyDialog
+              saleItem={item}
+              open={!!warrantyTargetItemId}
+              onOpenChange={(o) => !o && setWarrantyTargetItemId(null)}
+            />
+          );
+        })()}
     </div>
   );
 }

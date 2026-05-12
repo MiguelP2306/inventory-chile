@@ -21,8 +21,8 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 | 6 | Cotizaciones + modal venta/cotización + impresión 80mm/carta + WhatsApp/email | ✅ |
 | 7 | Ventas con caja integrada (warehouseId + método de pago + comisión tarjeta + cancelación atómica + PDF carta/80mm) | ✅ |
 | 7.5 | Multi-bodega + transferencias entre bodegas + código de ubicación por bodega (flujo Mercado Libre Full manual) | ✅ |
-| 7.6 | Devoluciones + Garantías | pendiente |
-| 7.7 | Guía de despacho con número correlativo | pendiente |
+| 7.6 | Devoluciones (cliente y proveedor) con condición Vendible/Dañado + reembolso atómico en caja + Garantías con lifecycle (OPEN/IN_REVIEW/APPROVED/REJECTED/RESOLVED) | ✅ |
+| 7.7 | Guía de despacho con correlativo DESP-AAAA-NNNNN, dirección de entrega editable, transportista con sugerencias, PDF Carta/80mm, anulación con motivo + cascada al cancelar venta | ✅ |
 | 8 | Reportes + proyección de stock + lista de productos críticos (CSV/Excel) | pendiente |
 | 8.5 | **Lead lifecycle + Seguimiento comercial + HubSpot push** (WhatsApp como identificador, lifecycle automático `NEW`/`QUOTED`/`FOLLOW_UP`/`WON`/`LOST`, bandeja `/seguimiento`, sync one-way a HubSpot) | pendiente |
 | — | **Ronda 4** (transversal antes de Fase 9): responsive móvil — sidebar drawer + tablas optimizadas + revisión de forms en mobile | pendiente |
@@ -1035,6 +1035,257 @@ Y en [`packages/shared/src/enums.ts`](packages/shared/src/enums.ts):
 
 ---
 
+## Fase 7.6 — Devoluciones y garantías
+
+Cierra el ciclo post-venta del MVP. Las **devoluciones** son operaciones contables que mueven stock y caja en simetría con la venta/compra original. Las **garantías** son un seguimiento informativo de reclamos que NO afecta stock automáticamente — si la resolución implica cambio o reembolso, el operador hace la devolución por separado.
+
+### Decisiones de negocio acordadas
+
+| Tema | Decisión |
+| --- | --- |
+| Schema de devoluciones | **Tabla única `returns`** con discriminador `type` (`CUSTOMER` / `SUPPLIER`). Para `CUSTOMER` se llena `saleId`; para `SUPPLIER`, `purchaseEntryId`. Permite listado unificado en `/devoluciones` con badge de origen. La integridad se valida en el service (XOR de los dos FKs). |
+| Efecto en caja (cliente) | `CashTransaction(EXPENSE, source=SALE_RETURN)` por el monto total a devolver. **Método de pago elegible** por el operador (default = método de la venta original — venta con tarjeta puede devolverse en efectivo si el operador lo decide). Esto se separa de la cancelación de venta (que es all-or-nothing y voidea las transacciones originales). |
+| Efecto en caja (proveedor) | `CashTransaction(INCOME, source=PURCHASE_RETURN)` — el proveedor nos reembolsa. Mismo selector de método de pago. Simetría con el flujo de cliente. |
+| Estado del producto devuelto | **Selector por ítem** "Vendible" / "Dañado". `RESELLABLE` emite el movimiento de stock (`RETURN_IN` cliente, `RETURN_OUT` proveedor). `DAMAGED` NO mueve stock — queda como pérdida del negocio sin restock. El reembolso en caja sí ocurre en ambos casos. |
+| Devoluciones parciales | **Sí, con validación anti-doble-devolución**: el sistema lleva el acumulado de qty devuelto por cada `saleItemId` (solo COMPLETED, las CANCELLED liberan el cupo). El form solo permite hasta `qtyVendido - qtyYaDevuelto`. Backend revalida en duro. |
+| Cancelación de devoluciones | **Permitida con motivo obligatorio** (min 5 chars). Reversión atómica: emite el movimiento inverso de stock (solo si era RESELLABLE) + voidea la cash transaction con compensación. Si el stock ya se consumió en otra operación, la cancelación falla con 409. |
+| Numeración | Correlativo `DEV-AAAA-NNNNN` único, generado vía `CountersService.nextNumber('RETURN', ...)` con lock pesimista por `(kind, year)`. |
+| Esquema de garantías | Tabla `warranty_claims` (id, number, saleItemId, productId, customerId, status, openedAt, resolvedAt?, resolution?, notes?, linkedReturnId?, userId). **NO afecta stock**. Estados `OPEN` → `IN_REVIEW` → (`APPROVED` → `RESOLVED`) o (`REJECTED`). |
+| Múltiples reclamos por SaleItem | **Permitido si los previos están en estado terminal** (`REJECTED` o `RESOLVED`). Mientras haya uno activo (`OPEN`, `IN_REVIEW`, `APPROVED`), el sistema bloquea abrir otro sobre el mismo ítem. |
+| Resolución con cambio de producto | **Manual**: cuando el reclamo se marca `APPROVED`, aparece un banner verde que sugiere crear una devolución desde la venta. La garantía queda como bitácora; el operador hace la devolución por separado y el frontend linkea ambas vía `linkedReturnId`. No hay efecto automático en stock — respeta la regla del PLAN ("garantías NO disparan movimientos"). |
+| Transiciones de estado | Validadas en backend: `OPEN → IN_REVIEW/REJECTED`, `IN_REVIEW → APPROVED/REJECTED`, `APPROVED → RESOLVED`. Estados terminales (`REJECTED`, `RESOLVED`) no permiten transición. Transición a `RESOLVED` o `REJECTED` requiere `resolution` (texto obligatorio). |
+| Numeración garantías | Correlativo `GAR-AAAA-NNNNN` único, mismo patrón que devoluciones (counter kind `'WARRANTY'`). |
+| Punto de entrada | **Devoluciones**: botón "Crear devolución" en el detalle de la venta (`/ventas/[id]`) + listado dedicado `/devoluciones`. Para devoluciones a proveedor, equivalente desde el detalle de compra (futuro `/compras/[id]/detalle`). **Garantías**: botón "Abrir reclamo" en cada fila de items de `/ventas/[id]` + listado `/garantias`. |
+
+### Schema
+
+#### Migración [`1779000000000-ReturnsAndWarrantiesPhase76.ts`](apps/api/src/database/migrations/1779000000000-ReturnsAndWarrantiesPhase76.ts)
+
+| Cambio | Tabla / Enum | Notas |
+| --- | --- | --- |
+| Enum extendido | `cash_transactions.source` | Agrega `SALE_RETURN` y `PURCHASE_RETURN`. Permite filtrar en el libro de caja las transacciones de reembolso por separado de ventas y compras directas. |
+| Tabla nueva | `returns` | `id`, `number` único (correlativo `DEV-AAAA-NNNNN`), `type` enum, `saleId` y `purchaseEntryId` ambos nullable (XOR por service), `warehouseId` FK RESTRICT, `date`, `reason`, `notes`, `refundAmount`, `paymentMethod`, `status` (`COMPLETED`/`CANCELLED`), auditoría completa de cancelación. |
+| Tabla nueva | `return_items` | `returnId` FK CASCADE, `productId` FK RESTRICT, `saleItemId` y `purchaseEntryItemId` ambos nullable según tipo, `qty`, `unitPrice`, `unitCost`, `subtotal`, `itemCondition` enum (`RESELLABLE`/`DAMAGED`). |
+| Tabla nueva | `warranty_claims` | `id`, `number` único (correlativo `GAR-AAAA-NNNNN`), `saleItemId` FK RESTRICT, `productId`, `customerId`, `status` enum, `openedAt`, `resolvedAt`, `resolution`, `notes`, `linkedReturnId` FK SET NULL (link opcional a la devolución que cerró el reclamo). |
+
+> El `down` revierte en orden inverso (drop tablas → restaurar enum). Idempotente.
+
+### Backend
+
+#### Módulo nuevo [`apps/api/src/returns/`](apps/api/src/returns/)
+
+- **`ReturnsService.create(dto, userId)`** — único punto de creación. En una transacción atómica:
+  1. Valida coherencia type↔saleId/purchaseEntryId (XOR).
+  2. Para CUSTOMER: valida que la venta exista y no esté `CANCELLED`. Calcula la qty ya devuelta por cada `saleItemId` y rechaza si la nueva qty + acumulada excede lo vendido.
+  3. Para SUPPLIER: valida que la compra exista. Default `warehouseId` = primera bodega activa.
+  4. Genera `DEV-AAAA-NNNNN` con `CountersService`.
+  5. Persiste `Return` + cada `ReturnItem`.
+  6. Por cada item RESELLABLE emite el movimiento correspondiente (`RETURN_IN` cliente, `RETURN_OUT` proveedor). Items DAMAGED no mueven stock.
+  7. Registra `CashTransaction` con el `source` correcto y el `paymentMethod` elegido por el operador.
+- **`ReturnsService.cancel(id, dto, userId)`** — reversión atómica:
+  1. Emite movimientos inversos para cada item RESELLABLE (cliente: `RETURN_OUT`, proveedor: `RETURN_IN`). DAMAGED no se revierte (nunca movió stock).
+  2. Voidea las cash transactions con `source=SALE_RETURN` o `PURCHASE_RETURN` y `sourceId=id` vía `cashbox.voidTransaction`.
+  3. Marca `status=CANCELLED` con auditoría.
+- **`ReturnsService.returnedQtyBySale(saleId)`** — helper consumido por el frontend para limitar la qty máxima en el form: suma de `qty` por `saleItemId` en returns COMPLETED.
+- **Endpoints**: `GET /returns`, `GET /returns/:id`, `GET /returns/by-sale/:saleId/returned-qty`, `POST /returns`, `POST /returns/:id/cancel`.
+
+#### Módulo nuevo [`apps/api/src/warranties/`](apps/api/src/warranties/)
+
+- **`WarrantiesService.create(dto, userId)`** — valida que no haya un reclamo activo sobre el mismo SaleItem (los terminales `REJECTED` / `RESOLVED` liberan). Genera correlativo `GAR-AAAA-NNNNN`. Persiste con status `OPEN`. No toca stock.
+- **`WarrantiesService.updateStatus(id, dto)`** — valida transición legal según tabla `VALID_TRANSITIONS`. Para `RESOLVED` / `REJECTED` exige texto de `resolution`. Setea `resolvedAt` automáticamente al cerrar.
+- **`WarrantiesService.linkReturn(id, returnId)`** — endpoint helper: el frontend lo llama tras crear una devolución desde el flujo de reclamo aprobado, así queda registrado el link `WarrantyClaim.linkedReturnId → Return.id` (visible en el detalle del reclamo).
+- **Endpoints**: `GET /warranties`, `GET /warranties/:id`, `POST /warranties`, `PATCH /warranties/:id/status`, `POST /warranties/:id/link-return/:returnId`.
+
+### DTOs compartidos — [`packages/shared/src/types.ts`](packages/shared/src/types.ts)
+
+Agregados:
+- `ReturnTypeDto`, `ReturnStatusDto`, `ReturnItemConditionDto`.
+- `ReturnDto`, `ReturnItemDto`, `CreateReturnInput`, `CreateReturnItemInput`, `CancelReturnInput`, `ReturnedQtyDto`.
+- `WarrantyStatusDto`.
+- `WarrantyClaimDto`, `CreateWarrantyClaimInput`, `UpdateWarrantyClaimStatusInput`.
+
+En [`packages/shared/src/enums.ts`](packages/shared/src/enums.ts):
+- `CashTransactionSource` extendido con `SALE_RETURN` y `PURCHASE_RETURN`.
+- `ReturnType`, `ReturnStatus`, `ReturnItemCondition`, `WarrantyStatus`.
+
+### Frontend
+
+#### Componentes nuevos
+
+- [`CustomerReturnForm`](apps/web/components/forms/customer-return-form.tsx) — form que muestra los items de la venta y, para cada uno: input numérico de cantidad a devolver (max = vendido - ya devuelto), selector de condición (Vendible/Dañado), precio congelado de la venta. Muestra el total a reembolsar en tiempo real. Selector de método de reembolso (default = método de la venta original).
+- [`CustomerReturnDialog`](apps/web/components/forms/customer-return-dialog.tsx) — wrapper en `<Dialog>` del CustomerReturnForm. Al guardar, redirige al detalle de la devolución creada.
+- [`CancelReturnDialog`](apps/web/components/forms/cancel-return-dialog.tsx) — pide motivo obligatorio (min 5 chars), explica el alcance de la reversión, invalida queries de stock/caja/movimientos al cerrar.
+- [`OpenWarrantyDialog`](apps/web/components/forms/open-warranty-dialog.tsx) — desde una fila de item en `/ventas/[id]`: dialog con datos readonly del producto + textarea de descripción inicial del problema. Al guardar, redirige al detalle del reclamo.
+- [`ReturnStatusBadge`](apps/web/components/return-status-badge.tsx) + [`ReturnTypeBadge`](apps/web/components/return-status-badge.tsx) — badges visuales.
+- [`WarrantyStatusBadge`](apps/web/components/warranty-status-badge.tsx) — colores distintos por estado (azul=Abierto, ámbar=En revisión, verde=Aprobado, rojo=Rechazado, gris=Resuelto).
+
+#### Pantallas nuevas
+
+- [`/devoluciones`](apps/web/app/(dashboard)/devoluciones/page.tsx) — listado paginado con filtros (tipo, estado, fechas, búsqueda libre). Sin botón "Nueva" en la pantalla — se crea desde el detalle de la venta/compra origen.
+- [`/devoluciones/[id]`](apps/web/app/(dashboard)/devoluciones/[id]/page.tsx) — detalle con bloques de Origen (link a venta/compra), Reembolso (monto + método + bodega), Motivo y Notas, tabla de items con badge de condición (Vendible/Dañado), botón "Cancelar devolución" si el status es COMPLETED.
+- [`/garantias`](apps/web/app/(dashboard)/garantias/page.tsx) — listado paginado con filtros (estado, fechas, búsqueda). Columnas: número, fecha apertura, producto, cliente, venta origen, estado.
+- [`/garantias/[id]`](apps/web/app/(dashboard)/garantias/[id]/page.tsx) — detalle con bloques de Producto, Cliente, Venta origen + Devolución vinculada si existe. Banner verde sugiriendo "Ir a la venta para crear devolución" cuando el reclamo está APPROVED y no tiene `linkedReturnId`. Botones de transición de estado (Pasar a revisión / Aprobar / Rechazar / Resolver) con dialog que pide resolución obligatoria para estados terminales.
+
+#### Pantallas actualizadas
+
+- [`/ventas/[id]`](apps/web/app/(dashboard)/ventas/[id]/page.tsx) — botón "Crear devolución" agregado al header (junto a "Cancelar venta"). En cada fila de la tabla de items, ícono ⚠️ "Abrir reclamo de garantía". Los dialogs se montan al final del componente.
+- [`Sidebar`](apps/web/components/sidebar.tsx) — items "Devoluciones" y "Garantías" agregados a la sección Operación.
+
+### Verificación end-to-end de la fase
+
+| Caso | Resultado esperado |
+| --- | --- |
+| Devolución parcial de un ítem (Vendible) | Stock sube en la bodega original de la venta (`RETURN_IN`). Caja baja por el monto reembolsado (`CashTransaction(EXPENSE, source=SALE_RETURN)`). Aparece en `/inventario/movimientos`. Vuelve a `/ventas/[id]` y `Cant.` original sigue igual (la venta no se altera). |
+| Devolución parcial (Dañado) | NO mueve stock. Solo se registra la caja como EXPENSE. Útil para reembolsos sin restock. |
+| Devolver más de lo vendido | Backend devuelve 409 con mensaje claro indicando cuántas unidades quedan disponibles. Frontend bloquea antes con el atributo `max` del input. |
+| Devolver 2 veces el mismo ítem | Segunda devolución solo permite hasta `qtyVendido - qtyDevueltoEnPrimera`. Acumulado se calcula desde DB (`returnedQtyBySale`). |
+| Cancelar devolución | Stock vuelve al estado pre-devolución (`RETURN_OUT` si era Vendible). Caja se compensa (EXPENSE → INCOME vía voidTransaction). Si stock ya se consumió en otra operación, 409 — correcto. |
+| Devolución a proveedor (Vendible) | Stock baja de la bodega Principal (`RETURN_OUT`). Caja sube por el monto reembolsado (`CashTransaction(INCOME, source=PURCHASE_RETURN)`). |
+| Abrir reclamo de garantía sobre ítem ya tenía uno activo | Backend devuelve 409 indicando el número del reclamo existente. |
+| Abrir reclamo tras uno RESOLVED | Permitido — el sistema considera RESOLVED y REJECTED como terminales. |
+| Transición OPEN → APPROVED | 409 — debe pasar por IN_REVIEW primero. |
+| RESOLVED sin texto de resolución | 400 — el backend exige `resolution` para estados terminales. |
+| Reclamo APPROVED + crear devolución desde la venta | Operador hace click en banner del detalle del reclamo → navega a la venta → crea devolución. Backend setea `WarrantyClaim.linkedReturnId` al detectar el flujo (TODO: hoy es manual desde frontend vía `linkReturn` API; la auto-detección queda para refinamiento futuro). |
+
+### Tests / health
+
+- `pnpm --filter @inventory/api typecheck` ✅
+- `pnpm --filter @inventory/web typecheck` ✅
+- `pnpm --filter @inventory/shared build` ✅
+- Migración aplicable (`db:migrate`).
+
+### Pendientes para fases futuras
+
+- **Auto-link warranty → return**: hoy el operador puede crear una devolución desde la venta y un reclamo en paralelo sin que queden linkeados automáticamente. El endpoint `POST /warranties/:id/link-return/:returnId` existe pero la UI no lo dispara — refinamiento para una ronda posterior cuando se vea el flujo real.
+- **Auto-detección de devolución total**: si una devolución cubre el 100% de los items vendidos, sugerir al operador cancelar la venta en lugar (es operativamente más limpio porque libera el cupo de "ya devuelto").
+- **Devoluciones a proveedor desde la UI**: el backend soporta `SUPPLIER` returns, pero el frontend solo tiene el flujo `CUSTOMER` desde el detalle de venta. Para SUPPLIER, una pantalla "Nueva devolución a proveedor" desde `/compras/[id]` queda como mejora.
+
+---
+
+## Fase 7.7 — Guía de despacho
+
+Documento operativo paralelo a la "Nota de venta" para el envío físico de los productos. Mientras la nota de venta es el comprobante comercial (con totales, IVA, método de pago), la guía es el papel que acompaña al paquete: dirección de entrega, transportista, tracking, items con cantidades. NO afecta stock ni caja — es estrictamente operativo.
+
+### Decisiones de negocio acordadas
+
+| Tema | Decisión |
+| --- | --- |
+| Cuándo se genera | **Manual** con botón "Generar guía de despacho" en el detalle de la venta. No se genera automáticamente al confirmar la venta — muchas ventas mostrador (cliente se lleva el producto en el momento) no requieren guía. Generar automáticamente para todas ensuciaría el listado de `/guias` con guías que no son envíos reales. |
+| Relación venta ↔ guía | **1 venta puede tener N guías a lo largo del tiempo, pero solo UNA activa** simultáneamente. Si el operador detecta un error (transportista mal cargado, dirección incorrecta), anula la guía actual y genera una nueva. La anulada queda en el historial con correlativo + motivo. Backend rechaza generar una segunda guía activa con 409. |
+| Dirección de entrega | **Snapshot pre-llenado desde el cliente, editable** por guía. El operador puede modificar `addressStreet`, `addressNumber`, `communeId` y `addressNotes` para esta guía específica sin alterar al cliente. Usa el componente `<CommuneSelect>` con las 346 comunas chilenas. |
+| Transportista | **Texto libre con sugerencias autocompletables**. Input HTML `<input list="...">` que sugiere transportistas usados en guías previas (DISTINCT carrier ordenado por uso). Cero configuración inicial — se adapta al uso real. Sin entidad `Carrier` separada para mantener simple. |
+| Cancelar venta con guía activa | **Cascada automática**: si la venta se cancela y tiene guía activa, en la misma transacción atómica de `SalesService.cancel` se marca la guía como `VOIDED` con motivo "Venta cancelada · {motivo}". Coherencia total — una venta cancelada nunca tiene guía activa. La cascada está implementada inline con SQL raw para evitar import circular `SalesModule ↔ DispatchModule`. |
+| Numeración | Correlativo `DESP-AAAA-NNNNN` único, generado vía `CountersService.nextNumber('DISPATCH', ...)` con lock pesimista por `(kind, year)`. Las anuladas preservan su correlativo. |
+| PDF | **Carta (A4) + Térmica 80mm** con dropdown "Imprimir" en el detalle. Render separado de cotización/venta porque la estructura es distinta (sin totales, sin IVA, foco en envío). Title del documento: "Guía de despacho DESP-2026-00001". Incluye empresa + cliente + dirección de entrega + items con qty (sin precios) + transportista + tracking + observaciones + espacio para firma del receptor. Si la guía está VOIDED, se imprime "ANULADA" en rojo. |
+| Punto de entrada | **Botón "Generar guía de despacho"** en `/ventas/[id]` (junto a "Cancelar venta" y "Crear devolución"). Si ya hay guía activa, el botón cambia a **"Ver guía DESP-XYZ"** que linkea al detalle. Listado dedicado `/guias` con filtros pero sin botón "Nueva" — el flujo siempre arranca desde la venta. |
+
+### Schema
+
+#### Migración [`1779100000000-DispatchNotesPhase77.ts`](apps/api/src/database/migrations/1779100000000-DispatchNotesPhase77.ts)
+
+| Cambio | Tabla | Notas |
+| --- | --- | --- |
+| Tabla nueva | `dispatch_notes` | `id`, `number` único (`DESP-AAAA-NNNNN`), `saleId` FK RESTRICT a `sales`, `dispatchedAt`, `carrier` (varchar 120 nullable), `trackingNumber` (varchar 120 nullable), snapshot de dirección (`addressStreet`, `addressNumber`, `communeId` FK RESTRICT, `addressNotes`), `notes`, `status` enum (`ACTIVE`/`VOIDED`, default `ACTIVE`), auditoría completa de anulación (`voidedAt`, `voidReason`, `voidedById` FK SET NULL), `userId` FK RESTRICT, timestamps. |
+| Índices | `dispatch_notes` | `idx_dispatch_notes_number` (unique), `idx_dispatch_notes_sale_status` (compuesto para query "guía activa de esta venta"), `idx_dispatch_notes_dispatched_at`. |
+
+> La regla "1 activa por venta" se valida en service (no hay índice parcial en MySQL). El índice compuesto `(saleId, status)` hace eficiente la query.
+
+### Backend
+
+#### Módulo nuevo [`apps/api/src/dispatch/`](apps/api/src/dispatch/)
+
+- **`DispatchService.create(dto, userId)`** — valida que la venta exista y no esté `CANCELLED`, que no haya guía activa previa (409 si la hay), que la comuna exista. Genera `DESP-AAAA-NNNNN` con `CountersService`. Persiste con snapshot de dirección.
+- **`DispatchService.voidNote(id, dto, userId)`** — pasa `status` a `VOIDED` con motivo + auditoría. NO toca stock ni caja. Idempotente: rechaza si ya está anulada.
+- **`DispatchService.voidActiveBySale(saleId, reason, userId, manager)`** — invocable desde otra transacción (no usado actualmente vía dependencia para evitar circular, se hace SQL raw desde `SalesService.cancel`). Disponible para uso futuro.
+- **`DispatchService.findActiveBySale(saleId)`** — devuelve la guía activa de una venta (o null). Lo consume el detalle de venta para pintar "Generar guía" vs "Ver guía existente".
+- **`DispatchService.recentCarriers()`** — top 10 transportistas usados, agrupados y ordenados por frecuencia. Alimenta el datalist de autocompletado en el form.
+- **`DispatchController`** — endpoints: `GET /dispatch`, `GET /dispatch/recent-carriers`, `GET /dispatch/by-sale/:saleId/active`, `GET /dispatch/:id`, `POST /dispatch`, `POST /dispatch/:id/void`, `GET /dispatch/:id/pdf?format=letter|thermal80`.
+
+#### Cascada en `SalesService.cancel`
+
+Cuando la venta se cancela, dentro de la misma transacción atómica se anula la guía activa con SQL raw:
+
+```sql
+UPDATE dispatch_notes
+SET status='VOIDED', voidedAt=NOW(6), voidReason=?, voidedById=?
+WHERE saleId=? AND status='ACTIVE'
+```
+
+El motivo se compone como `"Venta cancelada · {motivo del cancel}"` para preservar trazabilidad.
+
+#### PdfService extendido — [`pdf.service.ts`](apps/api/src/notifications/pdf.service.ts)
+
+Render separado de cotización/venta porque la estructura es distinta (sin totales, items con solo cantidad + producto, layout de envío). Tipo nuevo `DispatchPdfInput` y dos renderers privados:
+
+- `generateDispatchLetter` — A4 con header empresa, título "Guía de despacho", venta origen, columnas Cliente + Entrega (dirección + transportista + tracking), tabla de items sin precios, observaciones, línea de firma del receptor. Si `voided=true`, imprime "ANULADA" en rojo.
+- `generateDispatchThermal` — tirilla 80mm con el mismo contenido en formato compacto.
+- Helper `fromDispatchNoteDto(d, settings): DispatchPdfInput` arma el input desde el DTO.
+- Método público `generateDispatch(input, format)` — switch entre los dos renderers.
+
+### DTOs compartidos
+
+En [`packages/shared/src/enums.ts`](packages/shared/src/enums.ts):
+- `DispatchStatus` (`ACTIVE` / `VOIDED`).
+
+En [`packages/shared/src/types.ts`](packages/shared/src/types.ts):
+- `DispatchStatusDto`.
+- `DispatchNoteDto` (con sale + customer + items embebidos para evitar refetches).
+- `CreateDispatchNoteInput`, `VoidDispatchNoteInput`.
+
+### Frontend
+
+#### API client
+
+- [`dispatch-api.ts`](apps/web/lib/dispatch-api.ts) — `listDispatchNotes`, `getDispatchNote`, `createDispatchNote`, `voidDispatchNote`, `listRecentCarriers`, `getActiveDispatchBySale`, `getDispatchPdfUrl`.
+
+#### Componentes y pantallas nuevas
+
+- [`DispatchStatusBadge`](apps/web/components/dispatch-status-badge.tsx) — verde para `ACTIVE`, rojo con line-through para `VOIDED`.
+- [`GenerateDispatchDialog`](apps/web/components/forms/generate-dispatch-dialog.tsx) — form modal con:
+  - Fieldset "Dirección de entrega" pre-llenada con la del cliente (usando `getCustomer` + `<CommuneSelect>`), editable.
+  - Fieldset "Transporte" con input `<list>` HTML + `<datalist>` alimentado desde `listRecentCarriers`.
+  - Observaciones textarea.
+  - Al guardar redirige al detalle de la guía.
+- [`VoidDispatchDialog`](apps/web/components/forms/void-dispatch-dialog.tsx) — pide motivo obligatorio min 5 chars. Aclara que la anulación NO toca stock ni caja.
+- [`/guias`](apps/web/app/(dashboard)/guias/page.tsx) — listado paginado con filtros (estado, búsqueda libre que matchea número + venta + transportista + tracking, rango de fechas). Filas VOIDED en gris. Sin botón "Nueva" (se entra desde la venta).
+- [`/guias/[id]`](apps/web/app/(dashboard)/guias/[id]/page.tsx) — detalle con 3 columnas (Venta origen, Dirección de entrega, Transporte) + tabla de items + observaciones. Botones "Anular guía" (si ACTIVE) e "Imprimir" (Carta/Térmica 80mm). Banner rojo con motivo si está VOIDED.
+
+#### Pantalla actualizada
+
+- [`/ventas/[id]`](apps/web/app/(dashboard)/ventas/[id]/page.tsx) — botón nuevo en el header:
+  - Si la venta NO tiene guía activa: **"Generar guía de despacho"** (icono camión) abre `GenerateDispatchDialog`.
+  - Si la venta YA tiene guía activa: **"Ver guía DESP-XXX"** (link al detalle de la guía).
+  - Si la venta está cancelada: ningún botón de guía (los 3 botones — generar guía, devolver, cancelar — se ocultan).
+- [`Sidebar`](apps/web/components/sidebar.tsx) — item "Guías de despacho" agregado a la sección Operación.
+
+### Verificación end-to-end de la fase
+
+| Caso | Resultado esperado |
+| --- | --- |
+| Venta nueva → "Generar guía" | Dialog abre con dirección pre-llenada del cliente. Operador completa carrier + tracking, confirma. Se crea la guía con correlativo `DESP-AAAA-NNNNN` y redirige al detalle. NO toca stock ni caja. |
+| Intentar generar segunda guía en la misma venta (con activa) | Botón del detalle de venta YA dice "Ver guía DESP-XXX" en lugar de "Generar guía". Si por alguna razón llega un request directo al endpoint, backend devuelve 409. |
+| Anular guía → generar nueva | Guía vieja queda VOIDED con motivo en el historial. El botón vuelve a "Generar guía". La nueva guía obtiene el siguiente correlativo. |
+| Cancelar venta con guía activa | En la misma transacción, la guía pasa a VOIDED con motivo "Venta cancelada · {motivo de cancelación}" y `voidedById` setteado. Estado coherente: venta cancelada sin guía activa. |
+| PDF Carta | Descarga PDF A4 con título "Guía de despacho DESP-AAAA-NNNNN", empresa, venta origen, dirección de entrega, tabla de items con cantidades sin precios, transportista + tracking, observaciones, línea de firma del receptor. |
+| PDF Térmica 80mm | Versión compacta del mismo contenido para tirilla térmica. Sin firma (no aplica al formato). |
+| Sugerencias de transportista | Tras generar la primera guía con "Chilexpress", la siguiente vez el datalist sugiere "Chilexpress" al tipear "Chi". |
+| Listado `/guias` | Muestra todas las guías con filtros por estado, búsqueda libre (número, venta, transportista, tracking) y rango de fechas. |
+
+### Tests / health
+
+- `pnpm --filter @inventory/api typecheck` ✅
+- `pnpm --filter @inventory/web typecheck` ✅
+- `pnpm --filter @inventory/shared build` ✅
+- Migración aplicable (`db:migrate`).
+
+### Pendientes para fases futuras
+
+- **Envío por email al transportista**: agregar un campo de email del transportista (en la sugerencia) o catálogo de transportistas con datos de contacto, para enviar la guía por email directamente desde el sistema. Hoy se descarga el PDF y se adjunta manualmente.
+- **Despachos parciales** (1:N): si el cliente eventualmente necesita despachar items de una venta en múltiples envíos (ej: 2 productos hoy con Chilexpress, 3 mañana con Starken), agregar `dispatch_note_items` con subset de items + qty, validar suma ≤ vendido, soportar "cuánto queda por despachar" en la UI. Mayor scope, mejor postergar hasta que aparezca el caso real.
+- **Refinamiento del PDF de la guía** (Fase 11): pulir el layout con branding final, agregar barcode CODE128 del número de tracking, ajustar el espacio para firma según uso real.
+
+---
+
 ## Tema oscuro
 
 El frontend soporta **light / dark / system** vía [`next-themes`](https://github.com/pacocoursey/next-themes). El toggle (sol/luna) vive en el header del dashboard. La preferencia se persiste en `localStorage` y respeta `prefers-color-scheme` del sistema cuando está en modo "system".
@@ -2021,11 +2272,11 @@ Cada fase es un PR independiente con verificación end-to-end al cierre. Ver [PL
 
 **Fase 7.5:** ✅ Multi-bodega + transferencias entre bodegas + código de ubicación por bodega + bodega "Mercado Libre Full" seedeada (inactiva por defecto) — ver sección "Fase 7.5" arriba.
 
-**Fase 7.6 (siguiente):** Devoluciones (suman stock) y Garantías (no afectan stock).
+**Fase 7.6:** ✅ Devoluciones (cliente y proveedor) + Garantías (no afectan stock) — ver sección "Fase 7.6" arriba.
 
-**Fase 7.7:** Guía de despacho con número correlativo.
+**Fase 7.7:** ✅ Guía de despacho con correlativo DESP-AAAA-NNNNN, dirección de entrega editable, PDF Carta/80mm, anulación con motivo + cascada al cancelar venta — ver sección "Fase 7.7" arriba.
 
-**Fase 8:** Reportes + **Proyección de stock** con lista de productos críticos exportable a CSV/Excel (importante por el lead time de 2-3 meses de las importaciones del cliente).
+**Fase 8 (siguiente):** Reportes + **Proyección de stock** con lista de productos críticos exportable a CSV/Excel (importante por el lead time de 2-3 meses de las importaciones del cliente).
 
 **Fase 8.5 (nueva — pedida en mayo 2026):** **Lead lifecycle + Seguimiento comercial + HubSpot push**. Formaliza el flujo comercial real: WhatsApp como identificador del lead, lifecycle automático (`NEW` → `QUOTED` → `FOLLOW_UP` → `WON` / `LOST`) calculado desde eventos del sistema, cron diario para detectar follow-ups vencidos, bandeja `/seguimiento` con tabs Pendientes/Sin respuesta/Vencidos/Último contacto + botones rápidos WhatsApp, sync one-way a HubSpot vía `@hubspot/api-client` (sistema como fuente de verdad). Bloquea Fase 9 porque el dashboard depende del concepto de "pendientes de seguimiento".
 

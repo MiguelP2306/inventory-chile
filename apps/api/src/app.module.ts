@@ -10,6 +10,7 @@ import { CategoriesModule } from './categories/categories.module';
 import { CommunesModule } from './communes/communes.module';
 import { CustomersModule } from './customers/customers.module';
 import { dataSourceOptions } from './database/data-source';
+import { DispatchModule } from './dispatch/dispatch.module';
 import { ExpenseCategoriesModule } from './expense-categories/expense-categories.module';
 import { ExpensesModule } from './expenses/expenses.module';
 import { HealthController } from './health.controller';
@@ -18,6 +19,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { ProductsModule } from './products/products.module';
 import { PurchasesModule } from './purchases/purchases.module';
 import { QuotationsModule } from './quotations/quotations.module';
+import { ReturnsModule } from './returns/returns.module';
 import { SalesModule } from './sales/sales.module';
 import { SettingsModule } from './settings/settings.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
@@ -26,6 +28,7 @@ import { UPLOADS_ROOT } from './uploads/upload-config';
 import { UploadsModule } from './uploads/uploads.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 import { WarehousesModule } from './warehouses/warehouses.module';
+import { WarrantiesModule } from './warranties/warranties.module';
 
 @Module({
   imports: [
@@ -63,6 +66,9 @@ import { WarehousesModule } from './warehouses/warehouses.module';
     SalesModule,
     WarehousesModule,
     TransfersModule,
+    ReturnsModule,
+    WarrantiesModule,
+    DispatchModule,
   ],
   controllers: [HealthController],
   providers: [],
