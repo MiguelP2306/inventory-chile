@@ -31,21 +31,32 @@ export class SalesPhase71778800000000 implements MigrationInterface {
     );
 
     // 1b. Backfill: tomar el id de la bodega "Principal" o, si no existe, la
-    //     primera por orden alfabético. Falla la migración si no hay ninguna
-    //     (caso imposible: el seed inicial crea Principal).
-    const warehouses = (await queryRunner.query(
-      `SELECT id FROM warehouses ORDER BY (name = 'Principal') DESC, name ASC LIMIT 1`,
-    )) as Array<{ id: string }>;
-    if (warehouses.length === 0) {
-      throw new Error(
-        '[SalesPhase7] No hay bodegas configuradas. Esperaba al menos "Principal" del seed.',
+    //     primera por orden alfabético. Si la tabla `sales` está vacía (caso
+    //     típico del setup fresco antes de correr seeds), el UPDATE es noop
+    //     y no necesitamos bodega; saltamos sin fallar. Si hay ventas pero
+    //     no hay bodegas, sí es un estado inválido — fallamos con mensaje
+    //     claro para que el operador corra `./run.sh db:seed` primero.
+    const salesCount = (await queryRunner.query(
+      `SELECT COUNT(*) AS count FROM \`sales\``,
+    )) as Array<{ count: number | string }>;
+    const hasSales = Number(salesCount[0]?.count ?? 0) > 0;
+
+    if (hasSales) {
+      const warehouses = (await queryRunner.query(
+        `SELECT id FROM warehouses ORDER BY (name = 'Principal') DESC, name ASC LIMIT 1`,
+      )) as Array<{ id: string }>;
+      if (warehouses.length === 0) {
+        throw new Error(
+          '[SalesPhase7] Hay ventas existentes pero no hay bodegas configuradas. ' +
+            'Corré `./run.sh db:seed` antes de aplicar esta migración.',
+        );
+      }
+      const defaultWarehouseId = warehouses[0]!.id;
+      await queryRunner.query(
+        `UPDATE \`sales\` SET \`warehouseId\` = ? WHERE \`warehouseId\` IS NULL`,
+        [defaultWarehouseId],
       );
     }
-    const defaultWarehouseId = warehouses[0]!.id;
-    await queryRunner.query(
-      `UPDATE \`sales\` SET \`warehouseId\` = ? WHERE \`warehouseId\` IS NULL`,
-      [defaultWarehouseId],
-    );
 
     // 1c. Pasar a NOT NULL ahora que está backfilleado.
     await queryRunner.query(

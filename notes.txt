@@ -1,71 +1,28 @@
-Prompt: 
-    Perfecto! Ahora tengo una duda que debi de hacer antes de empezar la fase 7 pero ya que estamos te preguntare de una.
+Errores encontrados
 
-    Necesito integrar que se pueda generar automaticamente la etiqueta para cada producto con su descripcion y codigo en tamano 50mm y ancho de 30mm alto en impresora termica
+Global:
+    Validar de forma correcta el RUT en toda la web
 
-    Las bodegas tienen productos y cada producto dentro de una bodega va a tener un codigo de ubicacion para que el cliente cuando necesite conseguir un producto dentro de una bodega en especifico ir hacia la ubicacion del codigo
+Productos:
+    Editar producto > compatibilidad
 
-    Esto estaria correcto agregarlo en esta fase o lo correcto seria a esperar a tal fase?
+    Editar el producto. En tab "Compatibilidad", agregar otra fila con Toyota Corolla 2015-2018 (rango que se superpone con el existente).
+    Respuesta esperada: Error inline en la fila: "Ya existe una compatibilidad con este modelo y rango se superpone".
+    Respuesta actual: Agrega otra fila satisfactoria apesar de que se superponga de la que ya existe
 
-AI:
-    Buena pregunta para revisar antes de seguir. Te respondo con lo que está planificado y mi recomendación, así decidís sin que arranque a programar.
+    Informacion actual
+        Toyota Corolla 2015 2018
+        Toyota Corolla 2010 2020
 
-    Estado actual en el plan
-    1. Etiquetas térmicas con código + descripción — Ya está planificado en Fase 11 (PLAN.md, sección "Códigos de barras y refinamiento de plantillas"):
+Inventario (stock): 
+    Cree dos compras en la ruta "Compras", una compra con un solo producto y la otra compra con 2 productos. En movimientos de inventario (/movimientos) me registro de manera satisfactoria las compras mencionadas pero en stock tengo un problema
+    El problema esta en que en mi caso tenia un solo almacen (warehouse) activado que es el por defecto "Principal" y el otro almacen por defecto estaba desactivado (Mercado Libre Full) en la ruta stock tenia por defecto el almacen activado por defecto "Princial" y los datos parecia que ni hizo ninguna compra, activo el segundo almacen "Mercado libre full" que estaba creado por defecto pero desactivado por defecto tambien y me aparece la informacion de las compras que hice
+    Esperado: Debe de haber algo mas entendible como por ejemplo que en compras y demas lugares donde sea necesario haya un select para escoger a que almacen (warehouse) activo va la accion y sea obligatorio o algo parecido, dame opciones si la que menciono no te parece que este correcta
 
-    Generación de etiquetas: PDF imprimible con barcode CODE128 + SKU + nombre + precio (bwip-js).
-    La librería ya está decidida (bwip-js). Tu requerimiento de 50×30 mm es una variación de formato concreta sobre eso.
+    Pasa lo mismo en COTIZACION. Al yo crear una nueva venta me dice en el tab de items "Stock: 0" y "Hay items que exceden el stock disponible. Ajustá las cantidades o quitá esas líneas antes de confirmar." porque esta trayendo los datos del almacen "Principal" donde no hay stock pero en el almacen "Mercado Libre Full" si tengo stock. Tampoco me deja escoger que almacen usar en cotizacion al crear la venta
 
-    2. Código de ubicación por bodega — NO está en el plan. Lo más cercano es el campo Product.location que existe hoy (sale.entity hermana, product.entity) como texto libre global del producto. No es por bodega.
+    Estoy en inventario y selecciono el almacen vacio "Principal" para poder agregar a un producto stock, pero cuando agrego a un producto stock como por ejemplo 20, me suma el stock del producto pero en el otro almacen, en el almacen "Mercado Libre Full" y no se suma nada en el almacen donde estoy intentando aumentar el stock que es el "Principal"
 
-    Mi recomendación
-    Mejor no meter esto en Fase 7. La fase ya cerró su scope (ventas + caja + cancelación) y se probó end-to-end. Mezclar features nuevas ahora dificulta el QA del cliente y agranda el diff.
+Compras:
+    No puedo editar una compra; por ejem quiero subir un archivo como factura de la compra despues de crearla pero no puedo.
 
-    Lo separaría así:
-
-    Feature	Mejor encaje	Por qué
-    Etiquetas 50×30 mm térmicas	Fase 11 (ya planificada) o mini-fase 7.4 aparte si la querés ya	Es self-contained. No bloquea ni depende de nada. Se hace en aislado: endpoint GET /products/:id/label?format=50x30 que devuelve PDF + botón "Imprimir etiqueta" en /productos/[id].
-    Código de ubicación por bodega	Fase 7.5 (multi-bodega)	Hoy hay 1 sola bodega ("Principal"). Una ubicación "por bodega" cuando solo hay una es lo mismo que el Product.location global que ya existe. El valor real aparece cuando entren ML Full y otras bodegas en 7.5 — ahí cada producto puede estar en lugares físicos distintos por bodega.
-    Si querés acelerar
-    Si te urge tener etiquetas YA (antes de Fase 11), lo puedo hacer como una mini-fase 7.4 independiente — son ~150 líneas backend + 1 botón en /productos/[id]. Las etiquetas no dependen de ubicación por bodega, así que se pueden hacer aisladas.
-
-    Si te urge la ubicación por bodega antes de 7.5, hay dos caminos:
-
-    Camino rápido: usar el campo existente Product.location (texto libre, global) y exponerlo más visiblemente. Cuando llegue 7.5 lo migramos a Stock.locationCode (per-bodega).
-    Camino "hacelo bien ya": adelantar parte de 7.5 — agregar Stock.locationCode (varchar 30, nullable) ahora con migración chica, dejar el form de Stock para editarlo, y ya queda preparado. Cuando entre multi-bodega en 7.5, este campo ya está poblado por bodega y solo agregamos el selector de bodega.
-    AskUserQuestion
-    OUT
-    User has answered your questions: "Sobre las etiquetas térmicas 50×30 mm: ¿cuándo las querés?"="Esperar Fase 11 como está planificado (Recomendado)". You can now continue with the user's answers in mind.
-    AskUserQuestion
-    OUT
-    User has answered your questions: "Sobre el código de ubicación por bodega: ¿qué hacemos?"="Esperar Fase 7.5 (Recomendado)". You can now continue with the user's answers in mind.
-    Perfecto. Decisión tomada:
-
-    Etiquetas térmicas 50×30 mm → quedan en Fase 11 como ya estaba planificado. Anotaré tu requerimiento del formato específico (50×30) para que cuando lleguemos allá no tengamos que volver a discutirlo.
-    Código de ubicación por bodega → Fase 7.5 (multi-bodega). Ahí agrego Stock.locationCode y el form para editarlo, junto con el activado real de multi-bodega.
-    Voy a dejar registro de las dos decisiones en PLAN.md para que no se pierdan:
-
-    Read c:\Users\Valeria\OneDrive\Escritorio\Nueva carpeta\inventory-chile\PLAN.md (lines 419-448)
-    Edit c:\Users\Valeria\OneDrive\Escritorio\Nueva carpeta\inventory-chile\PLAN.md
-    Added 1 line
-    Y anoto el formato 50×30 mm en Fase 11:
-
-    Grep "Generación de etiquetas|bwip-js" (in c:\Users\Valeria\OneDrive\Escritorio\Nueva carpeta\inventory-chile\PLAN.md)
-    7 lines of output
-    Edit c:\Users\Valeria\OneDrive\Escritorio\Nueva carpeta\inventory-chile\PLAN.md
-    Modified
-    Listo. Quedaron documentadas las dos decisiones para que no se pierdan cuando lleguemos a las fases correspondientes:
-
-    Resumen de decisiones
-
-    Etiquetas térmicas 50×30 mm → Fase 11 (ya planificada). Formato confirmado y anotado en PLAN.md:506.
-    Código de ubicación por bodega → Fase 7.5. Schema (Stock.locationCode), UI y migración del campo viejo Product.location documentados en PLAN.md:425 como ítem 7 de la fase.
-    Lo que sigue naturalmente
-    La próxima fase que toca es la 7.5 (multi-bodega + Mercado Libre Full). Cuando arranquemos esa, también entra el código de ubicación por bodega como parte del scope. Las etiquetas vienen después en Fase 11.
-
-    Si querés, también puedo dejar una nota en el README en la sección de "Decisiones pendientes con el cliente" para que el cliente vea que el requerimiento quedó registrado pero pospuesto a su fase natural — avisame si te suma o lo dejamos solo en el PLAN.
-
-
-==============================================================================================================
-
-Validar de forma correcta el RUT en toda la web
