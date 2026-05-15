@@ -24,7 +24,7 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 | 7.6 | Devoluciones (cliente y proveedor) con condición Vendible/Dañado + reembolso atómico en caja + Garantías con lifecycle (OPEN/IN_REVIEW/APPROVED/REJECTED/RESOLVED) | ✅ |
 | 7.7 | Guía de despacho con correlativo DESP-AAAA-NNNNN, dirección de entrega editable, transportista con sugerencias, PDF Carta/80mm, anulación con motivo + cascada al cancelar venta | ✅ |
 | — | **Ronda 5** (bugfixes tras pruebas 0–7.7): RUT consistente, solapamiento de compatibilidades, bodega default = "Principal" + bodega activa visible en sidebar, edición y cancelación de compras | ✅ |
-| 8 | Reportes + proyección de stock + lista de productos críticos (CSV/Excel) | pendiente |
+| 8 | Reportes + proyección de stock + lista de productos críticos (CSV/Excel) | ✅ |
 | 8.5 | **Lead lifecycle + Seguimiento comercial + HubSpot push** (WhatsApp como identificador, lifecycle automático `NEW`/`QUOTED`/`FOLLOW_UP`/`WON`/`LOST`, bandeja `/seguimiento`, sync one-way a HubSpot) | pendiente |
 | — | **Ronda 4** (transversal antes de Fase 9): responsive móvil — sidebar drawer + tablas optimizadas + revisión de forms en mobile | pendiente |
 | 9 | Dashboard mobile-first con KPIs **clicables** del día + alertas + gráficos (depende de Fase 8.5 para "Pendientes de seguimiento") | pendiente |
