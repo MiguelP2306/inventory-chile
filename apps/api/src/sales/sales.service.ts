@@ -386,13 +386,19 @@ export class SalesService {
   // ---------------- helpers ----------------
 
   private async defaultWarehouseId(): Promise<string> {
-    const w = await this.warehouseRepo.findOne({
-      where: {},
-      order: { name: 'ASC' },
-    });
+    // Filtra activas + prefiere "Principal" explícitamente. Ver
+    // InventoryService.defaultWarehouseId() para la justificación (Ronda 5/7).
+    const rows = await this.warehouseRepo
+      .createQueryBuilder('w')
+      .where('w.isActive = TRUE')
+      .orderBy(`(w.name = 'Principal')`, 'DESC')
+      .addOrderBy('w.name', 'ASC')
+      .limit(1)
+      .getMany();
+    const w = rows[0];
     if (!w) {
       throw new NotFoundException(
-        'No hay bodegas configuradas. El seed inicial crea "Principal".',
+        'No hay bodegas activas. El seed inicial crea "Principal".',
       );
     }
     return w.id;

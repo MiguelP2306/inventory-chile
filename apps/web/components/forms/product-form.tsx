@@ -91,17 +91,41 @@ const schema = z
   })
   .superRefine((v, ctx) => {
     if (v.fitments) {
-      const seen = new Map<string, number>();
+      // Detección de solapamiento inclusivo (los bordes cuentan): para cada
+      // par de filas del mismo modelo, si comparten ≥1 año en su rango es
+      // duplicado/solapamiento. yearFrom null se trata como -∞, yearTo null
+      // se interpreta como (year + 1) según la regla acordada en Ronda 5
+      // — no como +∞: una fila "desde 2018" sin hasta cubre 2018 y 2019.
+      const PLUS_INF = Number.POSITIVE_INFINITY;
+      const MINUS_INF = Number.NEGATIVE_INFINITY;
+      const ranges = v.fitments.map((f) => {
+        const from = f.yearFrom ?? MINUS_INF;
+        // Si solo se define yearFrom, asumimos "year y siguiente" (2 años).
+        // Si no hay yearFrom ni yearTo, el rango es vacío (no se chequea).
+        const to =
+          f.yearTo != null
+            ? f.yearTo
+            : f.yearFrom != null
+              ? f.yearFrom + 1
+              : PLUS_INF;
+        return { modelId: f.modelId, from, to };
+      });
       v.fitments.forEach((f, idx) => {
-        const key = `${f.modelId}|${f.yearFrom ?? ''}|${f.yearTo ?? ''}`;
-        if (f.modelId && seen.has(key)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: 'Esta compatibilidad ya está cargada (modelo y años repetidos).',
-            path: ['fitments', idx, 'modelId'],
-          });
-        } else if (f.modelId) {
-          seen.set(key, idx);
+        if (!f.modelId) return;
+        const a = ranges[idx]!;
+        for (let j = 0; j < idx; j++) {
+          const b = ranges[j]!;
+          if (b.modelId !== a.modelId) continue;
+          // Solapamiento inclusivo: a.from <= b.to && b.from <= a.to.
+          if (a.from <= b.to && b.from <= a.to) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message:
+                'Esta compatibilidad se solapa con otra ya cargada para el mismo modelo.',
+              path: ['fitments', idx, 'yearFrom'],
+            });
+            break;
+          }
         }
       });
     }

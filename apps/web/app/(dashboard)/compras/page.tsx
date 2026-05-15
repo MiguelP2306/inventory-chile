@@ -121,6 +121,7 @@ export default function ComprasPage() {
             <TableRow>
               <TableHead>Fecha</TableHead>
               <TableHead>Proveedor</TableHead>
+              <TableHead>Bodega</TableHead>
               <TableHead>Notas</TableHead>
               <TableHead className="text-right">Subtotal</TableHead>
               <TableHead className="text-right">IVA</TableHead>
@@ -133,7 +134,7 @@ export default function ComprasPage() {
               <>
                 {Array.from({ length: 4 }).map((_, i) => (
                   <TableRow key={i}>
-                    <TableCell colSpan={7}>
+                    <TableCell colSpan={8}>
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
                   </TableRow>
@@ -142,7 +143,7 @@ export default function ComprasPage() {
             )}
             {!list.isLoading && items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={8} className="text-center text-muted-foreground">
                   Sin compras registradas todavía.
                 </TableCell>
               </TableRow>
@@ -155,6 +156,11 @@ export default function ComprasPage() {
                     {new Date(p.date).toLocaleDateString('es-CL', { dateStyle: 'medium' })}
                   </TableCell>
                   <TableCell className="font-medium">{p.supplier?.name ?? '—'}</TableCell>
+                  <TableCell className="text-sm">
+                    {p.warehouse?.name ?? (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
                   <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
                     {p.notes ?? '—'}
                   </TableCell>

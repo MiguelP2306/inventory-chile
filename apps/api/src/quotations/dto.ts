@@ -18,6 +18,7 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
+import { IsValidRut } from '../common/validators/rut';
 
 export class CreateQuotationItemDto {
   @IsUUID()
@@ -62,9 +63,12 @@ export class CreateQuotationDto {
   @MaxLength(200)
   customerEmailSnapshot?: string;
 
+  // RUT del cliente libre. Opcional, pero si viene debe ser válido (formato +
+  // DV). El service normaliza al guardar.
   @IsOptional()
   @IsString()
   @MaxLength(40)
+  @IsValidRut()
   customerTaxIdSnapshot?: string;
 
   @IsDateString()

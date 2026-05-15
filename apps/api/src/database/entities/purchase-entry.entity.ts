@@ -12,6 +12,7 @@ import {
 import { PurchaseEntryItem } from './purchase-entry-item.entity';
 import { Supplier } from './supplier.entity';
 import { User } from './user.entity';
+import { Warehouse } from './warehouse.entity';
 
 @Entity('purchase_entries')
 export class PurchaseEntry {
@@ -25,6 +26,16 @@ export class PurchaseEntry {
   @Index('idx_purchase_entries_supplier')
   @Column({ type: 'char', length: 36 })
   supplierId!: string;
+
+  // Bodega destino de la entrada de mercadería (Ronda 7). Nullable solo para
+  // las filas históricas previas a la migración que no se pudieron backfillear.
+  @ManyToOne(() => Warehouse, { onDelete: 'RESTRICT', nullable: true })
+  @JoinColumn({ name: 'warehouseId' })
+  warehouse?: Warehouse | null;
+
+  @Index('idx_purchase_entries_warehouse')
+  @Column({ type: 'char', length: 36, nullable: true })
+  warehouseId!: string | null;
 
   @Index('idx_purchase_entries_date')
   @Column({ type: 'datetime', precision: 6 })

@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Banknote, CreditCard, Receipt, Search, Send, Trash2 } from 'lucide-react';
+import { AlertTriangle, Banknote, CreditCard, Receipt, Search, Send, Trash2, Warehouse as WarehouseIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { ProductPicker } from '@/components/product-picker';
@@ -300,6 +300,9 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
     setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
   }
 
+  const currentWarehouse =
+    activeWarehouses.find((w) => w.id === warehouseId) ?? null;
+
   return (
     <form
       onSubmit={(e) => {
@@ -308,6 +311,63 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
       }}
       className="space-y-6"
     >
+      {/* Selector de bodega visible siempre, fuera de los tabs. La bodega
+          define contra qué stock se valida la venta y de dónde se descuentan
+          los items al confirmar. */}
+      <div className="rounded-md border bg-card p-4">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-4">
+          <Label className="flex items-center gap-2 text-sm md:w-44 md:shrink-0">
+            <WarehouseIcon className="h-4 w-4 text-muted-foreground" />
+            Bodega de la venta
+          </Label>
+          <Select
+            value={warehouseId}
+            onValueChange={setWarehouseId}
+            disabled={activeWarehouses.length === 0}
+          >
+            <SelectTrigger className="md:max-w-xs">
+              <SelectValue placeholder="Seleccioná bodega" />
+            </SelectTrigger>
+            <SelectContent>
+              {activeWarehouses.map((w) => (
+                <SelectItem key={w.id} value={w.id}>
+                  {w.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          El stock se evalúa y se descuenta de esta bodega al confirmar.
+          Cambiá la bodega si la elegida no tiene stock para todos los items.
+        </p>
+      </div>
+
+      {stockShortages.length > 0 && (
+        <div className="flex items-start gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+          <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
+          <div className="flex-1 space-y-1">
+            <p className="font-medium text-amber-700 dark:text-amber-300">
+              Stock insuficiente en{' '}
+              <strong>{currentWarehouse?.name ?? 'la bodega elegida'}</strong>{' '}
+              para {stockShortages.length}{' '}
+              {stockShortages.length === 1 ? 'producto' : 'productos'}.
+            </p>
+            <p className="text-amber-700/80 dark:text-amber-300/80">
+              Probá cambiar la bodega arriba o ajustá las cantidades.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setActiveTab('items')}
+          >
+            Ver items
+          </Button>
+        </div>
+      )}
+
       <Tabs
         value={activeTab}
         onValueChange={(v) => setActiveTab(v as typeof activeTab)}
@@ -355,27 +415,6 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
                 </>
               )}
             </div>
-
-            {activeWarehouses.length > 1 && (
-              <div className="space-y-2">
-                <Label>Bodega</Label>
-                <Select value={warehouseId} onValueChange={setWarehouseId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Seleccioná bodega" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {activeWarehouses.map((w) => (
-                      <SelectItem key={w.id} value={w.id}>
-                        {w.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  El stock se descuenta de esta bodega al confirmar.
-                </p>
-              </div>
-            )}
 
             <div className="space-y-2">
               <Label>Método de pago</Label>
@@ -639,7 +678,11 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
         </Button>
         <Button type="submit" disabled={!formValid || createMut.isPending}>
           <Receipt className="h-4 w-4" />
-          {createMut.isPending ? 'Confirmando...' : 'Confirmar venta'}
+          {createMut.isPending
+            ? 'Confirmando...'
+            : currentWarehouse
+              ? `Confirmar venta en ${currentWarehouse.name}`
+              : 'Confirmar venta'}
         </Button>
       </div>
 

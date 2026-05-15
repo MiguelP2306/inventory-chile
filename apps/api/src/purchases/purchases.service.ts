@@ -53,7 +53,7 @@ export class PurchasesService {
 
     const [items, total] = await this.entries.findAndCount({
       where,
-      relations: { supplier: true, user: true },
+      relations: { supplier: true, user: true, warehouse: true },
       order: { date: 'DESC' },
       take: pageSize,
       skip: (page - 1) * pageSize,
@@ -64,7 +64,12 @@ export class PurchasesService {
   async getOne(id: string) {
     const entry = await this.entries.findOne({
       where: { id },
-      relations: { supplier: true, user: true, items: { product: true } },
+      relations: {
+        supplier: true,
+        user: true,
+        warehouse: true,
+        items: { product: true },
+      },
     });
     if (!entry) throw new NotFoundException('Compra no encontrada');
     return entry;
@@ -109,6 +114,7 @@ export class PurchasesService {
 
       const entry = manager.create(PurchaseEntry, {
         supplierId: dto.supplierId,
+        warehouseId,
         date: dto.date ? new Date(dto.date) : new Date(),
         total,
         subtotal,
@@ -167,9 +173,26 @@ export class PurchasesService {
     return this.getOne(entryId);
   }
 
+  /**
+   * Bodega por defecto cuando el DTO no especifica una. Filtramos activas y
+   * preferimos "Principal" explícitamente — antes el orden alfabético hacía
+   * que "Mercado Libre Full" ganara contra "Principal" y las compras
+   * quedaban en la bodega equivocada (bug reportado en Ronda 5 + Ronda 7).
+   */
   private async firstWarehouseId(): Promise<string> {
-    const w = await this.warehouses.findOne({ where: {}, order: { name: 'ASC' } });
-    if (!w) throw new NotFoundException('No hay ningún almacén configurado.');
+    const rows = await this.warehouses
+      .createQueryBuilder('w')
+      .where('w.isActive = TRUE')
+      .orderBy(`(w.name = 'Principal')`, 'DESC')
+      .addOrderBy('w.name', 'ASC')
+      .limit(1)
+      .getMany();
+    const w = rows[0];
+    if (!w) {
+      throw new NotFoundException(
+        'No hay ningún almacén activo configurado.',
+      );
+    }
     return w.id;
   }
 }

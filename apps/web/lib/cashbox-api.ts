@@ -155,6 +155,7 @@ export interface UpdateCompanySettingsInput {
   defaultValidityDays?: number;
   taxRate?: string;
   cardCommissionRate?: string;
+  defaultLeadTimeDays?: number;
 }
 
 export const updateCompanySettings = (input: UpdateCompanySettingsInput) =>

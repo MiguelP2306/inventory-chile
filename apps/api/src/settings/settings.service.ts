@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { normalizeRut } from '../common/validators/rut';
 import { CompanySettings } from '../database/entities';
 import { UpdateCompanySettingsDto } from './dto';
 
@@ -47,7 +48,12 @@ export class SettingsService {
       }
     }
 
-    Object.assign(settings, dto);
+    const patch: Partial<CompanySettings> = { ...dto };
+    if (dto.taxId !== undefined) {
+      patch.taxId = dto.taxId ? normalizeRut(dto.taxId) : null;
+    }
+
+    Object.assign(settings, patch);
     return this.repo.save(settings);
   }
 }

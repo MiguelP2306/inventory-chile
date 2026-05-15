@@ -34,6 +34,7 @@ import {
 } from '@/lib/inventory-api';
 import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
+import { isValidRut, normalizeRut } from '@/lib/validators/rut';
 import type { SupplierDto } from '@inventory/shared';
 
 const PAGE_SIZE = 20;
@@ -125,9 +126,18 @@ export default function ProveedoresPage() {
     setForm(empty);
   }
 
+  // El RUT del proveedor es opcional (puede ser extranjero sin RUT chileno),
+  // pero si viene con contenido debe ser válido — espejo del backend.
+  const rutValue = (form.taxId ?? '').trim();
+  const rutInvalid = rutValue !== '' && !isValidRut(rutValue);
+
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim()) return;
+    if (rutInvalid) {
+      toast.error('RUT inválido (formato 12345678-9)');
+      return;
+    }
     if (editing) updateMut.mutate({ id: editing.id, input: form });
     else createMut.mutate(form);
   }
@@ -272,11 +282,25 @@ export default function ProveedoresPage() {
                   placeholder="+54 11 5555-1234"
                 />
               </Field>
-              <Field label="NIT/RUC">
+              <Field label="RUT (opcional)">
                 <Input
                   value={form.taxId ?? ''}
                   onChange={(e) => setForm({ ...form, taxId: e.target.value })}
+                  onBlur={(e) => {
+                    const v = e.target.value.trim();
+                    if (v && isValidRut(v)) {
+                      setForm((f) => ({ ...f, taxId: normalizeRut(v) }));
+                    }
+                  }}
+                  placeholder="12.345.678-9"
+                  aria-invalid={rutInvalid}
+                  className={rutInvalid ? 'border-destructive' : undefined}
                 />
+                {rutInvalid && (
+                  <p className="text-xs text-destructive">
+                    RUT inválido (formato 12345678-9)
+                  </p>
+                )}
               </Field>
               <Field label="Dirección">
                 <Input
@@ -299,7 +323,12 @@ export default function ProveedoresPage() {
               </Button>
               <Button
                 type="submit"
-                disabled={!form.name.trim() || createMut.isPending || updateMut.isPending}
+                disabled={
+                  !form.name.trim() ||
+                  rutInvalid ||
+                  createMut.isPending ||
+                  updateMut.isPending
+                }
               >
                 {editing ? 'Guardar' : 'Crear'}
               </Button>

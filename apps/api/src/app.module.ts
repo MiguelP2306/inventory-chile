@@ -17,8 +17,10 @@ import { HealthController } from './health.controller';
 import { InventoryModule } from './inventory/inventory.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ProductsModule } from './products/products.module';
+import { ProjectionModule } from './projection/projection.module';
 import { PurchasesModule } from './purchases/purchases.module';
 import { QuotationsModule } from './quotations/quotations.module';
+import { ReportsModule } from './reports/reports.module';
 import { ReturnsModule } from './returns/returns.module';
 import { SalesModule } from './sales/sales.module';
 import { SettingsModule } from './settings/settings.module';
@@ -69,6 +71,8 @@ import { WarrantiesModule } from './warranties/warranties.module';
     ReturnsModule,
     WarrantiesModule,
     DispatchModule,
+    ProjectionModule,
+    ReportsModule,
   ],
   controllers: [HealthController],
   providers: [],

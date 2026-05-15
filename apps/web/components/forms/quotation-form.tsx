@@ -61,6 +61,7 @@ import {
 } from '@/lib/quotations-api';
 import { getAvailableStock, type AvailableStockRow } from '@/lib/sales-api';
 import { isValidPhone, normalizePhone } from '@/lib/validators/phone';
+import { isValidRut, normalizeRut } from '@/lib/validators/rut';
 import { cn } from '@/lib/utils';
 import type { CustomerDto, QuotationDto } from '@inventory/shared';
 
@@ -113,6 +114,18 @@ const schema = z
           code: z.ZodIssueCode.custom,
           path: ['customerPhoneSnapshot'],
           message: 'Teléfono inválido (ej: +56 9 1234 5678)',
+        });
+      }
+      // RUT opcional pero validado si viene con contenido.
+      if (
+        val.customerTaxIdSnapshot &&
+        val.customerTaxIdSnapshot.trim() &&
+        !isValidRut(val.customerTaxIdSnapshot)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['customerTaxIdSnapshot'],
+          message: 'RUT inválido (formato 12345678-9)',
         });
       }
     }
@@ -326,7 +339,9 @@ export function QuotationForm({
         : (values.customerEmailSnapshot ?? '')?.trim() || null,
       customerTaxIdSnapshot: fromCatalog
         ? null
-        : (values.customerTaxIdSnapshot ?? '').trim() || null,
+        : (values.customerTaxIdSnapshot ?? '').trim()
+          ? normalizeRut((values.customerTaxIdSnapshot ?? '').trim())
+          : null,
       date: values.date,
       validUntil: values.validUntil,
       notes: (values.notes ?? '').trim() || null,

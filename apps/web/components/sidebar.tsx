@@ -1,14 +1,18 @@
 'use client';
 
+import { useQuery } from '@tanstack/react-query';
 import {
   ArrowDownToLine,
   ArrowLeftRight,
+  BarChart3,
   Boxes,
   Building2,
   Car,
   ClipboardList,
   Factory,
+  FileSpreadsheet,
   LayoutDashboard,
+  LineChart,
   Package,
   Receipt,
   RotateCcw,
@@ -16,6 +20,7 @@ import {
   ShieldAlert,
   ShoppingCart,
   Tag,
+  TrendingUp,
   Truck,
   Users,
   Wallet,
@@ -23,6 +28,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { getCompanySettings } from '@/lib/cashbox-api';
 import { cn } from '@/lib/utils';
 
 interface NavSection {
@@ -129,6 +135,35 @@ const SECTIONS: NavSection[] = [
     ],
   },
   {
+    label: 'Reportes',
+    items: [
+      {
+        href: '/proyeccion',
+        label: 'Proyección',
+        icon: TrendingUp,
+        matchPrefix: ['/proyeccion'],
+      },
+      {
+        href: '/reportes/ventas',
+        label: 'Ventas',
+        icon: BarChart3,
+        matchPrefix: ['/reportes/ventas'],
+      },
+      {
+        href: '/reportes/iva',
+        label: 'IVA',
+        icon: FileSpreadsheet,
+        matchPrefix: ['/reportes/iva'],
+      },
+      {
+        href: '/reportes/flujo-caja',
+        label: 'Flujo de caja',
+        icon: LineChart,
+        matchPrefix: ['/reportes/flujo-caja'],
+      },
+    ],
+  },
+  {
     label: 'Configuración',
     items: [
       {
@@ -143,10 +178,21 @@ const SECTIONS: NavSection[] = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const settings = useQuery({
+    queryKey: ['settings', 'company'],
+    queryFn: getCompanySettings,
+    staleTime: 5 * 60_000,
+  });
+
+  const companyName = settings.data?.name?.trim() || 'Inventario';
+
   return (
     <aside className="hidden w-56 shrink-0 border-r bg-card md:flex md:flex-col">
-      <div className="flex h-14 items-center border-b px-4 font-semibold">
-        Inventario
+      <div
+        className="flex h-14 items-center border-b px-4 text-base font-semibold truncate"
+        title={companyName}
+      >
+        {companyName}
       </div>
       <nav className="flex flex-1 flex-col gap-3 p-2">
         {SECTIONS.map((section, idx) => (

@@ -9,6 +9,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { IsValidRut } from '../common/validators/rut';
 
 export class UpdateCompanySettingsDto {
   @IsOptional()
@@ -31,9 +32,12 @@ export class UpdateCompanySettingsDto {
   @IsEmail()
   email?: string | null;
 
+  // RUT de la empresa. Opcional, pero si viene debe ser un RUT chileno válido
+  // (formato + DV). El service normaliza al guardar.
   @IsOptional()
   @IsString()
   @MaxLength(60)
+  @IsValidRut()
   taxId?: string | null;
 
   @IsOptional()
@@ -64,4 +68,12 @@ export class UpdateCompanySettingsDto {
   @IsOptional()
   @IsNumberString({ no_symbols: false })
   cardCommissionRate?: string;
+
+  // Lead time default (Fase 8). Días de cobertura por debajo de los cuales un
+  // producto se marca crítico en /proyeccion.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  defaultLeadTimeDays?: number;
 }

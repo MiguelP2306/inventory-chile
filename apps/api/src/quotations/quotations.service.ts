@@ -19,6 +19,7 @@ import { Brackets, DataSource, EntityManager, Repository } from 'typeorm';
 import { CountersService } from '../common/counters.service';
 import { dayRange } from '../common/date-range';
 import { rethrowFkAsConflict } from '../common/fk-error';
+import { normalizeRut } from '../common/validators/rut';
 import {
   CompanySettings,
   Customer,
@@ -231,7 +232,11 @@ export class QuotationsService {
         customerNameSnapshot: dto.customerId ? null : dto.customerNameSnapshot ?? null,
         customerPhoneSnapshot: dto.customerId ? null : dto.customerPhoneSnapshot ?? null,
         customerEmailSnapshot: dto.customerId ? null : dto.customerEmailSnapshot ?? null,
-        customerTaxIdSnapshot: dto.customerId ? null : dto.customerTaxIdSnapshot ?? null,
+        customerTaxIdSnapshot: dto.customerId
+          ? null
+          : dto.customerTaxIdSnapshot
+            ? normalizeRut(dto.customerTaxIdSnapshot)
+            : null,
         date,
         validUntil,
         status: QuotationStatus.DRAFT,
@@ -319,7 +324,9 @@ export class QuotationsService {
         if (dto.customerEmailSnapshot !== undefined)
           existing.customerEmailSnapshot = dto.customerEmailSnapshot ?? null;
         if (dto.customerTaxIdSnapshot !== undefined)
-          existing.customerTaxIdSnapshot = dto.customerTaxIdSnapshot ?? null;
+          existing.customerTaxIdSnapshot = dto.customerTaxIdSnapshot
+            ? normalizeRut(dto.customerTaxIdSnapshot)
+            : null;
       }
 
       if (dto.date) existing.date = new Date(dto.date);

@@ -23,6 +23,7 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 | 7.5 | Multi-bodega + transferencias entre bodegas + código de ubicación por bodega (flujo Mercado Libre Full manual) | ✅ |
 | 7.6 | Devoluciones (cliente y proveedor) con condición Vendible/Dañado + reembolso atómico en caja + Garantías con lifecycle (OPEN/IN_REVIEW/APPROVED/REJECTED/RESOLVED) | ✅ |
 | 7.7 | Guía de despacho con correlativo DESP-AAAA-NNNNN, dirección de entrega editable, transportista con sugerencias, PDF Carta/80mm, anulación con motivo + cascada al cancelar venta | ✅ |
+| — | **Ronda 5** (bugfixes tras pruebas 0–7.7): RUT consistente, solapamiento de compatibilidades, bodega default = "Principal" + bodega activa visible en sidebar, edición y cancelación de compras | ✅ |
 | 8 | Reportes + proyección de stock + lista de productos críticos (CSV/Excel) | pendiente |
 | 8.5 | **Lead lifecycle + Seguimiento comercial + HubSpot push** (WhatsApp como identificador, lifecycle automático `NEW`/`QUOTED`/`FOLLOW_UP`/`WON`/`LOST`, bandeja `/seguimiento`, sync one-way a HubSpot) | pendiente |
 | — | **Ronda 4** (transversal antes de Fase 9): responsive móvil — sidebar drawer + tablas optimizadas + revisión de forms en mobile | pendiente |
@@ -1283,6 +1284,43 @@ En [`packages/shared/src/types.ts`](packages/shared/src/types.ts):
 - **Envío por email al transportista**: agregar un campo de email del transportista (en la sugerencia) o catálogo de transportistas con datos de contacto, para enviar la guía por email directamente desde el sistema. Hoy se descarga el PDF y se adjunta manualmente.
 - **Despachos parciales** (1:N): si el cliente eventualmente necesita despachar items de una venta en múltiples envíos (ej: 2 productos hoy con Chilexpress, 3 mañana con Starken), agregar `dispatch_note_items` con subset de items + qty, validar suma ≤ vendido, soportar "cuánto queda por despachar" en la UI. Mayor scope, mejor postergar hasta que aparezca el caso real.
 - **Refinamiento del PDF de la guía** (Fase 11): pulir el layout con branding final, agregar barcode CODE128 del número de tracking, ajustar el espacio para firma según uso real.
+
+---
+
+## Ronda 5 — Correcciones tras pruebas de Fases 0–7.7
+
+Ronda de bugfixes transversal a partir de las pruebas del cliente. Cuatro problemas más una mejora de UX del sidebar.
+
+### Bug 1 — Validación de RUT inconsistente
+
+El RUT se validaba de forma distinta según el formulario. Ahora **todos** los campos RUT usan el mismo validador (formato + dígito verificador módulo 11) y se normalizan al guardar (`12.345.678-9` → `12345678-9`).
+
+- **Backend** ([`common/validators/rut.ts`](apps/api/src/common/validators/rut.ts)): el decorador `@IsValidRut()` se aplica en `CreateCustomerDto`/`UpdateCustomerDto`, `CreateSupplierDto`/`UpdateSupplierDto`, `CreateQuotationDto.customerTaxIdSnapshot` y `UpdateCompanySettingsDto.taxId`. Los services llaman `normalizeRut()` antes de persistir.
+- **Regla campo obligatorio vs opcional**: el RUT del cliente es obligatorio (valida siempre); proveedor, snapshot de cotización libre y RUT de empresa son opcionales — `@IsOptional()` hace que solo se valide si viene con contenido.
+- **Frontend** ([`lib/validators/rut.ts`](apps/web/lib/validators/rut.ts)): espejo del validador. Aplicado en `customer-form`, `register-customer-from-snapshot-dialog`, el diálogo de proveedores (`/proveedores`) y `quotation-form` (campo `customerTaxIdSnapshot`). Se normaliza en `onBlur` y al enviar.
+
+### Bug 2 — Solapamiento de rangos de compatibilidad en productos
+
+Al editar un producto, el tab "Compatibilidad" permitía cargar rangos de años solapados para el mismo modelo (ej: `Corolla 2015–2018` y `Corolla 2010–2020`).
+
+- **Fix** ([`components/forms/product-form.tsx`](apps/web/components/forms/product-form.tsx)): el `superRefine` del schema detecta **solapamiento inclusivo** — si dos filas del mismo `modelId` comparten ≥1 año, error inline en la fila (`fitments.<idx>.yearFrom`) que bloquea el guardado.
+- **Convención de bordes**: `yearTo = null` se interpreta como `yearFrom + 1` (una fila "desde 2018" sin "hasta" cubre 2018 y 2019, no hasta el infinito). `yearFrom = null` se trata como −∞.
+
+### Bug 3 — Stock asignado a la bodega equivocada (crítico)
+
+Cuando se activaba la bodega "Mercado Libre Full", las compras/ventas/ajustes que no especificaban bodega caían en ella en vez de "Principal", porque el default ordenaba alfabéticamente (`Mercado...` < `Principal`).
+
+- **Fix backend**: los cuatro métodos `defaultWarehouseId`/`firstWarehouseId` (en `PurchasesService`, `SalesService`, `InventoryService`, `ReturnsService`) ahora filtran `isActive = TRUE` y ordenan `(name = 'Principal') DESC, name ASC` — "Principal" gana siempre que esté activa.
+- **Fix UX — bodega activa visible y global**: nuevo hook [`useCurrentWarehouse`](apps/web/lib/use-current-warehouse.ts) persiste la bodega activa en `localStorage` y la sincroniza entre componentes (custom event) y entre tabs (`storage` event). El **sidebar** muestra el nombre de la empresa (de `CompanySettings`) como título y debajo `Almacén: <nombre>` — con selector inline cuando hay 2+ bodegas activas. `/inventario`, `AdjustStockDialog`, el form de compra y el selector "Stock evaluado contra:" del tab Items de cotización se conectan al mismo hook.
+
+### Bug 4 — No se podían editar compras
+
+Una compra creada era inmutable; no se podía adjuntar la factura después.
+
+- **`PATCH /purchases/:id`** ([`purchases.controller.ts`](apps/api/src/purchases/purchases.controller.ts)): edita **solo campos no críticos** — `invoiceUrl`, `notes`, `date`. Items, costos, totales y proveedor son inmutables (para corregirlos hay que cancelar y crear nueva).
+- **`POST /purchases/:id/cancel`**: cancelación atómica con motivo (mín. 5 caracteres). Revierte el stock emitiendo `RETURN_OUT` con qty negativa equivalente a cada `PURCHASE_IN` original (los movimientos son la fuente de verdad de a qué bodega volver) y anula la transacción de caja con `voidTransaction`. Si el stock ya se consumió, `applyMovement` rechaza con 409 — hay que revertir esas operaciones derivadas primero.
+- **Migración** `1779200000000-PurchaseEditCancelRound5.ts`: agrega a `purchase_entries` el enum `status` (`ACTIVE` | `CANCELLED`, default `ACTIVE`) más `cancelledAt`, `cancelReason`, `cancelledById` (FK a `users`) e índice sobre `status`.
+- **Frontend**: el listado `/compras` muestra badge de estado y las filas linkean al nuevo detalle [`/compras/[id]`](apps/web/app/(dashboard)/compras/[id]/page.tsx), con `EditPurchaseDialog` y `CancelPurchaseDialog`.
 
 ---
 

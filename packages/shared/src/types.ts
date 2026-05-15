@@ -178,6 +178,10 @@ export interface PurchaseEntryItemDto {
 export interface PurchaseEntryDto {
   id: string;
   supplierId: string;
+  // Ronda 7 — bodega destino de la entrada de mercadería. Puede ser null en
+  // compras históricas previas a la migración de Ronda 7 que no se pudieron
+  // backfillear.
+  warehouseId: string | null;
   date: string;
   total: string;
   // Fase 5: descomposición IVA + factura adjunta.
@@ -187,6 +191,7 @@ export interface PurchaseEntryDto {
   notes: string | null;
   userId: string;
   supplier?: SupplierDto;
+  warehouse?: { id: string; name: string } | null;
   items?: PurchaseEntryItemDto[];
   user?: { id: string; name: string; email: string };
 }
@@ -260,6 +265,132 @@ export interface CompanySettingsDto {
   defaultValidityDays: number;
   taxRate: string;
   cardCommissionRate: string;
+  // Fase 8 — umbral de cobertura para marcar productos críticos en /proyeccion.
+  defaultLeadTimeDays: number;
+}
+
+// ---------- Proyección de stock y reportes (Fase 8) ----------
+
+/**
+ * Fila de la proyección de stock por producto. El servicio devuelve una por
+ * cada producto activo, sumando el stock de todas las bodegas activas.
+ *
+ * `dailyConsumption` y `coverageDays` pueden ser 0 cuando no hubo ventas en
+ * la ventana de consumo (90 días por defecto). En ese caso `coverageDays`
+ * se reporta como `null` (interpretado como ∞ por la UI) para evitar
+ * NaN/Infinity en el JSON.
+ */
+export interface ProjectionRowDto {
+  productId: string;
+  sku: string;
+  name: string;
+  cost: string;
+  totalStock: number;
+  // Promedio de unidades vendidas por día, calculado sobre la ventana de
+  // consumo (90 días). Redondeado a 4 decimales para legibilidad.
+  dailyConsumption: number;
+  // Stock / consumo diario. null si consumo = 0 (cobertura infinita).
+  coverageDays: number | null;
+  // Fecha estimada de quiebre = hoy + coverageDays. null si consumo = 0.
+  stockoutDate: string | null;
+  // Cantidad sugerida a pedir = consumo_diario × (leadTime + 30) − stockActual.
+  // 0 si la fórmula da negativo (stock suficiente).
+  suggestedOrder: number;
+  // true cuando coverageDays !== null && coverageDays <= leadTimeDays.
+  isCritical: boolean;
+}
+
+export interface ProjectionResponseDto {
+  leadTimeDays: number;
+  windowDays: number;
+  generatedAt: string;
+  rows: ProjectionRowDto[];
+}
+
+export interface ReportSalesRowDto {
+  id: string;
+  number: string;
+  date: string;
+  customerName: string;
+  customerTaxId: string | null;
+  paymentMethod: 'CASH' | 'TRANSFER' | 'CARD';
+  status: 'PENDING' | 'PAID' | 'CANCELLED';
+  subtotal: string;
+  taxAmount: string;
+  total: string;
+}
+
+export interface ReportSalesResponseDto {
+  dateFrom: string | null;
+  dateTo: string | null;
+  rows: ReportSalesRowDto[];
+  // Totales agregan SOLO las ventas no canceladas.
+  totalSubtotal: string;
+  totalTax: string;
+  totalAmount: string;
+  countActive: number;
+  countCancelled: number;
+}
+
+export interface ReportIvaSaleRowDto {
+  id: string;
+  number: string;
+  date: string;
+  customerName: string;
+  customerTaxId: string | null;
+  subtotal: string;
+  taxAmount: string;
+  total: string;
+}
+
+export interface ReportIvaPurchaseRowDto {
+  id: string;
+  date: string;
+  supplierName: string;
+  supplierTaxId: string | null;
+  subtotal: string;
+  taxAmount: string;
+  total: string;
+}
+
+export interface ReportIvaResponseDto {
+  dateFrom: string | null;
+  dateTo: string | null;
+  // IVA débito = suma de tax de ventas no canceladas (lo que el negocio debe).
+  debit: string;
+  // IVA crédito = suma de tax de compras (lo que se puede acreditar).
+  credit: string;
+  // debit − credit (positivo = a pagar; negativo = a favor).
+  balance: string;
+  salesRows: ReportIvaSaleRowDto[];
+  purchaseRows: ReportIvaPurchaseRowDto[];
+}
+
+export type CashFlowSourceDto =
+  | 'SALE'
+  | 'PURCHASE'
+  | 'MANUAL'
+  | 'SALE_RETURN'
+  | 'PURCHASE_RETURN';
+
+export interface ReportCashFlowRowDto {
+  id: string;
+  date: string;
+  type: 'INCOME' | 'EXPENSE';
+  source: CashFlowSourceDto;
+  paymentMethod: 'CASH' | 'TRANSFER' | 'CARD';
+  description: string;
+  amount: string;
+  isVoided: boolean;
+}
+
+export interface ReportCashFlowResponseDto {
+  dateFrom: string | null;
+  dateTo: string | null;
+  rows: ReportCashFlowRowDto[];
+  totalIncome: string;
+  totalExpense: string;
+  net: string;
 }
 
 // ---------- Cotizaciones (Fase 6) ----------

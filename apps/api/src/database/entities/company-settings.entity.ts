@@ -48,6 +48,12 @@ export class CompanySettings {
   @Column({ type: 'decimal', precision: 5, scale: 4, default: 0.025 })
   cardCommissionRate!: string;
 
+  // Fase 8 — umbral de días de cobertura para marcar un producto como crítico
+  // en /proyeccion. Default 75 días (cubre el lead time 2-3 meses del cliente).
+  // La pantalla permite overridearlo por consulta sin tocar este valor.
+  @Column({ type: 'int', default: 75 })
+  defaultLeadTimeDays!: number;
+
   @UpdateDateColumn({ type: 'datetime', precision: 6 })
   updatedAt!: Date;
 }

@@ -286,13 +286,22 @@ export class InventoryService {
     return { stockId: saved.id, locationCode: saved.locationCode };
   }
 
+  /**
+   * Bodega activa por defecto. Filtramos activas y preferimos "Principal"
+   * explícitamente — antes el orden alfabético hacía que "Mercado Libre Full"
+   * ganara y los ajustes terminaban en la bodega equivocada (bug Ronda 5/7).
+   * El frontend siempre debería pasar warehouseId explícito; este fallback
+   * es defensa en profundidad.
+   */
   private async defaultWarehouseId(): Promise<string> {
-    // Primera bodega ACTIVA por orden alfabético. Si no hay activas, falla
-    // con mensaje claro (caso patológico — el seed garantiza Principal activa).
-    const w = await this.warehouses.findOne({
-      where: { isActive: true },
-      order: { name: 'ASC' },
-    });
+    const rows = await this.warehouses
+      .createQueryBuilder('w')
+      .where('w.isActive = TRUE')
+      .orderBy(`(w.name = 'Principal')`, 'DESC')
+      .addOrderBy('w.name', 'ASC')
+      .limit(1)
+      .getMany();
+    const w = rows[0];
     if (!w) throw new NotFoundException('No hay ningún almacén activo configurado.');
     return w.id;
   }

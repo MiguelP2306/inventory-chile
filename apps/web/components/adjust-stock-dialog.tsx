@@ -23,11 +23,24 @@ type Mode = 'increase' | 'decrease' | 'set';
 interface Props {
   product: { id: string; sku: string; name: string };
   currentQty: number;
+  // Bodega contextual heredada de la pantalla `/inventario` (Ronda 7). Es
+  // obligatoria para que el ajuste vaya a la bodega que el usuario está
+  // viendo, no a la default del backend. Si por algún motivo viene null
+  // (caso patológico), el dialog rechaza el submit.
+  warehouseId: string;
+  warehouseName: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-export function AdjustStockDialog({ product, currentQty, open, onOpenChange }: Props) {
+export function AdjustStockDialog({
+  product,
+  currentQty,
+  warehouseId,
+  warehouseName,
+  open,
+  onOpenChange,
+}: Props) {
   const qc = useQueryClient();
   const [mode, setMode] = useState<Mode>('increase');
   const [qty, setQty] = useState<string>('');
@@ -64,13 +77,14 @@ export function AdjustStockDialog({ product, currentQty, open, onOpenChange }: P
     mutationFn: () =>
       adjustStock({
         productId: product.id,
+        warehouseId,
         qty: signedDelta,
         reason: reason.trim(),
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['stock'] });
       qc.invalidateQueries({ queryKey: ['movements'] });
-      toast.success('Stock ajustado');
+      toast.success(`Stock ajustado en ${warehouseName}`);
       onOpenChange(false);
     },
     onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo ajustar')),
@@ -99,12 +113,17 @@ export function AdjustStockDialog({ product, currentQty, open, onOpenChange }: P
           }}
           className="space-y-4"
         >
-          <div className="rounded-md bg-muted p-3 text-sm">
+          <div className="rounded-md bg-muted p-3 text-sm space-y-1">
             <div>
               SKU: <span className="font-mono">{product.sku}</span>
             </div>
             <div>
-              Stock actual: <span className="font-semibold">{currentQty}</span>
+              Bodega:{' '}
+              <span className="font-semibold">{warehouseName}</span>
+            </div>
+            <div>
+              Stock actual en esta bodega:{' '}
+              <span className="font-semibold">{currentQty}</span>
             </div>
           </div>
 
@@ -190,7 +209,7 @@ export function AdjustStockDialog({ product, currentQty, open, onOpenChange }: P
                 ? 'Ajustando...'
                 : isNoChange
                   ? 'Sin cambios'
-                  : 'Ajustar'}
+                  : `Ajustar stock en ${warehouseName}`}
             </Button>
           </DialogFooter>
         </form>

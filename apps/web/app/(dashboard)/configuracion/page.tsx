@@ -23,6 +23,8 @@ import {
 const schema = z.object({
   taxRatePct: z.coerce.number().min(0).max(100),
   cardCommissionRatePct: z.coerce.number().min(0).max(100),
+  // Días de lead time default usados por la proyección de stock (Fase 8).
+  defaultLeadTimeDays: z.coerce.number().int().min(1).max(365),
 });
 type FormValues = z.infer<typeof schema>;
 
@@ -45,6 +47,7 @@ export default function ConfiguracionPage() {
     defaultValues: {
       taxRatePct: 19,
       cardCommissionRatePct: 2.5,
+      defaultLeadTimeDays: 75,
     },
   });
 
@@ -53,6 +56,7 @@ export default function ConfiguracionPage() {
       form.reset({
         taxRatePct: rateToPct(settings.taxRate),
         cardCommissionRatePct: rateToPct(settings.cardCommissionRate),
+        defaultLeadTimeDays: settings.defaultLeadTimeDays,
       });
     }
   }, [settings, form]);
@@ -62,6 +66,7 @@ export default function ConfiguracionPage() {
       updateCompanySettings({
         taxRate: pctToRate(values.taxRatePct),
         cardCommissionRate: pctToRate(values.cardCommissionRatePct),
+        defaultLeadTimeDays: values.defaultLeadTimeDays,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['settings', 'company'] });
@@ -143,6 +148,31 @@ export default function ConfiguracionPage() {
               {form.formState.errors.cardCommissionRatePct?.message && (
                 <p className="text-xs text-destructive">
                   {form.formState.errors.cardCommissionRatePct.message}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="defaultLeadTimeDays">
+                Lead time default (días)
+              </Label>
+              <Input
+                id="defaultLeadTimeDays"
+                type="number"
+                step="1"
+                min={1}
+                max={365}
+                {...form.register('defaultLeadTimeDays')}
+                className="max-w-[160px]"
+              />
+              <p className="text-xs text-muted-foreground">
+                Días de cobertura por debajo de los cuales un producto se
+                marca como crítico en la proyección. Default 75. Coincide
+                con el lead time de importación de 2-3 meses.
+              </p>
+              {form.formState.errors.defaultLeadTimeDays?.message && (
+                <p className="text-xs text-destructive">
+                  {form.formState.errors.defaultLeadTimeDays.message}
                 </p>
               )}
             </div>

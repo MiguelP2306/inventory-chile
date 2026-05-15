@@ -36,6 +36,8 @@ import {
   listSuppliers,
   type PurchaseInput,
 } from '@/lib/inventory-api';
+import { listWarehouses } from '@/lib/warehouses-api';
+import type { WarehouseDto } from '@inventory/shared';
 
 interface ItemRow {
   productId: string;
@@ -57,11 +59,30 @@ export default function NuevaCompraPage() {
   const router = useRouter();
   const qc = useQueryClient();
   const [supplierId, setSupplierId] = useState('');
+  const [warehouseId, setWarehouseId] = useState('');
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<ItemRow[]>([]);
   const [invoiceUrl, setInvoiceUrl] = useState<string | null>(null);
   const [uploadingInvoice, setUploadingInvoice] = useState(false);
+
+  // Bodegas activas para el selector. La compra es obligatoria: si no se
+  // selecciona, no se puede registrar. Default = "Principal" si está activa,
+  // si no la primera activa por orden alfabético.
+  const warehousesQ = useQuery({
+    queryKey: ['warehouses', 'active'],
+    queryFn: () => listWarehouses({ active: 'true' }),
+  });
+  const activeWarehouses: WarehouseDto[] = Array.isArray(warehousesQ.data)
+    ? warehousesQ.data
+    : warehousesQ.data?.items ?? [];
+  useEffect(() => {
+    if (warehouseId || activeWarehouses.length === 0) return;
+    const principal = activeWarehouses.find((w) => w.name === 'Principal');
+    setWarehouseId((principal ?? activeWarehouses[0]!).id);
+  }, [warehouseId, activeWarehouses]);
+  const selectedWarehouse =
+    activeWarehouses.find((w) => w.id === warehouseId) ?? null;
   // El IVA puede sobreescribirse para coincidir con la factura real del
   // proveedor. Mientras `taxOverride` sea null, el subtotal/IVA se
   // recalculan automáticamente desde el total bruto.
@@ -90,6 +111,7 @@ export default function NuevaCompraPage() {
 
   const valid =
     !!supplierId &&
+    !!warehouseId &&
     items.length > 0 &&
     items.every((i) => i.qty > 0 && Number(i.unitCost) >= 0);
 
@@ -113,6 +135,7 @@ export default function NuevaCompraPage() {
     if (!valid) return;
     mut.mutate({
       supplierId,
+      warehouseId,
       date,
       notes: notes.trim() || undefined,
       invoiceUrl,
@@ -171,7 +194,11 @@ export default function NuevaCompraPage() {
             Cancelar
           </Button>
           <Button type="submit" disabled={!valid || mut.isPending || uploadingInvoice}>
-            {mut.isPending ? 'Guardando...' : 'Registrar compra'}
+            {mut.isPending
+              ? 'Guardando...'
+              : selectedWarehouse
+                ? `Registrar compra en ${selectedWarehouse.name}`
+                : 'Registrar compra'}
           </Button>
         </div>
       </div>
@@ -196,6 +223,29 @@ export default function NuevaCompraPage() {
               ))}
             </SelectContent>
           </Select>
+        </div>
+        <div className="space-y-2">
+          <Label>Bodega destino</Label>
+          <Select value={warehouseId} onValueChange={setWarehouseId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Seleccioná bodega" />
+            </SelectTrigger>
+            <SelectContent>
+              {activeWarehouses.length === 0 && (
+                <div className="px-3 py-2 text-sm text-muted-foreground">
+                  No hay bodegas activas.
+                </div>
+              )}
+              {activeWarehouses.map((w) => (
+                <SelectItem key={w.id} value={w.id}>
+                  {w.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            La mercadería ingresa al stock de esta bodega.
+          </p>
         </div>
         <div className="space-y-2">
           <Label>Fecha</Label>

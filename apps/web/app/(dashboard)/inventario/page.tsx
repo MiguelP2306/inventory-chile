@@ -273,10 +273,12 @@ export default function InventarioPage() {
         </div>
       )}
 
-      {adjustTarget && (
+      {adjustTarget && currentWarehouse && (
         <AdjustStockDialog
           product={adjustTarget.product}
           currentQty={adjustTarget.quantity}
+          warehouseId={adjustTarget.warehouseId}
+          warehouseName={currentWarehouse.name}
           open={!!adjustTarget}
           onOpenChange={(o) => !o && setAdjustTarget(null)}
         />
