@@ -154,7 +154,7 @@ export default function AlmacenesPage() {
       </div>
 
       <div className="rounded-md border bg-card">
-        <Table>
+        <Table stickyFirstColumn>
           <TableHeader>
             <TableRow>
               <TableHead>Nombre</TableHead>

@@ -145,7 +145,7 @@ export default function SeguimientoPage() {
       </div>
 
       <div className="rounded-md border bg-card">
-        <Table>
+        <Table stickyFirstColumn>
           <TableHeader>
             <TableRow>
               <TableHead>Cliente</TableHead>

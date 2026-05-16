@@ -117,7 +117,7 @@ export default function ReporteFlujoCajaPage() {
       )}
 
       <div className="rounded-md border bg-card">
-        <Table>
+        <Table stickyFirstColumn>
           <TableHeader>
             <TableRow>
               <TableHead>Fecha</TableHead>

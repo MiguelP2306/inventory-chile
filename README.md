@@ -26,7 +26,7 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 | — | **Ronda 5** (bugfixes tras pruebas 0–7.7): RUT consistente, solapamiento de compatibilidades, bodega default = "Principal" + bodega activa visible en sidebar, edición y cancelación de compras | ✅ |
 | 8 | Reportes + proyección de stock + lista de productos críticos (CSV/Excel) | ✅ |
 | 8.5 | **Lead lifecycle + Seguimiento comercial + HubSpot push** (WhatsApp como identificador, lifecycle automático `NEW`/`QUOTED`/`FOLLOW_UP`/`WON`/`LOST`, bandeja `/seguimiento`, sync one-way a HubSpot **off-by-default — stub listo, falta `@hubspot/api-client` cuando el cliente provea API key**) | ✅ |
-| — | **Ronda 4** (transversal antes de Fase 9): responsive móvil — sidebar drawer + tablas optimizadas + revisión de forms en mobile | pendiente |
+| — | **Ronda 4** (transversal antes de Fase 9): responsive móvil — sidebar drawer + tablas optimizadas + revisión de forms en mobile | ✅ |
 | 9 | Dashboard mobile-first con KPIs **clicables** del día + alertas + gráficos (depende de Fase 8.5 para "Pendientes de seguimiento") | pendiente |
 | 10 | Carga masiva Excel | pendiente |
 | 11 | Códigos de barras + etiquetas + refinamiento de plantillas | pendiente |

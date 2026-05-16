@@ -10,10 +10,15 @@ const TabsList = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.List>,
   React.ComponentPropsWithoutRef<typeof TabsPrimitive.List>
 >(({ className, ...props }, ref) => (
+  // `max-w-full overflow-x-auto` permite que en mobile la lista de tabs
+  // (cuando hay 3-4 triggers con labels largos como "Cliente y pago" o
+  // "Pendientes de seguimiento") haga scroll horizontal en lugar de
+  // romper el layout o desbordar la pantalla. En desktop hay espacio y
+  // la barra no aparece.
   <TabsPrimitive.List
     ref={ref}
     className={cn(
-      'inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground',
+      'inline-flex h-10 max-w-full items-center justify-center overflow-x-auto rounded-md bg-muted p-1 text-muted-foreground',
       className,
     )}
     {...props}

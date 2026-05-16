@@ -90,3 +90,26 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer components {
+  /* Ronda 4 (responsive móvil): cuando una tabla recibe la clase
+     `sticky-first-col`, la primera celda de cada fila (cabecera + cuerpo)
+     se queda pegada al borde izquierdo durante el scroll horizontal en
+     mobile (`<md`). En `md+` la tabla cabe en pantalla y la celda vuelve
+     a comportarse como columna normal. Usa `bg-card` para que cubra el
+     contenido que pasa debajo durante el scroll. */
+  .sticky-first-col thead tr > th:first-child,
+  .sticky-first-col tbody tr > td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background-color: hsl(var(--card));
+  }
+  @media (min-width: 768px) {
+    .sticky-first-col thead tr > th:first-child,
+    .sticky-first-col tbody tr > td:first-child {
+      position: static;
+      background-color: transparent;
+    }
+  }
+}

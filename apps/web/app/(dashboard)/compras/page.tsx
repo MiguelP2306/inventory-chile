@@ -116,7 +116,7 @@ export default function ComprasPage() {
       </div>
 
       <div className="rounded-md border bg-card">
-        <Table>
+        <Table stickyFirstColumn>
           <TableHeader>
             <TableRow>
               <TableHead>Fecha</TableHead>

@@ -170,7 +170,7 @@ export default function InventarioPage() {
       </div>
 
       <div className="rounded-md border bg-card">
-        <Table>
+        <Table stickyFirstColumn>
           <TableHeader>
             <TableRow>
               <TableHead>SKU</TableHead>

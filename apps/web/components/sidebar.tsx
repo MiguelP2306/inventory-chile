@@ -183,15 +183,68 @@ const SECTIONS: NavSection[] = [
   },
 ];
 
-export function Sidebar() {
-  const pathname = usePathname();
+/**
+ * Hook que devuelve el nombre de la empresa para mostrar como título del
+ * sidebar desktop o el drawer mobile. Compartido entre ambos para no
+ * duplicar la query (TanStack reuses el caché por queryKey).
+ */
+export function useCompanyName(): string {
   const settings = useQuery({
     queryKey: ['settings', 'company'],
     queryFn: getCompanySettings,
     staleTime: 5 * 60_000,
   });
+  return settings.data?.name?.trim() || 'Inventario';
+}
 
-  const companyName = settings.data?.name?.trim() || 'Inventario';
+/**
+ * Lista de links del sidebar. Compartida entre el sidebar fijo (desktop)
+ * y el drawer mobile (`<md`). `onNavigate` lo invoca el drawer al hacer
+ * tap en un link para cerrarse solo.
+ */
+export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
+  const pathname = usePathname();
+  return (
+    <nav className="flex flex-1 flex-col gap-3 p-2">
+      {SECTIONS.map((section, idx) => (
+        <div key={section.label ?? `section-${idx}`} className="flex flex-col gap-1">
+          {section.label && (
+            <div className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {section.label}
+            </div>
+          )}
+          {section.items.map((item) => {
+            const Icon = item.icon;
+            const active = item.exact
+              ? pathname === item.href
+              : item.matchPrefix
+                ? item.matchPrefix.some((p) => pathname.startsWith(p))
+                : pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={onNavigate}
+                className={cn(
+                  'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
+                  active
+                    ? 'bg-accent text-accent-foreground'
+                    : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                )}
+              >
+                <Icon className="h-4 w-4" />
+                {item.label}
+              </Link>
+            );
+          })}
+        </div>
+      ))}
+    </nav>
+  );
+}
+
+export function Sidebar() {
+  const companyName = useCompanyName();
 
   return (
     <aside className="hidden w-56 shrink-0 border-r bg-card md:flex md:flex-col">
@@ -201,40 +254,7 @@ export function Sidebar() {
       >
         {companyName}
       </div>
-      <nav className="flex flex-1 flex-col gap-3 p-2">
-        {SECTIONS.map((section, idx) => (
-          <div key={section.label ?? `section-${idx}`} className="flex flex-col gap-1">
-            {section.label && (
-              <div className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {section.label}
-              </div>
-            )}
-            {section.items.map((item) => {
-              const Icon = item.icon;
-              const active = item.exact
-                ? pathname === item.href
-                : item.matchPrefix
-                  ? item.matchPrefix.some((p) => pathname.startsWith(p))
-                  : pathname === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
-                    active
-                      ? 'bg-accent text-accent-foreground'
-                      : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
-                  )}
-                >
-                  <Icon className="h-4 w-4" />
-                  {item.label}
-                </Link>
-              );
-            })}
-          </div>
-        ))}
-      </nav>
+      <SidebarNav />
     </aside>
   );
 }

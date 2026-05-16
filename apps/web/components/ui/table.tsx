@@ -1,10 +1,31 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 
-const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
-  ({ className, ...props }, ref) => (
+interface TableProps extends React.HTMLAttributes<HTMLTableElement> {
+  /**
+   * Ronda 4 (responsive móvil): cuando `true`, en `<md` la primera celda
+   * de cada fila se queda pegada al borde izquierdo durante el scroll
+   * horizontal. La regla CSS está en `globals.css` (`.sticky-first-col`)
+   * y sólo aplica en mobile — en desktop la tabla cabe y la celda
+   * vuelve a ser normal. Usar en tablas con muchas columnas (productos,
+   * inventario, ventas, etc) para que SKU/número/etc siempre quede
+   * visible mientras el usuario scrollea las demás columnas con el dedo.
+   */
+  stickyFirstColumn?: boolean;
+}
+
+const Table = React.forwardRef<HTMLTableElement, TableProps>(
+  ({ className, stickyFirstColumn, ...props }, ref) => (
     <div className="relative w-full overflow-auto">
-      <table ref={ref} className={cn('w-full caption-bottom text-sm', className)} {...props} />
+      <table
+        ref={ref}
+        className={cn(
+          'w-full caption-bottom text-sm',
+          stickyFirstColumn && 'sticky-first-col',
+          className,
+        )}
+        {...props}
+      />
     </div>
   ),
 );

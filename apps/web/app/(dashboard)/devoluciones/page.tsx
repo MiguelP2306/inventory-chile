@@ -153,7 +153,7 @@ export default function DevolucionesPage() {
       </div>
 
       <div className="rounded-md border bg-card">
-        <Table>
+        <Table stickyFirstColumn>
           <TableHeader>
             <TableRow>
               <TableHead>Número</TableHead>

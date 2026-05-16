@@ -64,11 +64,12 @@ export function QuickSearch() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex h-9 w-72 items-center gap-2 rounded-md border bg-background px-3 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        aria-label="Buscar producto"
+        className="flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:w-72"
       >
-        <Search className="h-4 w-4" />
-        <span>Buscar producto…</span>
-        <kbd className="pointer-events-none ml-auto inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px]">
+        <Search className="h-4 w-4 shrink-0" />
+        <span className="hidden sm:inline">Buscar producto…</span>
+        <kbd className="pointer-events-none ml-auto hidden h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] sm:inline-flex">
           {mac ? '⌘' : 'Ctrl'} K
         </kbd>
       </button>

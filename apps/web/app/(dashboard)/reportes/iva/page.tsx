@@ -116,7 +116,7 @@ export default function ReporteIvaPage() {
 
         <TabsContent value="ventas" className="mt-4">
           <div className="rounded-md border bg-card">
-            <Table>
+            <Table stickyFirstColumn>
               <TableHeader>
                 <TableRow>
                   <TableHead>N° venta</TableHead>
@@ -175,7 +175,7 @@ export default function ReporteIvaPage() {
 
         <TabsContent value="compras" className="mt-4">
           <div className="rounded-md border bg-card">
-            <Table>
+            <Table stickyFirstColumn>
               <TableHeader>
                 <TableRow>
                   <TableHead>Fecha</TableHead>

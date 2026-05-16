@@ -269,7 +269,7 @@ export default function ProductosPage() {
 
       {/* Tabla */}
       <div className="rounded-md border bg-card">
-        <Table>
+        <Table stickyFirstColumn>
           <TableHeader>
             <TableRow>
               <TableHead className="w-[60px]" />

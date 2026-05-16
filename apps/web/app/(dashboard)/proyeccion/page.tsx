@@ -140,7 +140,7 @@ export default function ProyeccionPage() {
       </div>
 
       <div className="rounded-md border bg-card">
-        <Table>
+        <Table stickyFirstColumn>
           <TableHeader>
             <TableRow>
               <TableHead>SKU</TableHead>
