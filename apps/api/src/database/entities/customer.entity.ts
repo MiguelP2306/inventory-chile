@@ -1,3 +1,4 @@
+import { CustomerSource, LifecycleStatus } from '@inventory/shared';
 import {
   Column,
   CreateDateColumn,
@@ -48,6 +49,48 @@ export class Customer {
 
   @Column({ type: 'text', nullable: true })
   internalNotes!: string | null;
+
+  // ---------- Fase 8.5 — Lead lifecycle ----------
+
+  // Canal por el que llegó el cliente. Indicativo, no afecta lógica.
+  @Column({
+    type: 'enum',
+    enum: CustomerSource,
+    default: CustomerSource.OTHER,
+  })
+  source!: CustomerSource;
+
+  // Teléfono específico para WhatsApp (separado de `phone` para distinguir
+  // entre fijo y celular). E.164. Si vacío y se necesita un link wa.me, la
+  // capa de presentación puede caer a `phone` como fallback.
+  @Index('idx_customers_whatsapp')
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  whatsappPhone!: string | null;
+
+  @Index('idx_customers_lifecycle')
+  @Column({
+    type: 'enum',
+    enum: LifecycleStatus,
+    default: LifecycleStatus.NEW,
+  })
+  lifecycleStatus!: LifecycleStatus;
+
+  @Column({ type: 'datetime', precision: 6, nullable: true })
+  lastContactAt!: Date | null;
+
+  @Index('idx_customers_next_followup')
+  @Column({ type: 'datetime', precision: 6, nullable: true })
+  nextFollowUpAt!: Date | null;
+
+  // Solo se llena cuando lifecycleStatus = LOST.
+  @Column({ type: 'text', nullable: true })
+  lostReason!: string | null;
+
+  // ID del contacto en HubSpot. Se popula tras el primer sync exitoso. Si
+  // null + hubspotEnabled=true, el próximo job hace upsert por whatsappPhone
+  // o email.
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  hubspotContactId!: string | null;
 
   @CreateDateColumn({ type: 'datetime', precision: 6 })
   createdAt!: Date;

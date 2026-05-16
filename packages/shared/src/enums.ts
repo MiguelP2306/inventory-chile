@@ -123,3 +123,54 @@ export const ProductCodeKind = {
 } as const;
 export type ProductCodeKind =
   (typeof ProductCodeKind)[keyof typeof ProductCodeKind];
+
+// ---------- Fase 8.5 — Lead lifecycle + HubSpot ----------
+
+// Canal por el que llegó el cliente (Fase 8.5). Informativo, no afecta lógica.
+export const CustomerSource = {
+  WHATSAPP: 'WHATSAPP',
+  EMAIL: 'EMAIL',
+  PHONE: 'PHONE',
+  IN_PERSON: 'IN_PERSON',
+  OTHER: 'OTHER',
+} as const;
+export type CustomerSource =
+  (typeof CustomerSource)[keyof typeof CustomerSource];
+
+// Estado comercial del cliente. Se calcula automáticamente a partir de
+// eventos del sistema (crear cotización → QUOTED, confirmar venta → WON,
+// cron de timeout → FOLLOW_UP). Solo LOST se setea manualmente.
+export const LifecycleStatus = {
+  NEW: 'NEW',
+  QUOTED: 'QUOTED',
+  FOLLOW_UP: 'FOLLOW_UP',
+  WON: 'WON',
+  LOST: 'LOST',
+} as const;
+export type LifecycleStatus =
+  (typeof LifecycleStatus)[keyof typeof LifecycleStatus];
+
+// Tipo de evento en `lead_events`. Bitácora — no es la fuente de verdad
+// del estado actual (esa es `Customer.lifecycleStatus`).
+export const LeadEventType = {
+  QUOTATION_CREATED: 'QUOTATION_CREATED',
+  QUOTATION_SENT: 'QUOTATION_SENT',
+  SALE_CONFIRMED: 'SALE_CONFIRMED',
+  LOST_MARKED: 'LOST_MARKED',
+  FOLLOW_UP_TRIGGERED: 'FOLLOW_UP_TRIGGERED',
+  MANUAL_CONTACT: 'MANUAL_CONTACT',
+} as const;
+export type LeadEventType =
+  (typeof LeadEventType)[keyof typeof LeadEventType];
+
+// Estado de cada job en la outbox `hubspot_sync_jobs`. PENDING → PROCESSING
+// → DONE (ok) / FAILED (3 attempts fallidos) / SKIPPED (hubspotEnabled=off).
+export const HubspotSyncJobStatus = {
+  PENDING: 'PENDING',
+  PROCESSING: 'PROCESSING',
+  DONE: 'DONE',
+  FAILED: 'FAILED',
+  SKIPPED: 'SKIPPED',
+} as const;
+export type HubspotSyncJobStatus =
+  (typeof HubspotSyncJobStatus)[keyof typeof HubspotSyncJobStatus];

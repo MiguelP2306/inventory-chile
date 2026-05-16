@@ -33,6 +33,7 @@ import {
   Warehouse,
 } from '../database/entities';
 import { InventoryService } from '../inventory/inventory.service';
+import { LifecycleService } from '../lifecycle/lifecycle.service';
 import { CancelSaleDto, CreateSaleDto, ListSalesQueryDto } from './dto';
 
 const COUNTER_KIND = 'SALE';
@@ -59,6 +60,7 @@ export class SalesService {
     private readonly counters: CountersService,
     private readonly inventory: InventoryService,
     private readonly cashbox: CashboxService,
+    private readonly lifecycle: LifecycleService,
   ) {}
 
   // ---------------- reads ----------------
@@ -304,6 +306,16 @@ export class SalesService {
         await qRepo.save(q);
       }
 
+      // Fase 8.5 — mover el lifecycle del cliente a WON dentro de la
+      // MISMA transacción del create. El cliente sale del embudo de
+      // seguimiento, se limpia su nextFollowUpAt.
+      await this.lifecycle.applySaleConfirmed(
+        manager,
+        dto.customerId,
+        savedSale.id,
+        userId,
+      );
+
       return savedSale.id;
     });
 
@@ -470,6 +482,17 @@ export class SalesService {
             addressNumber: s.customer.addressNumber,
             communeId: s.customer.communeId,
             internalNotes: s.customer.internalNotes,
+            source: s.customer.source,
+            whatsappPhone: s.customer.whatsappPhone,
+            lifecycleStatus: s.customer.lifecycleStatus,
+            lastContactAt: s.customer.lastContactAt
+              ? s.customer.lastContactAt.toISOString()
+              : null,
+            nextFollowUpAt: s.customer.nextFollowUpAt
+              ? s.customer.nextFollowUpAt.toISOString()
+              : null,
+            lostReason: s.customer.lostReason,
+            hubspotContactId: s.customer.hubspotContactId,
           }
         : undefined,
       warehouseId: s.warehouseId,

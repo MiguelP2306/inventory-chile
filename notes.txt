@@ -1,2 +1,31 @@
 Dudas?
     Cuando yo registre en productos un producto, siempre debo de en "stock" y especificamente en "stock" manipular el mismo stock del producto?
+    Cuando se haga una cotizacion preguntar si hay stock o advertir antes de hacer la cotizacion
+
+Probar de nuevo la devolucion de una venta confirmar que regresa el stock
+
+revisar que las notificaciones este en espanol en reclamos y garantias > Cambiar estado: IN_REVIEW → APPROVED
+
+Cuando se crea la devolucion de una venta se debe de registrar siempre en movimientos asi este danado o los productos de devolucion
+
+Configuracion que la ui se muestre por tabs y no una de bajo de la otra
+
+
+Poder abrir una cateogira para ver los productos asociados y una opcion checboox para seleccionar varios y hacer acciones con varios seleccionadas o desvincular productos
+Eliminar alertas y usar modales de preguntas
+
+categorias, marcas, vehiculos, modelos > Al seleccionar uno de estos quiero ver toda la informacion que tiene asociado
+
+Que redirije al detalle del producto en stock al seleccionar uno
+
+Probar de no borrar almacen si tiene relacion
+
+Boton para colocar max en nueva transferencia para hacerlo mas comoda
+
+Solamente se puede subir una factura en nueva entrada de mercaderia (se puede subir varios y que sea pdf o imagenes)
+
+En compras agregar filtro por rango de precio y por bodega 
+
+En proveedores al detallar un proveedor y entrar en compras poder ver la factura de la compra
+
+En cliente en detalles de cliente agregar un tab uno para informacion personal y otro para registros de compras.

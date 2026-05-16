@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsEmail,
   IsInt,
   IsNumberString,
@@ -76,4 +77,31 @@ export class UpdateCompanySettingsDto {
   @Min(1)
   @Max(365)
   defaultLeadTimeDays?: number;
+
+  // ---------- Fase 8.5 ----------
+
+  // Horas para agendar el primer follow-up tras una cotización.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(720)
+  followUpHoursDefault?: number;
+
+  // Toggle global del sync a HubSpot.
+  @IsOptional()
+  @IsBoolean()
+  hubspotEnabled?: boolean;
+
+  // Owner ID en HubSpot al que se asignan los contactos nuevos.
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  hubspotDefaultOwnerId?: string | null;
+
+  // Plantilla de mensaje WhatsApp usada en `/seguimiento`. Soporta tokens
+  // {cliente}, {cotizacion}, {total}, {link}.
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  whatsappFollowUpTemplate?: string | null;
 }

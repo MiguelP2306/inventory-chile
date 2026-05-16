@@ -15,6 +15,7 @@ import {
   Warehouse,
 } from '../database/entities';
 import { InventoryModule } from '../inventory/inventory.module';
+import { LifecycleModule } from '../lifecycle/lifecycle.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { SalesController } from './sales.controller';
 import { SalesService } from './sales.service';
@@ -37,6 +38,7 @@ import { SalesService } from './sales.service';
     InventoryModule,
     CashboxModule,
     NotificationsModule,
+    LifecycleModule,
   ],
   controllers: [SalesController],
   providers: [SalesService],

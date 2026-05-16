@@ -71,6 +71,13 @@ export class CustomersService {
       addressNumber: blank(dto.addressNumber),
       communeId: dto.communeId ?? null,
       internalNotes: blank(dto.internalNotes),
+      // Fase 8.5 — campos de lifecycle. lifecycleStatus arranca en NEW por
+      // default de la entidad. El operador puede setear source/whatsappPhone
+      // al crear.
+      source: dto.source,
+      whatsappPhone: dto.whatsappPhone
+        ? normalizePhone(dto.whatsappPhone)
+        : null,
     });
     const saved = await this.repo.save(entity);
     return this.getOne(saved.id);
@@ -109,6 +116,12 @@ export class CustomersService {
     }
     if (dto.internalNotes !== undefined)
       entity.internalNotes = blank(dto.internalNotes);
+    if (dto.source !== undefined) entity.source = dto.source;
+    if (dto.whatsappPhone !== undefined) {
+      entity.whatsappPhone = dto.whatsappPhone
+        ? normalizePhone(dto.whatsappPhone)
+        : null;
+    }
 
     await this.repo.save(entity);
     return this.getOne(id);

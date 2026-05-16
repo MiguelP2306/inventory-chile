@@ -54,6 +54,27 @@ export class CompanySettings {
   @Column({ type: 'int', default: 75 })
   defaultLeadTimeDays!: number;
 
+  // ---------- Fase 8.5 — Seguimiento y HubSpot ----------
+
+  // Horas tras el último contacto para agendar `nextFollowUpAt`. Si el
+  // cliente no responde en ese plazo el cron lo mueve a FOLLOW_UP.
+  @Column({ type: 'int', default: 48 })
+  followUpHoursDefault!: number;
+
+  // Toggle global del sync a HubSpot. Off por default — la integración está
+  // implementada pero no llama a la API hasta que el operador la prenda.
+  @Column({ type: 'boolean', default: false })
+  hubspotEnabled!: boolean;
+
+  // Owner ID en HubSpot al que se asignan los contactos creados. Opcional.
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  hubspotDefaultOwnerId!: string | null;
+
+  // Plantilla de mensaje usada en los botones WhatsApp de `/seguimiento`.
+  // Soporta tokens {cliente}, {cotizacion}, {total}, {link}.
+  @Column({ type: 'text', nullable: true })
+  whatsappFollowUpTemplate!: string | null;
+
   @UpdateDateColumn({ type: 'datetime', precision: 6 })
   updatedAt!: Date;
 }

@@ -1,4 +1,4 @@
-# RESUME — Ronda 6 + Fase 8 + Ronda 7
+# RESUME — Fase 8.5 (Lead lifecycle + HubSpot)
 
 Documento de hand-off para QA. Cada bloque describe **qué cambió**, **archivos tocados**, **cómo testearlo paso a paso** y **respuestas esperadas** para validar que está OK.
 
@@ -8,332 +8,258 @@ URL local: API en `http://localhost:4000/api`, web en `http://localhost:3000`.
 
 ---
 
-## Parte 0 — Ronda 7 · Stock en bodega equivocada + selector obligatorio en compras
+## Fase 8.5 — Lead lifecycle + Seguimiento comercial + HubSpot push
 
-Bugs reportados después de Fase 8: los ajustes de stock terminaban en "Mercado Libre Full" aunque el operador estuviera viendo "Principal", y el formulario de compra no permitía elegir la bodega destino. La causa raíz son dos: (1) el hook global `useCurrentWarehouse` seguía existiendo con estado en localStorage y se desincronizaba; (2) los defaults del backend ordenaban alfabéticamente sin preferir "Principal".
+Formaliza el flujo comercial real: la mayoría de las ventas arrancan por WhatsApp y necesitan seguimiento. El sistema lleva la **fuente de verdad** del estado del lead y empuja cambios a HubSpot vía outbox. La operación diaria de seguimiento vive en una bandeja dedicada con botones rápidos.
 
-### 0A. Backend — fix de defaults + persistir bodega en compras
+**Decisiones tomadas con el cliente** (ver historial de Q&A):
+- Lifecycle vive en `Customer` (extensión), no en entidad `Lead` separada.
+- Hooks corren dentro de la MISMA transacción del create de cotización/venta.
+- Queue para HubSpot = tabla `hubspot_sync_jobs` (outbox) + cron interno cada 1 min (sin Redis).
+- HubSpot apagado por default — la integración está implementada pero el push real es un stub hasta que el cliente confirme su API key.
+- `whatsappPhone` separado de `phone`. Fallback automático a `phone` si vacío.
+- Backfill calculado: ventas previas → WON, cot abiertas → QUOTED, resto → NEW.
+- Cron diario a las 00:30 hora `America/Santiago`.
+- Plantilla WhatsApp nueva (`whatsappFollowUpTemplate` en CompanySettings) con tokens.
+- Cotizaciones con cliente libre NO mueven lifecycle.
+- Sidebar: `/seguimiento` en Operación, entre Cotizaciones y Ventas.
+- Acciones por fila en bandeja: WhatsApp + Marcar contacto + Ver cotizaciones + Marcar perdido (las 4).
+- Form de cliente: `source` + `whatsappPhone` editables al crear/editar.
+- Configuración: sección nueva "Seguimiento y HubSpot".
 
-**Cambios**
-- [apps/api/src/database/migrations/1779400000000-PurchaseWarehouseRound7.ts](apps/api/src/database/migrations/1779400000000-PurchaseWarehouseRound7.ts) — agrega `warehouseId` a `purchase_entries` (nullable, FK a `warehouses`) + backfill desde el primer movimiento `PURCHASE_IN` de cada entry.
-- [apps/api/src/database/entities/purchase-entry.entity.ts](apps/api/src/database/entities/purchase-entry.entity.ts) — campo + relación `warehouse`.
-- [apps/api/src/purchases/purchases.service.ts](apps/api/src/purchases/purchases.service.ts) — `create()` persiste `warehouseId`. `list()` y `getOne()` cargan la relación `warehouse`. `firstWarehouseId()` filtra activas y prefiere "Principal".
-- [apps/api/src/inventory/inventory.service.ts](apps/api/src/inventory/inventory.service.ts) — `defaultWarehouseId()` ahora ordena `(name = 'Principal') DESC, name ASC` (antes era alfabético puro → ganaba "Mercado Libre Full").
-- [apps/api/src/sales/sales.service.ts](apps/api/src/sales/sales.service.ts) — mismo fix en `defaultWarehouseId()`.
-- [packages/shared/src/types.ts](packages/shared/src/types.ts) — `PurchaseEntryDto` ahora expone `warehouseId` y `warehouse: { id, name }`.
+---
+
+### 1. Schema (migración)
+
+[apps/api/src/database/migrations/1779500000000-LeadLifecycleAndHubSpotPhase85.ts](apps/api/src/database/migrations/1779500000000-LeadLifecycleAndHubSpotPhase85.ts):
+
+- Extiende `customers`: `source` (enum WHATSAPP/EMAIL/PHONE/IN_PERSON/OTHER, default OTHER), `whatsappPhone` (E.164), `lifecycleStatus` (enum NEW/QUOTED/FOLLOW_UP/WON/LOST, default NEW), `lastContactAt`, `nextFollowUpAt`, `lostReason`, `hubspotContactId`. Más índices sobre `lifecycleStatus`, `nextFollowUpAt` y `whatsappPhone`.
+- Crea tabla `lead_events` (id, customerId FK CASCADE, type enum 6 valores, refType/refId opcionales, occurredAt, userId FK SET NULL). Indexada por customer y por fecha.
+- Crea tabla `hubspot_sync_jobs` (outbox: id, customerId FK CASCADE, status enum PENDING/PROCESSING/DONE/FAILED/SKIPPED, attempts, lastError, scheduledAt, processedAt, createdAt). Índice compuesto sobre `(status, scheduledAt)`.
+- Extiende `company_settings`: `followUpHoursDefault` (int, default 48), `hubspotEnabled` (boolean, default false), `hubspotDefaultOwnerId` (varchar 64 nullable), `whatsappFollowUpTemplate` (text nullable) con texto default sembrado.
+- **Backfill** del lifecycle: clientes con al menos 1 venta no cancelada → `WON`; con cotizaciones DRAFT/SENT/APPROVED → `QUOTED` con `lastContactAt` desde la cot más reciente; resto → `NEW`.
 
 **Cómo aplicar la migración**
 ```bash
 cd apps/api
 pnpm migration:run
 ```
-Verificar:
+
+**Verificar en MySQL**
 ```sql
-SHOW COLUMNS FROM purchase_entries LIKE 'warehouseId';
-SELECT id, warehouseId FROM purchase_entries LIMIT 5;
+SELECT lifecycleStatus, COUNT(*) FROM customers GROUP BY lifecycleStatus;
+SHOW COLUMNS FROM customers LIKE 'whatsappPhone';
+SHOW COLUMNS FROM company_settings LIKE 'whatsappFollowUpTemplate';
+SELECT COUNT(*) FROM lead_events;
+SELECT COUNT(*) FROM hubspot_sync_jobs;
 ```
-Las compras existentes deberían tener su `warehouseId` backfilleado desde sus movimientos.
+Las dos tablas nuevas existen vacías. Customers tienen sus lifecycle correctamente backfilleados.
 
-### 0B. Frontend — selector obligatorio + label en botón + hook global eliminado
+---
 
-**Cambios**
-- Borrado: `apps/web/lib/use-current-warehouse.ts`. El hook global con localStorage desaparece — cada formulario maneja su propia bodega.
-- [apps/web/app/(dashboard)/compras/nuevo/page.tsx](apps/web/app/(dashboard)/compras/nuevo/page.tsx) — selector "Bodega destino" **siempre visible** en el grid superior, obligatorio (bloquea submit), default "Principal" si activa. Botón primario muestra `Registrar compra en <bodega>`.
-- [apps/web/components/adjust-stock-dialog.tsx](apps/web/components/adjust-stock-dialog.tsx) — ahora **recibe `warehouseId` y `warehouseName` como props** (no usa más default del backend ni hook global). El info box muestra "Bodega: <nombre>" y "Stock actual en esta bodega: N". Botón primario muestra `Ajustar stock en <bodega>`. El toast también lo cita.
-- [apps/web/app/(dashboard)/inventario/page.tsx](apps/web/app/(dashboard)/inventario/page.tsx) — pasa al diálogo la bodega del filtro URL visible (`adjustTarget.warehouseId` + `currentWarehouse.name`). Si todavía no hay bodega seleccionada (caso patológico), el diálogo simplemente no se renderiza.
-- [apps/web/components/forms/sale-form.tsx](apps/web/components/forms/sale-form.tsx) — botón primario muestra `Confirmar venta en <bodega>`.
-- [apps/web/app/(dashboard)/compras/page.tsx](apps/web/app/(dashboard)/compras/page.tsx) — nueva columna "Bodega" en el listado mostrando `warehouse.name` (o "—" para filas históricas sin backfill).
+### 2. Backend — Lifecycle automático
 
-### 0C. Cómo testear — Ajuste de stock
+Archivos nuevos:
+- [apps/api/src/database/entities/lead-event.entity.ts](apps/api/src/database/entities/lead-event.entity.ts)
+- [apps/api/src/database/entities/hubspot-sync-job.entity.ts](apps/api/src/database/entities/hubspot-sync-job.entity.ts)
+- [apps/api/src/lifecycle/dto.ts](apps/api/src/lifecycle/dto.ts)
+- [apps/api/src/lifecycle/lifecycle.service.ts](apps/api/src/lifecycle/lifecycle.service.ts) — único punto de mutación del lifecycle. Hooks expuestos:
+  - `applyQuotationCreated(manager, customerId, quotationId, userId)` — invocado por `QuotationsService.create()` dentro de la MISMA transacción. Setea `QUOTED`, `lastContactAt = NOW()`, `nextFollowUpAt = NOW() + followUpHoursDefault`. Inserta `LeadEvent(QUOTATION_CREATED)` + job en outbox. No-op si cliente libre.
+  - `applyQuotationSent(...)` — reagenda follow-up tras envío real. Insertado en `QuotationsService.markSent()`.
+  - `applySaleConfirmed(...)` — invocado por `SalesService.create()` dentro de su transacción. Setea `WON`, limpia `nextFollowUpAt` y `lostReason`, inserta `LeadEvent(SALE_CONFIRMED)`.
+  - `touch(customerId, userId)` — endpoint manual. Refresca timestamps. Si estaba en FOLLOW_UP o NEW vuelve a QUOTED.
+  - `markLost(customerId, reason, userId)` — endpoint manual. Único cambio manual de estado.
+  - `markOverdueAsFollowUp()` — usado por el cron diario. Mueve QUOTED vencidos a FOLLOW_UP.
+  - `list(query)` — bandeja con 4 tabs y filtros.
+- [apps/api/src/lifecycle/lifecycle-cron.service.ts](apps/api/src/lifecycle/lifecycle-cron.service.ts) — cron diario `@Cron('30 0 * * *', { timeZone: 'America/Santiago' })`.
+- [apps/api/src/lifecycle/lifecycle.controller.ts](apps/api/src/lifecycle/lifecycle.controller.ts) — endpoints:
+  - `GET /follow-ups?tab=pendientes|sin-respuesta|vencidos|ultimo-contacto&q=&page=&pageSize=`
+  - `POST /customers/:id/touch`
+  - `POST /customers/:id/mark-lost` (motivo ≥ 5 chars)
+- [apps/api/src/lifecycle/lifecycle.module.ts](apps/api/src/lifecycle/lifecycle.module.ts)
 
-1. Asegurate de tener al menos 2 bodegas activas (`/almacenes`): por ejemplo "Principal" y "Mercado Libre Full".
-2. Ir a `/inventario`. En el selector arriba, **elegir "Principal"**.
-3. Click en el icono de ajuste de cualquier producto.
+Archivos modificados:
+- [apps/api/src/database/entities/customer.entity.ts](apps/api/src/database/entities/customer.entity.ts) — campos de lifecycle.
+- [apps/api/src/database/entities/company-settings.entity.ts](apps/api/src/database/entities/company-settings.entity.ts) — campos de seguimiento + HubSpot.
+- [apps/api/src/database/entities/index.ts](apps/api/src/database/entities/index.ts) — exporta las 2 entidades nuevas.
+- [apps/api/src/customers/dto.ts](apps/api/src/customers/dto.ts) — `source` y `whatsappPhone` opcionales en create/update.
+- [apps/api/src/customers/customers.service.ts](apps/api/src/customers/customers.service.ts) — propaga campos nuevos.
+- [apps/api/src/settings/dto.ts](apps/api/src/settings/dto.ts) — 4 campos nuevos del settings.
+- [apps/api/src/quotations/quotations.service.ts](apps/api/src/quotations/quotations.service.ts) — inyecta `LifecycleService`, hook en `create()` y `markSent()`. `toDto()` ahora incluye los campos de lifecycle del customer.
+- [apps/api/src/quotations/quotations.module.ts](apps/api/src/quotations/quotations.module.ts) — importa `LifecycleModule`.
+- [apps/api/src/sales/sales.service.ts](apps/api/src/sales/sales.service.ts) — inyecta `LifecycleService`, hook en `create()` después de marcar la cotización CONVERTED. `toDto()` ahora incluye los campos de lifecycle del customer.
+- [apps/api/src/sales/sales.module.ts](apps/api/src/sales/sales.module.ts) — importa `LifecycleModule`.
+- [apps/api/src/app.module.ts](apps/api/src/app.module.ts) — registra `LifecycleModule` + `HubspotModule`.
+- [packages/shared/src/enums.ts](packages/shared/src/enums.ts) — 4 enums nuevos: `CustomerSource`, `LifecycleStatus`, `LeadEventType`, `HubspotSyncJobStatus`.
+- [packages/shared/src/types.ts](packages/shared/src/types.ts) — `CustomerDto` extendido + DTOs nuevos (`FollowUpRowDto`, `FollowUpListDto`, `LeadEventDto`, `MarkLostInput`, `HubspotTestResultDto`, etc.). `CompanySettingsDto` ahora incluye los 4 campos de Fase 8.5.
+
+---
+
+### 3. Backend — HubSpot (preparado pero apagado)
+
+Archivos nuevos en [apps/api/src/hubspot/](apps/api/src/hubspot/):
+- `hubspot.service.ts` — patrón outbox. Cada cambio en lifecycle inserta `hubspot_sync_jobs(status=PENDING)`.
+- `hubspot-cron.service.ts` — `@Cron(EVERY_MINUTE)` drena hasta 25 jobs por tick.
+- `hubspot.controller.ts` — `POST /hubspot/test` para el botón "Test sync" de configuración.
+- `hubspot.module.ts`.
+
+Diseño:
+- Si `hubspotEnabled=false` o `HUBSPOT_API_KEY` falta → los jobs se marcan SKIPPED silenciosamente sin tocar la API.
+- Si está activo: el método `pushToHubspot()` es un **stub** que devuelve un id sintético. Marcado como TODO con comentarios explicando exactamente el código a poner cuando se instale `@hubspot/api-client`. El mapping (`firstname`/`lastname` por split, `phone` = whatsappPhone fallback phone, `email`, propiedad custom `inventory_lifecycle_status`) ya está armado y testeable por unidad.
+- Retry: hasta 3 intentos con backoff exponencial (5 min × 5^attempt). Después marca FAILED.
+- Idempotente: el worker lee el estado actual del cliente, no del payload del job. Múltiples jobs del mismo cliente convergen al mismo resultado.
+
+---
+
+### 4. Frontend — Bandeja, formularios, configuración
+
+Archivos nuevos:
+- [apps/web/lib/lifecycle-api.ts](apps/web/lib/lifecycle-api.ts) — wrappers axios + helper `buildWhatsappUrl()` + `applyWhatsappTokens()`.
+- [apps/web/components/lifecycle-badge.tsx](apps/web/components/lifecycle-badge.tsx) — badge con paleta por estado (NEW/QUOTED slate/blue, FOLLOW_UP amber, WON emerald, LOST destructive).
+- [apps/web/components/mark-lost-dialog.tsx](apps/web/components/mark-lost-dialog.tsx) — diálogo reutilizable entre bandeja y detalle de cliente.
+- [apps/web/app/(dashboard)/seguimiento/page.tsx](apps/web/app/(dashboard)/seguimiento/page.tsx) — bandeja con 4 tabs + búsqueda + paginación. Cada fila tiene 4 acciones rápidas: WhatsApp (con plantilla resolvida), Marcar contacto (✓), Ver cotizaciones (link a `/cotizaciones?customer=<id>`), Marcar perdido (×).
+
+Archivos modificados:
+- [apps/web/components/sidebar.tsx](apps/web/components/sidebar.tsx) — nueva entrada "Seguimiento" en sección Operación, entre Cotizaciones y Ventas.
+- [apps/web/lib/customers-api.ts](apps/web/lib/customers-api.ts) — `CustomerInput` con `source` + `whatsappPhone`.
+- [apps/web/lib/cashbox-api.ts](apps/web/lib/cashbox-api.ts) — `UpdateCompanySettingsInput` con los 4 campos nuevos.
+- [apps/web/components/forms/customer-form.tsx](apps/web/components/forms/customer-form.tsx) — agregados campos `source` (select 5 opciones) + `whatsappPhone` (validado E.164). Header muestra `LifecycleBadge` + "Último contacto: X" + motivo si LOST. Botón "Marcar perdido" visible cuando estado ∈ {NEW, QUOTED, FOLLOW_UP}.
+- [apps/web/app/(dashboard)/configuracion/page.tsx](apps/web/app/(dashboard)/configuracion/page.tsx) — nueva sección "Seguimiento y HubSpot" con horas para follow-up, plantilla WhatsApp con tokens, toggle hubspotEnabled, owner ID, y botón Test sync.
+
+---
+
+### 5. Cómo testear — Lifecycle automático
+
+**Crear cliente nuevo**
+1. Ir a `/clientes/nuevo`. Llenar nombre, RUT, **WhatsApp** (ej: `+56 9 1234 5678`), **Canal de origen** (ej: WhatsApp). Guardar.
+2. Volver al detalle del cliente.
 
 **Respuesta esperada**
-- El diálogo muestra explícitamente: "Bodega: **Principal**" en el info box gris.
-- "Stock actual en esta bodega: N" coincide con el valor de la tabla.
-- Botón primario dice: **"Ajustar stock en Principal"**.
-- Aumentar +5 unidades, motivo cualquiera, confirmar → toast "Stock ajustado en Principal".
-- Volver a la tabla con "Principal" → el stock subió +5.
-- Cambiar a "Mercado Libre Full" en el filtro → el stock de ese producto **NO** cambió ahí (sigue como estaba antes).
+- El header muestra el badge **"Nuevo"** (NEW).
+- "Último contacto" no aparece (todavía no hubo contacto).
+- En `/seguimiento` ningún tab lo muestra (NEW no entra a las bandejas).
 
-### 0D. Cómo testear — Compras
-
-1. Ir a `/compras` → "Nueva entrada".
-2. Mirar el grid superior.
+**Crear cotización para el cliente**
+1. Ir a `/cotizaciones/nueva`, elegir el cliente del catálogo, agregar al menos 1 ítem, guardar.
 
 **Respuesta esperada**
-- Hay un campo **"Bodega destino"** siempre visible, junto a Proveedor / Fecha / Factura.
-- Default = "Principal" si está activa, si no la primera activa.
-- Si limpiás el selector (no se puede cuando es shadcn Select, pero conceptualmente), el botón "Registrar compra" queda deshabilitado.
-- Elegir proveedor, agregar 1 item, dejar bodega = "Principal" → botón dice **"Registrar compra en Principal"**.
-- Confirmar → toast "Compra registrada", redirige a `/compras`.
-- En el listado de `/compras`: la compra recién creada aparece con la columna **"Bodega" = Principal**.
-- Las compras viejas (anteriores a la migración) pueden mostrar "—" en la columna Bodega si el backfill no encontró movimientos. Eso es esperado.
+- Volver al detalle del cliente: badge ahora muestra **"Cotizado"** (QUOTED).
+- "Último contacto" muestra la fecha actual.
+- En `/seguimiento` tab **"Pendientes"**: el cliente aparece con su cotización en la columna correspondiente y `nextFollowUpAt = NOW + 48h`.
 
-### 0E. Checklist QA — Ronda 7
-
-- [ ] Migración `1779400000000-PurchaseWarehouseRound7` aplicada.
-- [ ] Compras existentes tienen `warehouseId` backfilleado (verificable por SQL).
-- [ ] `/compras/nuevo` muestra "Bodega destino" obligatoria con default Principal.
-- [ ] Botón "Registrar compra" lleva el nombre de la bodega.
-- [ ] `/compras` (listado) tiene columna "Bodega".
-- [ ] Ajustar stock desde `/inventario` lo hace en la bodega visible (no en otra).
-- [ ] Botón "Ajustar stock en X" muestra el nombre de la bodega.
-- [ ] Botón "Confirmar venta en X" muestra el nombre de la bodega (SaleForm).
-- [ ] El archivo `apps/web/lib/use-current-warehouse.ts` no existe más.
-
----
-
-## Parte 1 — Ronda 6 · Bugs de ventas
-
-Bugfixes basados en feedback del cliente tras Ronda 5. Dos problemas: selector global en el sidebar que confundía contexto, y bloqueo al convertir cotización en venta por falta de stock sin opción de cambiar bodega.
-
-### 1A. Quitar selector de bodega del header del sidebar
-
-**Cambios**
-- [components/sidebar.tsx](apps/web/components/sidebar.tsx): el header del sidebar pasa a mostrar **solo el nombre de la empresa** (de `CompanySettings.name`). Se eliminó el `<Select>` de bodega global y todos sus eventos.
-
-**Por qué**
-El selector global creaba estado oculto: el operador no veía con claridad contra qué bodega se evaluaba el stock en cada flujo. La bodega ahora es contextual a cada formulario (venta, compra, ajuste, cotización), no global.
-
-**Cómo testear**
-1. Login en `http://localhost:3000`.
-2. Mirar el sidebar izquierdo.
+**Simular vencimiento del follow-up**
+1. Forzar el vencimiento manualmente vía SQL (sin esperar 48h):
+   ```sql
+   UPDATE customers SET nextFollowUpAt = NOW() - INTERVAL 1 DAY WHERE id = '<customer-id>';
+   ```
+2. Ejecutar el cron a mano vía endpoint REST o con un script de prueba que llame `LifecycleService.markOverdueAsFollowUp()`. Alternativa: esperar las 00:30 hora Chile.
 
 **Respuesta esperada**
-- El header del sidebar muestra el nombre de la empresa (por defecto seedeado o lo que esté en `/configuracion`).
-- **No hay** selector ni texto "Almacén: X" en el header.
+- El cliente se mueve a `lifecycleStatus = FOLLOW_UP`.
+- Aparece en `/seguimiento` tab **"Vencidos"**, NO en "Pendientes".
+- Se inserta `LeadEvent(FOLLOW_UP_TRIGGERED)`.
+- Se inserta `HubspotSyncJob(status=PENDING)`.
+
+**Marcar contacto manual**
+1. En `/seguimiento` tab "Vencidos", click en el botón ✓ "Marcar contacto" de la fila.
+
+**Respuesta esperada**
+- Toast "Contacto registrado".
+- Cliente vuelve a `lifecycleStatus = QUOTED`, sale de "Vencidos", vuelve a "Pendientes".
+- `lastContactAt` actualizado a NOW, `nextFollowUpAt = NOW + 48h`.
+
+**Convertir cotización a venta**
+1. Abrir la cotización del cliente y convertirla a venta. Confirmar la venta.
+
+**Respuesta esperada**
+- Cliente pasa a `WON`, sale de las bandejas filtradas (QUOTED/FOLLOW_UP).
+- `nextFollowUpAt = NULL` (el embudo se cierra).
+- Detalle del cliente muestra badge "Ganado".
+- Se inserta `LeadEvent(SALE_CONFIRMED, refType='sale', refId=<sale-id>)`.
 
 ---
 
-### 1B. Selector de bodega visible y explícito en el flujo venta
+### 6. Cómo testear — Marcar perdido
 
-**Cambios**
-- [components/forms/sale-form.tsx](apps/web/components/forms/sale-form.tsx): el selector de bodega se movió **fuera de los tabs**, al tope del modal, **siempre visible** (antes estaba escondido en el tab "Cliente y pago" y solo aparecía con 2+ bodegas activas).
-- Default = **"Principal"** si está activa, si no la primera activa.
-- Cambiar la bodega re-ejecuta el query de stock disponible (`getAvailableStock(productIds, warehouseId)`).
-- Banner ámbar arriba del form cuando faltan items, indicando la bodega evaluada y cuántos productos no tienen stock. Las filas afectadas se pintan en rojo claro con su stock disponible visible.
-- El botón "Confirmar venta" se deshabilita automáticamente cuando hay shortages (`stockShortages.length > 0`).
-- El mismo formulario es usado por la venta directa (`/ventas/nueva`) y por la conversión cotización → venta vía [SaleFormDialog](apps/web/components/forms/sale-form-dialog.tsx).
+1. En `/seguimiento` (o en `/clientes/<id>` cuando el lifecycle esté en QUOTED/FOLLOW_UP/NEW), click en la X roja "Marcar perdido".
+2. Ingresar motivo (mínimo 5 caracteres).
 
-**Cómo testear — venta directa**
-1. Asegurate de tener al menos 2 bodegas activas (`/almacenes`).
-2. Cargá stock en una sola de ellas para un producto (ej: 10 unidades en "Principal", 0 en otra).
-3. Abrí "Nueva venta" desde el FAB o desde `/ventas/nueva`.
-
-**Respuesta esperada — venta directa**
-- El selector "Bodega de la venta" aparece arriba del modal, fuera de los tabs.
-- Default = "Principal" si está activa.
-- Si elegís un producto sin stock en la bodega seleccionada → banner ámbar "Stock insuficiente en `<bodega>`" + fila pintada + botón "Confirmar" deshabilitado.
-- Cambiar a la otra bodega que sí tiene stock → el banner desaparece, las filas pierden el color rojo, el stock disponible se actualiza, el botón se habilita.
-
-**Cómo testear — convertir cotización a venta**
-1. Crear una cotización con un producto que tenga stock en una bodega y no en otra.
-2. Desde la cotización, hacer click en "Convertir a venta".
-3. En el modal de venta, mirar el selector arriba.
-
-**Respuesta esperada — conversión**
-- Modal abre con la cotización prellenada (cliente, items, notas).
-- El selector de bodega está arriba, default "Principal" (o primera activa).
-- Si esa bodega no tiene stock, banner ámbar + filas pintadas + botón "Confirmar" deshabilitado.
-- Cambiar la bodega arriba refresca el stock disponible al toque y desbloquea la venta.
+**Respuesta esperada**
+- Toast "Cliente marcado como perdido".
+- Cliente sale de la bandeja.
+- En detalle: badge "Perdido" + motivo visible debajo del título.
+- Se inserta `LeadEvent(LOST_MARKED)`.
+- Si después confirma una venta, vuelve a WON automáticamente y se limpia `lostReason`.
 
 ---
 
-## Parte 2 — Fase 8 · Reportes y proyección de stock
+### 7. Cómo testear — WhatsApp con plantilla
 
-Scope acordado: proyección + lista de críticos (CSV) + 3 reportes contables (ventas, IVA, flujo de caja) con export CSV.
+1. En `/configuracion` → sección "Seguimiento y HubSpot" → editar la plantilla a `Hola {cliente}, te recuerdo la cotización {cotizacion} por {total}. Link: {link}`. Guardar.
+2. Volver a `/seguimiento` y click en el botón verde de WhatsApp de cualquier fila con cotización abierta.
 
-### 2A. Backend
-
-**Archivos nuevos**
-- [apps/api/src/database/migrations/1779300000000-DefaultLeadTimePhase8.ts](apps/api/src/database/migrations/1779300000000-DefaultLeadTimePhase8.ts) — agrega `defaultLeadTimeDays` (int, default 75) a `company_settings`.
-- [apps/api/src/projection/dto.ts](apps/api/src/projection/dto.ts) — `ProjectionQueryDto` con `leadTimeDays` opcional (override).
-- [apps/api/src/projection/projection.service.ts](apps/api/src/projection/projection.service.ts) — cálculo de stock total, consumo diario, cobertura, fecha de quiebre, sugerencia de pedido y flag de crítico.
-- [apps/api/src/projection/projection.controller.ts](apps/api/src/projection/projection.controller.ts) — `GET /projection` (JSON) y `GET /projection/export.csv`.
-- [apps/api/src/projection/projection.module.ts](apps/api/src/projection/projection.module.ts) — módulo registrado en AppModule.
-- [apps/api/src/reports/dto.ts](apps/api/src/reports/dto.ts) — `ReportDateRangeQueryDto`.
-- [apps/api/src/reports/reports.service.ts](apps/api/src/reports/reports.service.ts) — agregaciones para ventas, IVA y flujo de caja.
-- [apps/api/src/reports/reports.controller.ts](apps/api/src/reports/reports.controller.ts) — `GET /reports/{sales,iva,cash-flow}` (JSON) + variantes `.csv`.
-- [apps/api/src/reports/reports.module.ts](apps/api/src/reports/reports.module.ts) — módulo registrado en AppModule.
-
-**Archivos modificados**
-- [apps/api/src/database/entities/company-settings.entity.ts](apps/api/src/database/entities/company-settings.entity.ts) — columna `defaultLeadTimeDays`.
-- [apps/api/src/settings/dto.ts](apps/api/src/settings/dto.ts) — campo en `UpdateCompanySettingsDto`.
-- [apps/api/src/app.module.ts](apps/api/src/app.module.ts) — registra `ProjectionModule` y `ReportsModule`.
-- [packages/shared/src/types.ts](packages/shared/src/types.ts) — nuevos types (`ProjectionRowDto`, `ProjectionResponseDto`, `ReportSalesResponseDto`, `ReportIvaResponseDto`, `ReportCashFlowResponseDto` + filas). `CompanySettingsDto` ahora incluye `defaultLeadTimeDays`.
-
-**Cálculos clave (proyección)**
-- Ventana de consumo fija: 90 días.
-- Stock total = suma de filas `Stock` en bodegas con `isActive = true`.
-- Consumo diario = `|SUM(qty)|` de movimientos `SALE_OUT` en la ventana / 90.
-- Cobertura (días) = `stockTotal / consumoDiario`. `null` si consumo = 0.
-- Fecha de quiebre = hoy + cobertura.
-- Crítico = `cobertura ≤ leadTime`.
-- Sugerencia de pedido = `ceil(consumoDiario × (leadTime + 30) − stockTotal)`, mínimo 0.
-- Productos inactivos están excluidos.
-
-**Reportes — convención de canceladas**
-- Reporte de ventas: las canceladas aparecen en la tabla con badge tachado pero **no suman** a los totales.
-- Reporte de IVA: filtra ventas canceladas; las compras no tienen estado todavía.
-- Reporte de flujo de caja: incluye las transacciones anuladas (`isVoided=true`) marcadas en la UI — el total ya cuadra porque al cancelar se crea automáticamente la compensación opuesta.
+**Respuesta esperada**
+- Abre `wa.me/<E164-sin-+>?text=<mensaje-con-tokens-reemplazados>` en pestaña nueva.
+- Los tokens se reemplazan: `{cliente}` con nombre, `{cotizacion}` con número, `{total}` con monto formateado en CLP, `{link}` con URL pública.
+- Si el cliente no tiene WhatsApp ni teléfono, el botón aparece deshabilitado con tooltip explicativo.
 
 ---
 
-### 2B. Frontend
+### 8. Cómo testear — HubSpot off-by-default
 
-**Archivos nuevos**
-- [apps/web/lib/reports-api.ts](apps/web/lib/reports-api.ts) — wrappers axios + builders de URL para CSV.
-- [apps/web/app/(dashboard)/proyeccion/page.tsx](apps/web/app/(dashboard)/proyeccion/page.tsx) — pantalla principal de proyección.
-- [apps/web/app/(dashboard)/reportes/ventas/page.tsx](apps/web/app/(dashboard)/reportes/ventas/page.tsx)
-- [apps/web/app/(dashboard)/reportes/iva/page.tsx](apps/web/app/(dashboard)/reportes/iva/page.tsx)
-- [apps/web/app/(dashboard)/reportes/flujo-caja/page.tsx](apps/web/app/(dashboard)/reportes/flujo-caja/page.tsx)
+1. En `/configuracion` → "Seguimiento y HubSpot" → confirmar que **toggle "Activar sincronización con HubSpot" está apagado** (default tras la migración).
+2. Crear una cotización para un cliente. Esperar 1 minuto a que corra el cron interno.
 
-**Archivos modificados**
-- [apps/web/components/sidebar.tsx](apps/web/components/sidebar.tsx) — nueva sección "Reportes" con sub-items: Proyección, Ventas, IVA, Flujo de caja.
-- [apps/web/lib/cashbox-api.ts](apps/web/lib/cashbox-api.ts) — `UpdateCompanySettingsInput` incluye `defaultLeadTimeDays`.
-- [apps/web/app/(dashboard)/configuracion/page.tsx](apps/web/app/(dashboard)/configuracion/page.tsx) — input "Lead time default (días)" en el form de impuestos y comisiones.
-
----
-
-### 2C. Cómo aplicar la migración
-
-Antes de testear cualquier cosa de Fase 8, hay que correr la migración nueva:
-
-```bash
-cd apps/api
-pnpm migration:run
-```
-
-**Respuesta esperada**: log "Migration `DefaultLeadTimePhase8_1779300000000` has been executed successfully." Si ya estaba aplicada, dice "No migrations are pending."
-
-Verificar en MySQL:
+**Verificar en DB**
 ```sql
-SELECT defaultLeadTimeDays FROM company_settings;
+SELECT id, status, attempts, lastError, processedAt FROM hubspot_sync_jobs ORDER BY createdAt DESC LIMIT 5;
 ```
-Debe devolver `75`.
+
+**Respuesta esperada — HubSpot off**
+- Filas tienen `status = SKIPPED` después del cron.
+- `attempts = 0` (no se intentó llamar a HubSpot).
+- `Customer.hubspotContactId` sigue null.
+
+**Activar el toggle**
+1. Prender el toggle, guardar. Click en "Test sync".
+
+**Respuesta esperada — HubSpot on sin API key**
+- Mensaje rojo: "Falta HUBSPOT_API_KEY en variables de entorno..."
+
+**Setear API key dummy**
+1. En `apps/api/.env.local`, agregar `HUBSPOT_API_KEY=test-key-de-prueba-123456789`. Reiniciar el server.
+2. Click en "Test sync" de nuevo.
+
+**Respuesta esperada — HubSpot on con API key dummy**
+- Mensaje verde: "Configuración válida. La llamada real a HubSpot está pendiente de activar (instalar @hubspot/api-client)."
+- Nuevos jobs `hubspot_sync_jobs` pasan a `status = DONE` con un `hubspotContactId` sintético `hs-stub-XXXXXXXX` (stub determinístico).
 
 ---
 
-### 2D. Lead time configurable en `/configuracion`
+### 9. Checklist QA — Fase 8.5
 
-**Cómo testear**
-1. Ir a `/configuracion`.
-2. Mirar el form "Impuestos y comisiones".
-
-**Respuesta esperada**
-- Hay tres campos: IVA (%), Comisión tarjeta (%), **Lead time default (días)** = 75 por defecto.
-- Cambiar el valor a 60, hacer click en "Guardar".
-- Aparece toast "Configuración actualizada".
-- Recargar la página: el valor se mantiene en 60.
-
----
-
-### 2E. Pantalla `/proyeccion`
-
-**Cómo testear**
-1. Generar datos de prueba:
-   - Crear 2-3 productos.
-   - Cargar stock vía compra (10 unidades de cada uno).
-   - Crear ventas (`SALE_OUT`) que descuenten stock — al menos 1 venta confirmada para cada producto, para tener "consumo" en la ventana de 90 días.
-2. Navegar a `/proyeccion`.
-
-**Respuesta esperada**
-- El header muestra el lead time efectivo (default = `defaultLeadTimeDays` de settings) y la ventana de consumo (90 días).
-- Por default se muestran **solo productos críticos**.
-- Cada fila tiene: SKU, Producto, Stock (total agregado), Consumo/día, Cobertura (días), Quiebre estimado (fecha), Sugerencia pedido, Estado.
-- Filas críticas en rojo claro con badge "Crítico".
-- Productos sin ventas en la ventana aparecen con cobertura "∞" — NO se marcan críticos.
-- Botón "Mostrar todos" alterna visualizar el catálogo completo proyectado.
-- Cambiar el input "Lead time" + click "Aplicar" recalcula la lista contra el nuevo umbral sin tocar settings.
-- Click en "Descargar lista de críticos" abre / descarga un CSV.
-
-**Verificar el CSV**
-- Se abre nativo en Excel sin problemas de encoding (acentos correctos).
-- Columnas: SKU, Producto, Stock total, Consumo diario, Dias cobertura, Fecha quiebre, Sugerencia pedido, Critico.
-- Filtros de la pantalla se respetan (si activaste "Mostrar todos", el CSV incluye todos; si no, solo críticos).
-- Nombre archivo: `proyeccion-criticos-YYYY-MM-DD.csv`.
+- [ ] Migración `1779500000000-LeadLifecycleAndHubSpotPhase85` aplicada sin errores.
+- [ ] Backfill: clientes con ventas previas tienen `lifecycleStatus = WON`; con cotizaciones abiertas tienen `QUOTED` + `lastContactAt`.
+- [ ] `/clientes/nuevo` muestra campos "WhatsApp (opcional)" y "Canal de origen".
+- [ ] Crear cotización mueve al cliente a QUOTED y aparece en `/seguimiento` "Pendientes".
+- [ ] Confirmar venta mueve al cliente a WON y lo saca de la bandeja.
+- [ ] Botón WhatsApp arma URL con plantilla resolvida (tokens reemplazados).
+- [ ] Botón ✓ marca contacto (toast OK + cliente vuelve a QUOTED si estaba en FOLLOW_UP).
+- [ ] Botón × abre dialog "Marcar perdido" con motivo obligatorio (min 5 chars).
+- [ ] Detalle del cliente muestra `LifecycleBadge` + "Último contacto: X".
+- [ ] `/configuracion` permite editar follow-up hours, plantilla WhatsApp, toggle HubSpot, owner ID.
+- [ ] Test sync con HubSpot off → mensaje "deshabilitado".
+- [ ] Test sync con HubSpot on sin API key → mensaje "Falta API key".
+- [ ] Sidebar tiene entrada "Seguimiento" entre Cotizaciones y Ventas.
+- [ ] Outbox `hubspot_sync_jobs` se llena cada vez que cambia lifecycle.
+- [ ] Cron diario a las 00:30 Santiago marca los QUOTED vencidos como FOLLOW_UP.
+- [ ] Tab "Sin respuesta" lista clientes QUOTED con `lastContactAt < NOW - 24h`.
 
 ---
 
-### 2F. Reporte `/reportes/ventas`
+### 10. Limitaciones / TODO post-fase
 
-**Cómo testear**
-1. Tener al menos 3-4 ventas: algunas pagadas, alguna cancelada.
-2. Ir a `/reportes/ventas`.
-3. Setear filtros de fecha "Desde" y "Hasta" para abarcar las ventas creadas.
-
-**Respuesta esperada**
-- 4 cards arriba: Ventas activas, Canceladas, IVA débito, Total facturado.
-- Tabla detallada: N° venta, Fecha, Cliente, RUT, Pago, Estado, Subtotal, IVA, Total.
-- Las **canceladas** aparecen tachadas (`line-through`) y con opacidad reducida.
-- Fila de totales al final (solo cuando hay rows) — **suma solo activas**.
-- Si las fechas filtran fuera de las ventas → "No hay ventas en el período".
-- Click en "Descargar CSV" descarga `ventas-<desde>_<hasta>.csv` con todas las filas.
-
-**Verificar el CSV**
-- Columnas: Numero, Fecha, Cliente, RUT, Metodo pago, Estado, Subtotal, IVA, Total.
-- Las canceladas también están en el CSV (con columna Estado = `CANCELLED`).
-
----
-
-### 2G. Reporte `/reportes/iva`
-
-**Cómo testear**
-1. Tener al menos 1 venta no cancelada y 1 compra en el período.
-2. Ir a `/reportes/iva`.
-
-**Respuesta esperada**
-- 4 cards arriba: IVA débito, IVA crédito, A pagar/A favor (resaltado en rojo si > 0, en verde si < 0), Documentos (`N v / M c`).
-- Tab "Ventas" — tabla con cada venta (N°, fecha, cliente, RUT, subtotal, IVA, total).
-- Tab "Compras" — tabla con cada compra (fecha, proveedor, RUT, subtotal, IVA, total).
-- Click en "Descargar CSV" descarga `iva-<desde>_<hasta>.csv` con ambas secciones combinadas (columna "Tipo" = VENTA o COMPRA).
-
-**Verificación numérica**
-- `A pagar = debit − credit`. Verificá que la card lo refleje (signo correcto).
-- Si solo hay ventas: A pagar = IVA débito.
-- Si solo hay compras: A favor = IVA crédito.
-
----
-
-### 2H. Reporte `/reportes/flujo-caja`
-
-**Cómo testear**
-1. Tener movimientos de caja en el período: al menos 1 venta (income), 1 compra (expense), 1 gasto manual.
-2. Ir a `/reportes/flujo-caja`.
-
-**Respuesta esperada**
-- 3 cards arriba: Total ingresos (verde), Total egresos (rojo), Saldo neto (verde si ≥ 0, rojo si < 0).
-- Tabla: Fecha, Tipo (Ingreso/Egreso badge), Origen (Venta/Compra/Manual/Devolución), Método, Descripción, Monto (con signo + o − y color).
-- Transacciones anuladas aparecen tachadas con label "(anulada)" pero suman al total junto con su compensación (que también está en la lista).
-- Click en "Descargar CSV" descarga `flujo-caja-<desde>_<hasta>.csv`.
-
----
-
-### 2I. Verificación end-to-end
-
-Caja de verificación final (checklist QA):
-
-- [ ] Migración `1779300000000-DefaultLeadTimePhase8` aplicada sin errores.
-- [ ] `/configuracion` muestra y persiste `defaultLeadTimeDays`.
-- [ ] Sidebar tiene sección "Reportes" con 4 sub-items.
-- [ ] `/proyeccion` lista productos críticos con todas las columnas.
-- [ ] Botón "Descargar lista de críticos" abre un CSV válido en Excel.
-- [ ] `/reportes/ventas` muestra detalle, totales correctos (sin canceladas), CSV exportable.
-- [ ] `/reportes/iva` muestra débito/crédito/balance y detalle por documento.
-- [ ] `/reportes/flujo-caja` muestra ingresos/egresos por período, CSV exportable.
-- [ ] Bug Ronda 6: el selector de bodega ya no está en el sidebar.
-- [ ] Bug Ronda 6: en la conversión cotización → venta se puede elegir la bodega y la validación de stock se actualiza al cambiarla.
-
----
-
-## Lo que NO entra en esta entrega
-
-Quedan para una fase 8.1 / posterior:
-- 8 reportes restantes del PLAN (estado de resultados, rentabilidad, sin rotación, etc.).
-- Export a Excel (`.xlsx`) — por ahora solo CSV.
-- Export a PDF de los reportes.
-- Filtros adicionales en flujo de caja (por origen, por método de pago).
-- Drilldown agrupado por día/mes en ventas.
+- La llamada real a HubSpot está stubbeada. Cuando el cliente confirme su API key + setup en HubSpot, instalar `@hubspot/api-client` y reemplazar el cuerpo de `HubspotService.pushToHubspot()` y `testSync()` con llamadas reales — el resto de la maquinaria (outbox, retries, mapping, toggle) ya funciona.
+- El cliente de HubSpot debe crear manualmente la propiedad custom `inventory_lifecycle_status` (tipo enumeration con valores NEW/QUOTED/FOLLOW_UP/WON/LOST) antes de prender el toggle.
+- Tab "Sin respuesta" usa 24h hardcoded. Si más adelante el cliente quiere ajustarlo, agregar `unansweredHours` a `CompanySettings`.
+- Cotizaciones con cliente libre (sin `customerId`) NO mueven lifecycle. Si el operador quiere hacerle seguimiento, primero usa "Registrar cliente desde snapshot" y recién entonces el cliente entra al embudo.

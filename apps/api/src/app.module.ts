@@ -14,7 +14,9 @@ import { DispatchModule } from './dispatch/dispatch.module';
 import { ExpenseCategoriesModule } from './expense-categories/expense-categories.module';
 import { ExpensesModule } from './expenses/expenses.module';
 import { HealthController } from './health.controller';
+import { HubspotModule } from './hubspot/hubspot.module';
 import { InventoryModule } from './inventory/inventory.module';
+import { LifecycleModule } from './lifecycle/lifecycle.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ProductsModule } from './products/products.module';
 import { ProjectionModule } from './projection/projection.module';
@@ -73,6 +75,8 @@ import { WarrantiesModule } from './warranties/warranties.module';
     DispatchModule,
     ProjectionModule,
     ReportsModule,
+    LifecycleModule,
+    HubspotModule,
   ],
   controllers: [HealthController],
   providers: [],

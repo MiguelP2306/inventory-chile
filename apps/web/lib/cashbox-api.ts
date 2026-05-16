@@ -156,6 +156,11 @@ export interface UpdateCompanySettingsInput {
   taxRate?: string;
   cardCommissionRate?: string;
   defaultLeadTimeDays?: number;
+  // Fase 8.5
+  followUpHoursDefault?: number;
+  hubspotEnabled?: boolean;
+  hubspotDefaultOwnerId?: string | null;
+  whatsappFollowUpTemplate?: string | null;
 }
 
 export const updateCompanySettings = (input: UpdateCompanySettingsInput) =>

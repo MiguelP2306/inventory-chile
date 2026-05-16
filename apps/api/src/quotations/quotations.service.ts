@@ -20,6 +20,7 @@ import { CountersService } from '../common/counters.service';
 import { dayRange } from '../common/date-range';
 import { rethrowFkAsConflict } from '../common/fk-error';
 import { normalizeRut } from '../common/validators/rut';
+import { LifecycleService } from '../lifecycle/lifecycle.service';
 import {
   CompanySettings,
   Customer,
@@ -59,6 +60,7 @@ export class QuotationsService {
     private readonly settingsRepo: Repository<CompanySettings>,
     @InjectDataSource() private readonly ds: DataSource,
     private readonly counters: CountersService,
+    private readonly lifecycle: LifecycleService,
   ) {}
 
   // ---------------- public read API ----------------
@@ -265,6 +267,16 @@ export class QuotationsService {
         await manager.getRepository(QuotationItem).save(item);
       }
 
+      // Fase 8.5 — mover el lifecycle del cliente a QUOTED y agendar
+      // follow-up dentro de la MISMA transacción del create. No-op si la
+      // cotización es de cliente libre.
+      await this.lifecycle.applyQuotationCreated(
+        manager,
+        dto.customerId ?? null,
+        saved.id,
+        userId,
+      );
+
       return saved.id;
     });
 
@@ -420,7 +432,28 @@ export class QuotationsService {
       q.status = QuotationStatus.SENT;
       dirty = true;
     }
-    if (dirty) await repo.save(q);
+    if (dirty) {
+      await repo.save(q);
+      // Fase 8.5 — reagendar follow-up tras el envío real. Si el caller
+      // ya viene en transacción se reusa; si no, abrimos una nueva.
+      if (manager) {
+        await this.lifecycle.applyQuotationSent(
+          manager,
+          q.customerId,
+          q.id,
+          q.userId,
+        );
+      } else {
+        await this.ds.transaction(async (m) => {
+          await this.lifecycle.applyQuotationSent(
+            m,
+            q.customerId,
+            q.id,
+            q.userId,
+          );
+        });
+      }
+    }
     return q;
   }
 
@@ -613,6 +646,18 @@ export class QuotationsService {
           addressNumber: q.customer.addressNumber,
           communeId: q.customer.communeId,
           internalNotes: q.customer.internalNotes,
+          // Fase 8.5 — lifecycle fields. Vienen de la entity directo.
+          source: q.customer.source,
+          whatsappPhone: q.customer.whatsappPhone,
+          lifecycleStatus: q.customer.lifecycleStatus,
+          lastContactAt: q.customer.lastContactAt
+            ? q.customer.lastContactAt.toISOString()
+            : null,
+          nextFollowUpAt: q.customer.nextFollowUpAt
+            ? q.customer.nextFollowUpAt.toISOString()
+            : null,
+          lostReason: q.customer.lostReason,
+          hubspotContactId: q.customer.hubspotContactId,
         }
       : null;
 

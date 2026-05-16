@@ -13,6 +13,7 @@ import {
   FileSpreadsheet,
   LayoutDashboard,
   LineChart,
+  MessageCircle,
   Package,
   Receipt,
   RotateCcw,
@@ -100,6 +101,12 @@ const SECTIONS: NavSection[] = [
         label: 'Cotizaciones',
         icon: ClipboardList,
         matchPrefix: ['/cotizaciones'],
+      },
+      {
+        href: '/seguimiento',
+        label: 'Seguimiento',
+        icon: MessageCircle,
+        matchPrefix: ['/seguimiento'],
       },
       {
         href: '/ventas',

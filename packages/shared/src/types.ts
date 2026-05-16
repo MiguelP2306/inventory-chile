@@ -151,6 +151,20 @@ export interface CommuneDto {
   region: string;
 }
 
+export type CustomerSourceDto =
+  | 'WHATSAPP'
+  | 'EMAIL'
+  | 'PHONE'
+  | 'IN_PERSON'
+  | 'OTHER';
+
+export type LifecycleStatusDto =
+  | 'NEW'
+  | 'QUOTED'
+  | 'FOLLOW_UP'
+  | 'WON'
+  | 'LOST';
+
 export interface CustomerDto {
   id: string;
   name: string;
@@ -162,6 +176,87 @@ export interface CustomerDto {
   communeId: string | null;
   commune?: CommuneDto | null;
   internalNotes: string | null;
+  // ---------- Fase 8.5 ----------
+  source: CustomerSourceDto;
+  whatsappPhone: string | null;
+  lifecycleStatus: LifecycleStatusDto;
+  lastContactAt: string | null;
+  nextFollowUpAt: string | null;
+  lostReason: string | null;
+  hubspotContactId: string | null;
+}
+
+// ---------- Fase 8.5 — Seguimiento ----------
+
+export type LeadEventTypeDto =
+  | 'QUOTATION_CREATED'
+  | 'QUOTATION_SENT'
+  | 'SALE_CONFIRMED'
+  | 'LOST_MARKED'
+  | 'FOLLOW_UP_TRIGGERED'
+  | 'MANUAL_CONTACT';
+
+export interface LeadEventDto {
+  id: string;
+  customerId: string;
+  type: LeadEventTypeDto;
+  refType: string | null;
+  refId: string | null;
+  occurredAt: string;
+  userId: string | null;
+}
+
+export type FollowUpTab =
+  | 'pendientes'
+  | 'sin-respuesta'
+  | 'vencidos'
+  | 'ultimo-contacto';
+
+/**
+ * Fila de la bandeja `/seguimiento`. Cada fila representa un cliente con
+ * lifecycle activo y los datos mínimos para que el operador decida si
+ * contactarlo. `latestQuotation` resume la cotización más reciente abierta
+ * (DRAFT/SENT/APPROVED) para construir el mensaje WhatsApp con tokens.
+ */
+export interface FollowUpRowDto {
+  customerId: string;
+  customerName: string;
+  customerTaxId: string;
+  whatsappPhone: string | null;
+  phone: string | null;
+  email: string | null;
+  lifecycleStatus: LifecycleStatusDto;
+  lastContactAt: string | null;
+  nextFollowUpAt: string | null;
+  latestQuotation: {
+    id: string;
+    number: string;
+    total: string;
+    publicToken: string;
+  } | null;
+}
+
+export interface FollowUpListDto {
+  items: FollowUpRowDto[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface MarkLostInput {
+  reason: string;
+}
+
+export interface TouchCustomerInput {
+  // Notas opcionales para registrar el contexto del contacto.
+  notes?: string;
+}
+
+export interface HubspotTestResultDto {
+  ok: boolean;
+  message: string;
+  // Si `ok`, devuelve el id del contacto dummy creado/actualizado en HubSpot.
+  contactId?: string;
 }
 
 // ---------- Purchases ----------
@@ -267,6 +362,11 @@ export interface CompanySettingsDto {
   cardCommissionRate: string;
   // Fase 8 — umbral de cobertura para marcar productos críticos en /proyeccion.
   defaultLeadTimeDays: number;
+  // Fase 8.5 — seguimiento + HubSpot.
+  followUpHoursDefault: number;
+  hubspotEnabled: boolean;
+  hubspotDefaultOwnerId: string | null;
+  whatsappFollowUpTemplate: string | null;
 }
 
 // ---------- Proyección de stock y reportes (Fase 8) ----------

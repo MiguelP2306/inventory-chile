@@ -2,13 +2,15 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Trash2 } from 'lucide-react';
+import { Trash2, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { CommuneSelect } from '@/components/commune-select';
+import { LifecycleBadge } from '@/components/lifecycle-badge';
+import { MarkLostDialog } from '@/components/mark-lost-dialog';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -20,6 +22,13 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   apiErrorMessage,
 } from '@/lib/catalog-api';
 import {
@@ -30,7 +39,15 @@ import {
 } from '@/lib/customers-api';
 import { isValidPhone, normalizePhone } from '@/lib/validators/phone';
 import { isValidRut, normalizeRut } from '@/lib/validators/rut';
-import type { CustomerDto } from '@inventory/shared';
+import type { CustomerDto, CustomerSourceDto } from '@inventory/shared';
+
+const CUSTOMER_SOURCES: { value: CustomerSourceDto; label: string }[] = [
+  { value: 'WHATSAPP', label: 'WhatsApp' },
+  { value: 'EMAIL', label: 'Email' },
+  { value: 'PHONE', label: 'Teléfono' },
+  { value: 'IN_PERSON', label: 'En persona' },
+  { value: 'OTHER', label: 'Otro' },
+];
 
 const schema = z.object({
   name: z.string().min(1, 'Nombre obligatorio').max(180),
@@ -56,6 +73,18 @@ const schema = z.object({
   addressNumber: z.string().max(20).optional().or(z.literal('')),
   communeId: z.string().uuid().optional().nullable(),
   internalNotes: z.string().optional().or(z.literal('')),
+  // Fase 8.5
+  source: z
+    .enum(['WHATSAPP', 'EMAIL', 'PHONE', 'IN_PERSON', 'OTHER'])
+    .default('OTHER'),
+  whatsappPhone: z
+    .string()
+    .optional()
+    .nullable()
+    .refine(
+      (v) => !v || v.trim() === '' || isValidPhone(v),
+      'WhatsApp inválido (ej: +56 9 1234 5678)',
+    ),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -68,6 +97,17 @@ export function CustomerForm({ customer }: Props) {
   const router = useRouter();
   const qc = useQueryClient();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [markLostOpen, setMarkLostOpen] = useState(false);
+
+  // El botón "Marcar perdido" solo se ofrece para clientes en el embudo
+  // comercial — no tiene sentido para WON (ya compraron) ni LOST (ya están
+  // perdidos). Si el cliente vuelve a comprar, el lifecycle se mueve a WON
+  // automáticamente y el botón reaparece si vuelve a QUOTED.
+  const canMarkLost =
+    !!customer &&
+    (customer.lifecycleStatus === 'QUOTED' ||
+      customer.lifecycleStatus === 'FOLLOW_UP' ||
+      customer.lifecycleStatus === 'NEW');
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -80,6 +120,8 @@ export function CustomerForm({ customer }: Props) {
       addressNumber: customer?.addressNumber ?? '',
       communeId: customer?.communeId ?? null,
       internalNotes: customer?.internalNotes ?? '',
+      source: customer?.source ?? 'OTHER',
+      whatsappPhone: customer?.whatsappPhone ?? '',
     },
   });
 
@@ -118,6 +160,10 @@ export function CustomerForm({ customer }: Props) {
       addressNumber: values.addressNumber?.trim() || null,
       communeId: values.communeId || null,
       internalNotes: values.internalNotes?.trim() || null,
+      source: values.source,
+      whatsappPhone: values.whatsappPhone?.trim()
+        ? normalizePhone(values.whatsappPhone)
+        : null,
     };
     mut.mutate(input);
   }
@@ -128,10 +174,43 @@ export function CustomerForm({ customer }: Props) {
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">
-          {customer ? 'Editar cliente' : 'Nuevo cliente'}
-        </h1>
+        <div className="flex flex-col gap-2">
+          <h1 className="text-2xl font-semibold">
+            {customer ? 'Editar cliente' : 'Nuevo cliente'}
+          </h1>
+          {customer && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <LifecycleBadge status={customer.lifecycleStatus} />
+              {customer.lastContactAt && (
+                <span>
+                  Último contacto:{' '}
+                  {new Date(customer.lastContactAt).toLocaleDateString('es-CL', {
+                    dateStyle: 'medium',
+                  })}
+                </span>
+              )}
+              {customer.lifecycleStatus === 'LOST' && customer.lostReason && (
+                <span>
+                  · Motivo:{' '}
+                  <em className="text-foreground">{customer.lostReason}</em>
+                </span>
+              )}
+            </div>
+          )}
+        </div>
         <div className="flex gap-2">
+          {canMarkLost && (
+            <Button
+              type="button"
+              variant="outline"
+              className="border-destructive/40 text-destructive hover:bg-destructive/10"
+              onClick={() => setMarkLostOpen(true)}
+              disabled={submitting}
+            >
+              <X className="h-4 w-4" />
+              Marcar perdido
+            </Button>
+          )}
           {customer && (
             <Button
               type="button"
@@ -202,6 +281,48 @@ export function CustomerForm({ customer }: Props) {
               }}
             />
           </Field>
+          <Field
+            label="WhatsApp (opcional)"
+            error={errors.whatsappPhone?.message}
+          >
+            <Input
+              {...form.register('whatsappPhone')}
+              placeholder="+56 9 1234 5678"
+              onBlur={(e) => {
+                const v = e.target.value.trim();
+                if (!v) return;
+                if (isValidPhone(v)) {
+                  form.setValue('whatsappPhone', normalizePhone(v), {
+                    shouldValidate: true,
+                  });
+                }
+              }}
+            />
+            <p className="text-xs text-muted-foreground">
+              Si el WhatsApp es distinto al teléfono general. Lo usa la
+              bandeja de seguimiento para construir los enlaces wa.me.
+            </p>
+          </Field>
+          <Field label="Canal de origen">
+            <Controller
+              control={form.control}
+              name="source"
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Canal" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CUSTOMER_SOURCES.map((s) => (
+                      <SelectItem key={s.value} value={s.value}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </Field>
         </div>
 
         <div className="space-y-2">
@@ -244,6 +365,15 @@ export function CustomerForm({ customer }: Props) {
           />
         </Field>
       </div>
+
+      <MarkLostDialog
+        customer={
+          customer ? { id: customer.id, name: customer.name } : null
+        }
+        open={markLostOpen}
+        onOpenChange={setMarkLostOpen}
+        invalidateKeys={[['customers'], ['customer'], ['follow-ups']]}
+      />
 
       <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <DialogContent>

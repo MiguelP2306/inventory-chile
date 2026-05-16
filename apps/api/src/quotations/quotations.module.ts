@@ -8,6 +8,7 @@ import {
   Quotation,
   QuotationItem,
 } from '../database/entities';
+import { LifecycleModule } from '../lifecycle/lifecycle.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PublicQuotationsController } from './public.controller';
 import { QuotationsController } from './quotations.controller';
@@ -25,6 +26,7 @@ import { QuotationsService } from './quotations.service';
     ]),
     CountersModule,
     NotificationsModule,
+    LifecycleModule,
   ],
   controllers: [QuotationsController, PublicQuotationsController],
   providers: [QuotationsService, QuotationsCronService],

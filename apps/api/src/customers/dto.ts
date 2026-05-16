@@ -1,7 +1,9 @@
+import { CustomerSource } from '@inventory/shared';
 import { PartialType } from '@nestjs/mapped-types';
 import { Type } from 'class-transformer';
 import {
   IsEmail,
+  IsEnum,
   IsInt,
   IsOptional,
   IsString,
@@ -52,6 +54,20 @@ export class CreateCustomerDto {
   @IsOptional()
   @IsString()
   internalNotes?: string | null;
+
+  // ---------- Fase 8.5 ----------
+
+  // Canal por el que llegó el cliente. Opcional al crear — default OTHER.
+  @IsOptional()
+  @IsEnum(CustomerSource)
+  source?: CustomerSource;
+
+  // Teléfono específico para WhatsApp. Si null, los botones wa.me caen al
+  // `phone` general como fallback. Validado en E.164 al igual que `phone`.
+  @IsOptional()
+  @IsString()
+  @IsValidPhone()
+  whatsappPhone?: string | null;
 }
 
 export class UpdateCustomerDto extends PartialType(CreateCustomerDto) {}

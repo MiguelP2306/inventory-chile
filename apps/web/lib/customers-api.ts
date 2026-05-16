@@ -29,6 +29,8 @@ export const listCustomersPaginated = (params: ListCustomersParams) =>
 export const getCustomer = (id: string) =>
   api.get<CustomerDto>(`/customers/${id}`).then((r) => r.data);
 
+import type { CustomerSourceDto } from '@inventory/shared';
+
 export interface CustomerInput {
   name: string;
   taxId: string;
@@ -38,6 +40,9 @@ export interface CustomerInput {
   addressNumber?: string | null;
   communeId?: string | null;
   internalNotes?: string | null;
+  // Fase 8.5
+  source?: CustomerSourceDto;
+  whatsappPhone?: string | null;
 }
 
 export const createCustomer = (input: CustomerInput) =>
