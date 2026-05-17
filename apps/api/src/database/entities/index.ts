@@ -16,6 +16,7 @@ export { ProductCode } from './product-code.entity';
 export { ProductImage } from './product-image.entity';
 export { PurchaseEntry } from './purchase-entry.entity';
 export { PurchaseEntryItem } from './purchase-entry-item.entity';
+export { PurchaseInvoice } from './purchase-invoice.entity';
 export { Quotation } from './quotation.entity';
 export { QuotationItem } from './quotation-item.entity';
 export { Return } from './return.entity';

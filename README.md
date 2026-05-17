@@ -40,6 +40,28 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 
 > Bitácora de fixes de UX y bugs reportados por el cliente sobre módulos ya entregados. Cada entrada describe el problema, la solución aplicada y los archivos tocados, para no perder el contexto cuando vuelvan a aparecer dudas o se quiera auditar el motivo de un cambio.
 
+### Ronda 7 — 2026-05-16 (bundle 13 mejoras transversales)
+
+Detalle completo + cómo testear cada fix en [CHANGELOG-RONDA-7.md](CHANGELOG-RONDA-7.md). Resumen rápido:
+
+1. **Cotización** — stock global agregado (suma todas las bodegas) visible en el badge + banner ámbar.
+2. **Garantías** — dialog "cambiar estado" traducido al español (antes `IN_REVIEW → APPROVED`, ahora `En revisión → Aprobado`).
+3. **Devoluciones** — productos dañados ahora generan movimiento `RETURN_IN_DAMAGED` en `/inventario/movimientos` (auditoría sin tocar stock).
+4. **Configuración** — secciones reorganizadas en 3 tabs (Comercial / Seguimiento+HubSpot / Categorías de gasto).
+5. **Categorías** — nueva página `/categorias/[id]` con productos asociados + checkboxes + bulk actions (desvincular / mover a otra categoría).
+6. **Alertas** — los 7 `window.confirm()` nativos reemplazados por un `<ConfirmDialog>` con diseño consistente.
+7. **Marcas / Vehículos / Modelos** — páginas de detalle nuevas (`/marcas/[id]`, `/vehiculos/marcas/[id]`, `/vehiculos/modelos/[id]`) con productos asociados.
+8. **Stock** — SKU y nombre clickeables en `/inventario` → abre `/productos/[id]`.
+9. **Transferencias** — botón **Max** autocompleta cantidad con el stock disponible de la bodega origen.
+10. **Compras** — multi-factura (PDF + imágenes) con tabla nueva `purchase_invoices` 1→N; agregar/quitar archivos desde el detalle de la compra.
+11. **Compras** — filtros nuevos por bodega y rango de total bruto.
+12. **Proveedores** — detalle muestra los archivos de factura por compra + link a `/compras/[id]`.
+13. **Clientes** — detalle reorganizado en 4 tabs (Datos / Compras / Cotizaciones / Histórico). El tab Histórico muestra timeline de eventos del lifecycle.
+
+Schema afectado por la migración `1779700000000-Round7BugfixesBundle`:
+- `inventory_movements.type` extiende enum con `RETURN_IN_DAMAGED`.
+- Nueva tabla `purchase_invoices` (1→N) + drop de `purchase_entries.invoiceUrl`.
+
 ### Ronda 3 — 2026-05-11 (conversión cotización libre → venta)
 
 #### 1. Cliente libre se perdía al convertir cotización en venta

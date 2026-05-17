@@ -452,8 +452,32 @@ export class SalesService {
   async availableStock(
     productIds: string[],
     warehouseId?: string,
+    aggregate?: boolean,
   ): Promise<Array<{ productId: string; warehouseId: string; quantity: number }>> {
     if (productIds.length === 0) return [];
+
+    // Ronda 7 — modo aggregate: suma stock de TODAS las bodegas activas. Usado
+    // por el QuotationForm porque las cotizaciones no se atan a una bodega
+    // específica; la conversión a venta es la que elige bodega. Mostrar el
+    // stock global le permite al operador decidir antes de cotizar si hay
+    // unidades en el sistema sin importar dónde.
+    if (aggregate) {
+      const rows = await this.ds
+        .getRepository(Stock)
+        .createQueryBuilder('s')
+        .select('s.productId', 'productId')
+        .addSelect('SUM(s.quantity)', 'quantity')
+        .where('s.productId IN (:...ids)', { ids: productIds })
+        .groupBy('s.productId')
+        .getRawMany<{ productId: string; quantity: string }>();
+      const byId = new Map(rows.map((r) => [r.productId, Number(r.quantity)]));
+      return productIds.map((pid) => ({
+        productId: pid,
+        warehouseId: 'aggregate',
+        quantity: byId.get(pid) ?? 0,
+      }));
+    }
+
     const wid = warehouseId ?? (await this.defaultWarehouseId());
     const rows = await this.ds.getRepository(Stock).find({
       where: { productId: In(productIds), warehouseId: wid },

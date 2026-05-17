@@ -1,9 +1,10 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Paperclip } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
+import { publicDocumentUrl } from '@/lib/cashbox-api';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -115,6 +116,8 @@ function SupplierPurchases({ supplierId }: { supplierId: string }) {
               <TableHead>Fecha</TableHead>
               <TableHead>Notas</TableHead>
               <TableHead className="text-right">Total</TableHead>
+              <TableHead className="w-[110px] text-center">Facturas</TableHead>
+              <TableHead className="w-[40px]" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -122,7 +125,7 @@ function SupplierPurchases({ supplierId }: { supplierId: string }) {
               <>
                 {Array.from({ length: 4 }).map((_, i) => (
                   <TableRow key={i}>
-                    <TableCell colSpan={3}>
+                    <TableCell colSpan={5}>
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
                   </TableRow>
@@ -131,24 +134,61 @@ function SupplierPurchases({ supplierId }: { supplierId: string }) {
             )}
             {!purchases.isLoading && items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={3} className="text-center text-muted-foreground">
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
                   Sin compras registradas a este proveedor.
                 </TableCell>
               </TableRow>
             )}
-            {items.map((p) => (
-              <TableRow key={p.id}>
-                <TableCell>
-                  {new Date(p.date).toLocaleDateString('es-CL', { dateStyle: 'medium' })}
-                </TableCell>
-                <TableCell className="text-xs text-muted-foreground">
-                  {p.notes ?? '—'}
-                </TableCell>
-                <TableCell className="text-right tabular-nums font-medium">
-                  {formatCurrency(p.total)}
-                </TableCell>
-              </TableRow>
-            ))}
+            {items.map((p) => {
+              // Ronda 7 — `invoices` viene como array desde el backend.
+              // Mostramos un link para cada uno (o "—" si no hay).
+              const invoices = p.invoices ?? [];
+              return (
+                <TableRow key={p.id}>
+                  <TableCell>
+                    {new Date(p.date).toLocaleDateString('es-CL', { dateStyle: 'medium' })}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {p.notes ?? '—'}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums font-medium">
+                    {formatCurrency(p.total)}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {invoices.length === 0 ? (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    ) : (
+                      <div className="flex items-center justify-center gap-1">
+                        {invoices.slice(0, 3).map((inv) => (
+                          <a
+                            key={inv.id}
+                            href={publicDocumentUrl(inv.url) ?? '#'}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={inv.originalName}
+                            className="text-muted-foreground hover:text-foreground"
+                          >
+                            <Paperclip className="h-4 w-4" />
+                          </a>
+                        ))}
+                        {invoices.length > 3 && (
+                          <span className="text-xs text-muted-foreground">
+                            +{invoices.length - 3}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button asChild variant="ghost" size="icon" title="Ver detalle">
+                      <Link href={`/compras/${p.id}`}>
+                        <ExternalLink className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>

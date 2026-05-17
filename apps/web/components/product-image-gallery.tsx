@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Star, Trash2, Upload } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import {
   apiErrorMessage,
@@ -26,6 +27,7 @@ export function ProductImageGallery({ productId }: Props) {
   const qc = useQueryClient();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const images = useQuery({
     queryKey: ['product-images', productId],
@@ -163,9 +165,7 @@ export function ProductImageGallery({ productId }: Props) {
                     size="icon"
                     variant="secondary"
                     className="h-8 w-8 text-destructive"
-                    onClick={() => {
-                      if (confirm('¿Eliminar esta imagen?')) remove.mutate(img.id);
-                    }}
+                    onClick={() => setDeleteTarget(img.id)}
                     title="Eliminar"
                     disabled={remove.isPending}
                   >
@@ -177,6 +177,18 @@ export function ProductImageGallery({ productId }: Props) {
           })}
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title="¿Eliminar esta imagen?"
+        description="La imagen será eliminada del producto. Esta acción no se puede deshacer."
+        confirmLabel="Eliminar"
+        variant="destructive"
+        onConfirm={async () => {
+          if (deleteTarget) await remove.mutateAsync(deleteTarget);
+        }}
+      />
     </div>
   );
 }

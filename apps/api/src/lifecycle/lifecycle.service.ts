@@ -411,6 +411,19 @@ export class LifecycleService {
     return { items, total, page, pageSize };
   }
 
+  /**
+   * Ronda 7 — devuelve el histórico de eventos de un cliente ordenado por
+   * fecha descendente. Usado por la tab "Histórico" del detalle del
+   * cliente para renderizar la timeline.
+   */
+  async listEvents(customerId: string): Promise<LeadEvent[]> {
+    return this.leadEvents.find({
+      where: { customerId },
+      order: { occurredAt: 'DESC' },
+      take: 100,
+    });
+  }
+
   // ---------- helpers privados ----------
 
   private async followUpHours(manager: EntityManager): Promise<number> {

@@ -63,7 +63,13 @@ export default function NuevaCompraPage() {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<ItemRow[]>([]);
-  const [invoiceUrl, setInvoiceUrl] = useState<string | null>(null);
+  // Ronda 7 — multi-factura. Cada item es una URL relativa devuelta por el
+  // backend tras subir el archivo. Mantiene también el nombre original para
+  // mostrar al operador qué subió. El submit envía solo las URLs en
+  // `invoiceUrls`; los metadatos se derivan en backend desde el nombre.
+  const [invoices, setInvoices] = useState<
+    Array<{ url: string; originalName: string }>
+  >([]);
   const [uploadingInvoice, setUploadingInvoice] = useState(false);
 
   // Bodegas activas para el selector. La compra es obligatoria: si no se
@@ -138,7 +144,7 @@ export default function NuevaCompraPage() {
       warehouseId,
       date,
       notes: notes.trim() || undefined,
-      invoiceUrl,
+      invoiceUrls: invoices.length > 0 ? invoices.map((i) => i.url) : undefined,
       taxAmountOverride:
         taxOverride !== null ? Number(taxOverride).toFixed(2) : undefined,
       items: items.map((i) => ({
@@ -162,23 +168,36 @@ export default function NuevaCompraPage() {
     }
   }, [autoTax, taxOverride]);
 
-  async function onSelectInvoice(file?: File | null) {
-    if (!file) return;
-    if (!ACCEPTED_DOC_MIMES.includes(file.type)) {
-      toast.error('Formato no permitido. PDF, JPG, PNG o WEBP.');
-      return;
-    }
-    if (file.size > MAX_DOC_BYTES) {
-      toast.error('Archivo supera 10 MB.');
-      return;
-    }
+  /**
+   * Ronda 7 — subir N archivos. El operador puede seleccionar varios
+   * archivos a la vez (el input tiene `multiple`); cada uno se sube
+   * secuencialmente y se acumula en `invoices`. Si alguno falla los
+   * anteriores quedan subidos — el flujo es agregar y los otros se
+   * suman.
+   */
+  async function onSelectInvoices(files: FileList | null) {
+    if (!files || files.length === 0) return;
     setUploadingInvoice(true);
+    const arr = Array.from(files);
     try {
-      const result = await uploadPurchaseInvoice(file);
-      setInvoiceUrl(result.url);
-      toast.success('Factura subida');
+      for (const file of arr) {
+        if (!ACCEPTED_DOC_MIMES.includes(file.type)) {
+          toast.error(`"${file.name}": formato no permitido (PDF/JPG/PNG/WEBP)`);
+          continue;
+        }
+        if (file.size > MAX_DOC_BYTES) {
+          toast.error(`"${file.name}": supera 10 MB`);
+          continue;
+        }
+        const result = await uploadPurchaseInvoice(file);
+        setInvoices((prev) => [
+          ...prev,
+          { url: result.url, originalName: result.originalName },
+        ]);
+      }
+      toast.success(`${arr.length} archivo${arr.length === 1 ? '' : 's'} subido${arr.length === 1 ? '' : 's'}`);
     } catch (err) {
-      toast.error(apiErrorMessage(err, 'No se pudo subir la factura'));
+      toast.error(apiErrorMessage(err, 'No se pudo subir un archivo'));
     } finally {
       setUploadingInvoice(false);
       if (inputRef.current) inputRef.current.value = '';
@@ -253,47 +272,62 @@ export default function NuevaCompraPage() {
         </div>
         <div className="space-y-2">
           <Label>Factura adjunta (opcional)</Label>
+          {/* Ronda 7 — input `multiple` para subir N archivos a la vez. La
+              lista de los ya subidos se renderiza debajo con un botón de
+              eliminar individual antes de confirmar la compra. */}
           <input
             ref={inputRef}
             type="file"
+            multiple
             accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
             className="hidden"
-            onChange={(e) => onSelectInvoice(e.target.files?.[0])}
+            onChange={(e) => onSelectInvoices(e.target.files)}
           />
-          {invoiceUrl ? (
-            <div className="flex items-center gap-2 rounded-md border bg-muted/30 p-2 text-sm">
-              <Paperclip className="h-4 w-4" />
-              <a
-                href={publicDocumentUrl(invoiceUrl) ?? '#'}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-1 truncate text-muted-foreground hover:underline"
-              >
-                Ver factura
-              </a>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => setInvoiceUrl(null)}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          ) : (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => inputRef.current?.click()}
-              disabled={uploadingInvoice}
-              className="w-full justify-start"
-            >
-              <Upload className="h-4 w-4" />
-              {uploadingInvoice
-                ? 'Subiendo...'
-                : 'Subir factura (PDF / imagen)'}
-            </Button>
+          {invoices.length > 0 && (
+            <ul className="space-y-1">
+              {invoices.map((inv, idx) => (
+                <li
+                  key={inv.url}
+                  className="flex items-center gap-2 rounded-md border bg-muted/30 p-2 text-sm"
+                >
+                  <Paperclip className="h-4 w-4 shrink-0" />
+                  <a
+                    href={publicDocumentUrl(inv.url) ?? '#'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 truncate text-muted-foreground hover:underline"
+                    title={inv.originalName}
+                  >
+                    {inv.originalName}
+                  </a>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() =>
+                      setInvoices((prev) => prev.filter((_, i) => i !== idx))
+                    }
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
           )}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => inputRef.current?.click()}
+            disabled={uploadingInvoice}
+            className="w-full justify-start"
+          >
+            <Upload className="h-4 w-4" />
+            {uploadingInvoice
+              ? 'Subiendo...'
+              : invoices.length > 0
+                ? 'Agregar más facturas (PDF / imagen)'
+                : 'Subir facturas (PDF / imagen, múltiples)'}
+          </Button>
         </div>
         <div className="space-y-2 md:col-span-3">
           <Label>Notas (opcional)</Label>

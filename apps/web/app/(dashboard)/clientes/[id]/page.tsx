@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation';
-import { CustomerForm } from '@/components/forms/customer-form';
+import { CustomerDetail } from '@/components/customer-detail';
 import { serverFetch } from '@/lib/server-api';
 import type { CustomerDto } from '@inventory/shared';
 
@@ -11,5 +11,5 @@ export default async function EditCustomerPage({
   const { id } = await params;
   const customer = await serverFetch<CustomerDto>(`/customers/${id}`);
   if (!customer) notFound();
-  return <CustomerForm customer={customer} />;
+  return <CustomerDetail customer={customer} />;
 }

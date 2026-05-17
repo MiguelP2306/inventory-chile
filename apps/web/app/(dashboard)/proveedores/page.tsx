@@ -5,6 +5,7 @@ import { ExternalLink, Pencil, Plus, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -59,6 +60,7 @@ export default function ProveedoresPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<SupplierDto | null>(null);
   const [form, setForm] = useState<SupplierInput>(empty);
+  const [deleteTarget, setDeleteTarget] = useState<SupplierDto | null>(null);
 
   const list = useQuery({
     queryKey: ['suppliers', { q: debouncedQ, page }],
@@ -212,9 +214,7 @@ export default function ProveedoresPage() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => {
-                        if (confirm(`¿Eliminar proveedor "${s.name}"?`)) removeMut.mutate(s.id);
-                      }}
+                      onClick={() => setDeleteTarget(s)}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
@@ -336,6 +336,25 @@ export default function ProveedoresPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title="¿Eliminar proveedor?"
+        description={
+          deleteTarget ? (
+            <>
+              Se eliminará <strong>{deleteTarget.name}</strong>. Si tiene
+              compras asociadas la operación va a fallar.
+            </>
+          ) : null
+        }
+        confirmLabel="Eliminar"
+        variant="destructive"
+        onConfirm={async () => {
+          if (deleteTarget) await removeMut.mutateAsync(deleteTarget.id);
+        }}
+      />
     </div>
   );
 }

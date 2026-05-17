@@ -133,6 +133,10 @@ export class SuppliersService {
     }
     const [items, total] = await this.purchases.findAndCount({
       where,
+      // Ronda 7 — incluir las facturas adjuntas (1→N) para que el detalle
+      // del proveedor muestre el ícono de paperclip y los links de descarga
+      // de cada archivo sin requerir una segunda llamada por compra.
+      relations: { invoices: true },
       order: { date: 'DESC' },
       take: pageSize,
       skip: (page - 1) * pageSize,

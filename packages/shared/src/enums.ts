@@ -7,6 +7,12 @@ export const InventoryMovementType = {
   // Fase 7.5 — transferencias entre bodegas. No tocan caja.
   TRANSFER_OUT: 'TRANSFER_OUT',
   TRANSFER_IN: 'TRANSFER_IN',
+  // Ronda 7 — devolución cuyo producto está dañado. El item NO vuelve al
+  // stock vendible (es una pérdida del negocio), pero el evento queda
+  // registrado en el historial para auditoría. `qty` se guarda como
+  // referencia informativa (cantidad reportada por el cliente). La tabla
+  // `stocks` NO se modifica para este tipo.
+  RETURN_IN_DAMAGED: 'RETURN_IN_DAMAGED',
 } as const;
 export type InventoryMovementType =
   (typeof InventoryMovementType)[keyof typeof InventoryMovementType];

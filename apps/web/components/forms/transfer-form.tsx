@@ -244,20 +244,40 @@ export function TransferForm({ onSuccess, onCancel }: Props) {
                   <TableCell className="max-w-[300px] truncate">{it.name}</TableCell>
                   <TableCell className="text-right">
                     <div className="space-y-1">
-                      <Input
-                        type="number"
-                        min={1}
-                        value={it.qty}
-                        onChange={(e) =>
-                          updateItem(idx, {
-                            qty: Math.max(1, Number(e.target.value) || 0),
-                          })
-                        }
-                        className={cn(
-                          'text-right',
-                          exceeds && 'border-destructive',
-                        )}
-                      />
+                      <div className="flex items-center gap-1">
+                        <Input
+                          type="number"
+                          min={1}
+                          value={it.qty}
+                          onChange={(e) =>
+                            updateItem(idx, {
+                              qty: Math.max(1, Number(e.target.value) || 0),
+                            })
+                          }
+                          className={cn(
+                            'text-right',
+                            exceeds && 'border-destructive',
+                          )}
+                        />
+                        {/* Ronda 7 — botón Max autocompleta con el stock
+                            disponible en la bodega origen. Si todavía no se
+                            cargó (loading) o el stock es 0, queda deshabilitado. */}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-9 shrink-0 px-2 text-xs"
+                          disabled={!stockLoaded || (available ?? 0) <= 0}
+                          onClick={() =>
+                            stockLoaded &&
+                            available > 0 &&
+                            updateItem(idx, { qty: available })
+                          }
+                          title="Llenar con el stock disponible en la bodega origen"
+                        >
+                          Max
+                        </Button>
+                      </div>
                       {stockLoaded && (
                         <div
                           className={cn(

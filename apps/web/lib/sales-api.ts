@@ -47,12 +47,20 @@ export interface AvailableStockRow {
  * al armar la venta y bloquear el botón "Confirmar" si la cantidad ingresada
  * excede el disponible.
  */
-export const getAvailableStock = (productIds: string[], warehouseId?: string) =>
+export const getAvailableStock = (
+  productIds: string[],
+  warehouseId?: string,
+  aggregate?: boolean,
+) =>
   api
     .get<AvailableStockRow[]>('/sales/available-stock', {
       params: {
         productIds: productIds.join(','),
         warehouseId,
+        // Ronda 7 — aggregate=1 hace SUM(stock) sobre todas las bodegas
+        // activas. Usado por el form de cotización porque no se ata a una
+        // bodega concreta hasta que se convierte a venta.
+        aggregate: aggregate ? '1' : undefined,
       },
     })
     .then((r) => r.data);

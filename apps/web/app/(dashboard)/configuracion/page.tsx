@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import {
   apiErrorMessage,
@@ -83,18 +84,19 @@ export default function ConfiguracionPage() {
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Configuración</h1>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Link
-          href="/configuracion/categorias-gasto"
-          className="rounded-md border bg-card p-4 text-sm transition-colors hover:bg-accent"
-        >
-          <h3 className="font-medium">Categorías de gasto</h3>
-          <p className="text-muted-foreground">
-            Editar las categorías disponibles al registrar un gasto manual.
-          </p>
-        </Link>
-      </div>
+      {/* Ronda 7 — secciones organizadas en tabs (antes era scroll vertical
+          de todas las secciones apiladas). Tres grupos:
+            - Comercial: IVA, comisión tarjeta, lead time de importación.
+            - Seguimiento y HubSpot: follow-up + integración HubSpot push.
+            - Categorías de gasto: link al editor dedicado. */}
+      <Tabs defaultValue="comercial" className="w-full">
+        <TabsList>
+          <TabsTrigger value="comercial">Comercial</TabsTrigger>
+          <TabsTrigger value="seguimiento">Seguimiento y HubSpot</TabsTrigger>
+          <TabsTrigger value="categorias">Categorías de gasto</TabsTrigger>
+        </TabsList>
 
+        <TabsContent value="comercial" className="mt-4">
       <form
         onSubmit={form.handleSubmit((v) => mut.mutate(v))}
         className="rounded-md border bg-card p-6 space-y-4 max-w-xl"
@@ -190,7 +192,29 @@ export default function ConfiguracionPage() {
         )}
       </form>
 
-      <SeguimientoHubspotSection />
+        </TabsContent>
+
+        <TabsContent value="seguimiento" className="mt-4">
+          <SeguimientoHubspotSection />
+        </TabsContent>
+
+        <TabsContent value="categorias" className="mt-4">
+          <Link
+            href="/configuracion/categorias-gasto"
+            className="block max-w-xl rounded-md border bg-card p-6 transition-colors hover:bg-accent"
+          >
+            <h3 className="font-medium">Editar categorías de gasto</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Definí las categorías disponibles al registrar un gasto
+              manual (`/gastos`). Las categorías marcadas como sistema no
+              se pueden borrar.
+            </p>
+            <span className="mt-3 inline-flex text-xs font-medium text-primary">
+              Ir al editor →
+            </span>
+          </Link>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -292,6 +292,29 @@ export class ProductsService {
     return this.attachCoverImages(items);
   }
 
+  /**
+   * Ronda 7 — actualización masiva del `categoryId` de productos. Usado por
+   * el detalle de categoría (`/categorias/[id]`) para:
+   *
+   *  - `categoryId = <uuid>` → mover N productos a otra categoría.
+   *  - `categoryId = null` → desvincular N productos de su categoría actual.
+   *
+   * Devuelve cuántos productos se actualizaron.
+   */
+  async bulkUpdateCategory(
+    productIds: string[],
+    categoryId: string | null,
+  ): Promise<{ updated: number }> {
+    if (productIds.length === 0) return { updated: 0 };
+    const result = await this.products
+      .createQueryBuilder()
+      .update(Product)
+      .set({ categoryId })
+      .whereInIds(productIds)
+      .execute();
+    return { updated: result.affected ?? 0 };
+  }
+
   // -------- helpers --------
   private toEntityFields(dto: CreateProductDto | UpdateProductDto): Partial<Product> {
     const fields: Partial<Product> = {};

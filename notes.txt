@@ -1,32 +1,9 @@
-Dudas?
-    No entiendo nada referente a Marcar como perdido al cliente 
+No entiendo nada referente a Marcar como perdido al cliente 
 Probar de nuevo la devolucion de una venta confirmar que regresa el stock
 Probar de no borrar almacen si tiene relacion
 
-Cuando se haga una cotizacion preguntar si hay stock o advertir antes de hacer la cotizacion
+==========================
 
-revisar que las notificaciones este en espanol en reclamos y garantias > Cambiar estado: IN_REVIEW → APPROVED (aparece tal cual en la notificacion de esa forma)
-
-Cuando se crea la devolucion de una venta se debe de registrar siempre en movimientos asi este danado o los productos de devolucion (actualmente si el producto esta danado en la devolucion no se marca en movimientos)
-
-pagina de Configuracion que la ui se muestre por tabs y no una de bajo de la otra
-
-Poder abrir una categoria para ver los productos asociados y una opcion checboox para seleccionar varios y hacer acciones con varios seleccionadas o desvincular productos
-Eliminar alertas "alert()" y usar modales de preguntas
-
-categorias, marcas, vehiculos, modelos > Al seleccionar uno de estos quiero ver toda la informacion que tiene asociado
-
-Que redirije al detalle del producto en stock al seleccionar uno
-
-Boton para colocar max en nueva transferencia para hacerlo mas comoda
-
-Solamente se puede subir una factura en nueva entrada de mercaderia (se puede subir varios y que sea pdf o imagenes)
-
-En compras agregar filtro por rango de precio y por bodega 
-
-En proveedores al detallar un proveedor y entrar en compras poder ver la factura de la compra
-
-En cliente en detalles de cliente agregar un tab uno para informacion personal y otro para registros de compras.
 
 
 ==========================
@@ -37,3 +14,12 @@ Seguimiento / Clientes:id
 
     Cuando le hago la cotizacion a un cliente pero lo dejo como borrador, el badge que muestra en volver al detalle del cliente y en seguimiento aparece como "Cotizado", esto es incorrecto y puede crear confusion, el cliente se le hizo la cotizacion efectivamente pero no fue enviada, solo se guardo esa cotizacion de ese cliente en borradores, deberia tener otro estado que haga referencia a que la cotizacion fue creada pero guardada en borradores. Cuando la cotizacion es enviada el badge correcto que deberia de tener estas dos partes es la que tiene actualmente "Cotizado"
     Cuando presiono en "Ver cotizacion del cliente" me envia a la ruta de cotizaciones pero sin el id de la cotizacion, solo me abre la lista de todas las cotizaciones, debe de abrirme la cotizacion que seleccione con el id
+
+
+==========================
+
+Toda la pagina esta en acento arg
+Genere una gia de despacho a una venta y no se vio reflejada en "movimientos"
+Anule una gia de despacho de una venta y no se vio reflejada en "movimientos"
+Cancele la devolucion de una venta con el tipo de devolucion "dañada" y no se vio reflejada en "movimientos"
+En compras agregar filtro por rango de precio hay un deley muy grande en lo que tecleo el numero, si tipeo muy rapido se pierde informacion

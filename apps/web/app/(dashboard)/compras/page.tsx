@@ -25,33 +25,65 @@ import {
 import { formatCurrency } from '@/lib/format';
 import { listPurchases, listSuppliers } from '@/lib/inventory-api';
 import { useUrlFilters } from '@/lib/use-url-filters';
+import { listWarehouses } from '@/lib/warehouses-api';
+import type { WarehouseDto } from '@inventory/shared';
 
 const ALL = '__all__';
 const PAGE_SIZE = 20;
 
 export default function ComprasPage() {
+  // Ronda 7 — filtros agregados: bodega, rango de total. Antes solo
+  // proveedor + rango de fecha. Estos dos nuevos viven en URL como el resto
+  // para compartir links/refrescar sin perder el filtro.
   const { values, setFilter, clear } = useUrlFilters({
     supplier: '',
+    warehouse: '',
     dateFrom: '',
     dateTo: '',
+    totalMin: '',
+    totalMax: '',
     page: '',
   });
   const supplierId = values.supplier || ALL;
+  const warehouseId = values.warehouse || ALL;
   const dateFrom = values.dateFrom ?? '';
   const dateTo = values.dateTo ?? '';
+  const totalMin = values.totalMin ?? '';
+  const totalMax = values.totalMax ?? '';
   const page = Number(values.page || '1');
 
-  const filtersActive = supplierId !== ALL || dateFrom !== '' || dateTo !== '';
+  const filtersActive =
+    supplierId !== ALL ||
+    warehouseId !== ALL ||
+    dateFrom !== '' ||
+    dateTo !== '' ||
+    totalMin !== '' ||
+    totalMax !== '';
 
   const suppliers = useQuery({ queryKey: ['suppliers'], queryFn: () => listSuppliers() });
+  const warehouses = useQuery({
+    queryKey: ['warehouses', 'all'],
+    queryFn: () => listWarehouses(),
+  });
+  const warehouseList = (
+    Array.isArray(warehouses.data)
+      ? warehouses.data
+      : warehouses.data?.items ?? []
+  ) as WarehouseDto[];
 
   const list = useQuery({
-    queryKey: ['purchases', { supplierId, dateFrom, dateTo, page }],
+    queryKey: [
+      'purchases',
+      { supplierId, warehouseId, dateFrom, dateTo, totalMin, totalMax, page },
+    ],
     queryFn: () =>
       listPurchases({
         supplierId: supplierId === ALL ? undefined : supplierId,
+        warehouseId: warehouseId === ALL ? undefined : warehouseId,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
+        totalMin: totalMin || undefined,
+        totalMax: totalMax || undefined,
         page,
         pageSize: PAGE_SIZE,
       }),
@@ -72,7 +104,7 @@ export default function ComprasPage() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Select
           value={supplierId}
           onValueChange={(v) => {
@@ -92,6 +124,26 @@ export default function ComprasPage() {
             ))}
           </SelectContent>
         </Select>
+        <Select
+          value={warehouseId}
+          onValueChange={(v) => {
+            setFilter('warehouse', v === ALL ? null : v);
+            setFilter('page', null);
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Bodega destino" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Todas las bodegas</SelectItem>
+            {warehouseList.map((w) => (
+              <SelectItem key={w.id} value={w.id}>
+                {w.name}
+                {!w.isActive ? ' (inactiva)' : ''}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Input
           type="date"
           value={dateFrom}
@@ -105,6 +157,28 @@ export default function ComprasPage() {
           value={dateTo}
           onChange={(e) => {
             setFilter('dateTo', e.target.value || null);
+            setFilter('page', null);
+          }}
+        />
+        <Input
+          type="number"
+          inputMode="numeric"
+          min={0}
+          placeholder="Total mínimo (CLP)"
+          value={totalMin}
+          onChange={(e) => {
+            setFilter('totalMin', e.target.value || null);
+            setFilter('page', null);
+          }}
+        />
+        <Input
+          type="number"
+          inputMode="numeric"
+          min={0}
+          placeholder="Total máximo (CLP)"
+          value={totalMax}
+          onChange={(e) => {
+            setFilter('totalMax', e.target.value || null);
             setFilter('page', null);
           }}
         />
@@ -126,7 +200,7 @@ export default function ComprasPage() {
               <TableHead className="text-right">Subtotal</TableHead>
               <TableHead className="text-right">IVA</TableHead>
               <TableHead className="text-right">Total</TableHead>
-              <TableHead className="w-[80px] text-center">Factura</TableHead>
+              <TableHead className="w-[80px] text-center">Facturas</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -149,11 +223,24 @@ export default function ComprasPage() {
               </TableRow>
             )}
             {items.map((p) => {
-              const invoice = publicDocumentUrl(p.invoiceUrl);
+              // Ronda 7 — invoices viene como array. Mostramos el conteo +
+              // el link del primero (los demás se ven en el detalle).
+              const invoiceCount = p.invoices?.length ?? 0;
+              const firstInvoice = invoiceCount > 0 ? p.invoices![0] : null;
+              const firstUrl = firstInvoice
+                ? publicDocumentUrl(firstInvoice.url)
+                : null;
               return (
                 <TableRow key={p.id}>
                   <TableCell>
-                    {new Date(p.date).toLocaleDateString('es-CL', { dateStyle: 'medium' })}
+                    <Link
+                      href={`/compras/${p.id}`}
+                      className="hover:underline"
+                    >
+                      {new Date(p.date).toLocaleDateString('es-CL', {
+                        dateStyle: 'medium',
+                      })}
+                    </Link>
                   </TableCell>
                   <TableCell className="font-medium">{p.supplier?.name ?? '—'}</TableCell>
                   <TableCell className="text-sm">
@@ -174,15 +261,22 @@ export default function ComprasPage() {
                     {formatCurrency(p.total)}
                   </TableCell>
                   <TableCell className="text-center">
-                    {invoice ? (
+                    {invoiceCount > 0 && firstUrl ? (
                       <a
-                        href={invoice}
+                        href={firstUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        title="Ver factura"
-                        className="inline-flex text-muted-foreground hover:text-foreground"
+                        title={
+                          invoiceCount === 1
+                            ? 'Ver factura'
+                            : `${invoiceCount} archivos — abrir primero`
+                        }
+                        className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
                       >
                         <Paperclip className="h-4 w-4" />
+                        {invoiceCount > 1 && (
+                          <span className="text-xs">×{invoiceCount}</span>
+                        )}
                       </a>
                     ) : (
                       <span className="text-xs text-muted-foreground">—</span>

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -9,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/types';
-import { CreatePurchaseEntryDto, ListPurchasesQueryDto } from './dto';
+import { AddInvoicesDto, CreatePurchaseEntryDto, ListPurchasesQueryDto } from './dto';
 import { PurchasesService } from './purchases.service';
 
 @Controller('purchases')
@@ -29,5 +30,26 @@ export class PurchasesController {
   @Post()
   create(@Body() dto: CreatePurchaseEntryDto, @CurrentUser() user: JwtPayload) {
     return this.svc.create(dto, user.sub);
+  }
+
+  /**
+   * Ronda 7 — agregar facturas a una compra existente. Cada item del body
+   * es el resultado de POST /uploads/purchase-invoice (la metadata real
+   * del archivo, no derivada).
+   */
+  @Post(':id/invoices')
+  addInvoices(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: AddInvoicesDto,
+  ) {
+    return this.svc.addInvoices(id, dto.files);
+  }
+
+  @Delete(':id/invoices/:invoiceId')
+  removeInvoice(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('invoiceId', new ParseUUIDPipe()) invoiceId: string,
+  ) {
+    return this.svc.removeInvoice(id, invoiceId);
   }
 }

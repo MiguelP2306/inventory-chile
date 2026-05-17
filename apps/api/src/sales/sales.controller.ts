@@ -36,12 +36,16 @@ export class SalesController {
   availableStock(
     @Query('productIds') productIds: string | undefined,
     @Query('warehouseId') warehouseId?: string,
+    @Query('aggregate') aggregate?: string,
   ) {
     const ids = (productIds ?? '')
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
-    return this.svc.availableStock(ids, warehouseId);
+    // `aggregate=1` suma stock de todas las bodegas activas (Ronda 7, usado
+    // por el QuotationForm). Sin el flag, mantiene el comportamiento previo
+    // de devolver el stock de una bodega específica.
+    return this.svc.availableStock(ids, warehouseId, aggregate === '1');
   }
 
   @Get(':id')

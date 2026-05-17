@@ -154,6 +154,19 @@ export const updateProduct = (id: string, input: Partial<ProductInput>) =>
 export const deleteProduct = (id: string) =>
   api.delete(`/products/${id}`).then((r) => r.data);
 
+/**
+ * Ronda 7 — bulk update de categoría sobre N productos.
+ *   - `categoryId = '<uuid>'`  → mover los productos a esa categoría.
+ *   - `categoryId = null`      → desvincular (productos quedan sin categoría).
+ */
+export const bulkUpdateProductCategory = (input: {
+  productIds: string[];
+  categoryId: string | null;
+}) =>
+  api
+    .patch<{ updated: number }>('/products/bulk-category', input)
+    .then((r) => r.data);
+
 // ---------- Product images (Fase 4B) ----------
 
 export const listProductImages = (productId: string) =>

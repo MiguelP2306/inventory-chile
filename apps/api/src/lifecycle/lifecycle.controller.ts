@@ -28,6 +28,17 @@ export class LifecycleController {
     return this.svc.list(query);
   }
 
+  /**
+   * Ronda 7 — histórico de eventos de un cliente (bitácora `lead_events`).
+   * Lo usa la tab "Histórico" del detalle de cliente para mostrar la
+   * timeline de creación de cotizaciones, envíos, marcado como perdido,
+   * confirmación de venta, etc.
+   */
+  @Get('customers/:id/events')
+  events(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.svc.listEvents(id);
+  }
+
   @Post('customers/:id/touch')
   async touch(
     @Param('id', new ParseUUIDPipe()) id: string,

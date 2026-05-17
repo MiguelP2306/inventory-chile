@@ -5,6 +5,7 @@ import type {
   FollowUpListDto,
   FollowUpTab,
   HubspotTestResultDto,
+  LeadEventDto,
 } from '@inventory/shared';
 import { api } from './api';
 
@@ -32,6 +33,15 @@ export const markCustomerLost = (customerId: string, reason: string) =>
 
 export const testHubspotSync = () =>
   api.post<HubspotTestResultDto>('/hubspot/test', {}).then((r) => r.data);
+
+/**
+ * Ronda 7 — histórico de eventos de un cliente (timeline). Usado por la
+ * tab "Histórico" del detalle del cliente.
+ */
+export const listCustomerEvents = (customerId: string) =>
+  api
+    .get<LeadEventDto[]>(`/customers/${customerId}/events`)
+    .then((r) => r.data);
 
 /**
  * Construye una URL `wa.me` desde un teléfono E.164 y un mensaje pre-formado.

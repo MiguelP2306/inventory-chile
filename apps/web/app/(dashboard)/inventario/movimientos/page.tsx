@@ -35,6 +35,7 @@ const MOVEMENT_TYPES: Array<{ value: MovementDto['type']; label: string }> = [
   { value: 'ADJUSTMENT', label: 'Ajuste' },
   { value: 'RETURN_IN', label: 'Devolución entrada' },
   { value: 'RETURN_OUT', label: 'Devolución salida' },
+  { value: 'RETURN_IN_DAMAGED', label: 'Devolución dañada (sin stock)' },
   { value: 'TRANSFER_OUT', label: 'Transferencia salida' },
   { value: 'TRANSFER_IN', label: 'Transferencia entrada' },
 ];
@@ -234,6 +235,12 @@ function TypeBadge({ type }: { type: MovementDto['type'] }) {
     ADJUSTMENT: { label: 'Ajuste', cls: 'bg-stock-low/15 text-stock-low' },
     RETURN_IN: { label: 'Dev. entrada', cls: 'bg-stock-ok/15 text-stock-ok' },
     RETURN_OUT: { label: 'Dev. salida', cls: 'bg-stock-out/15 text-stock-out' },
+    // Ronda 7 — la devolución dañada no toca stock; usamos color destructivo
+    // suave para diferenciarla visualmente de las que sí afectan inventario.
+    RETURN_IN_DAMAGED: {
+      label: 'Dev. dañada (sin stock)',
+      cls: 'bg-destructive/15 text-destructive',
+    },
     TRANSFER_OUT: {
       label: 'Transf. salida',
       cls: 'bg-violet-500/15 text-violet-700 dark:text-violet-300',

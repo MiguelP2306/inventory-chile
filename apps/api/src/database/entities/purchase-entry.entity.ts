@@ -10,6 +10,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { PurchaseEntryItem } from './purchase-entry-item.entity';
+import { PurchaseInvoice } from './purchase-invoice.entity';
 import { Supplier } from './supplier.entity';
 import { User } from './user.entity';
 import { Warehouse } from './warehouse.entity';
@@ -54,12 +55,13 @@ export class PurchaseEntry {
   @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
   taxAmount!: string;
 
-  // URL relativa al archivo de factura adjunto (PDF o imagen).
-  @Column({ type: 'varchar', length: 500, nullable: true })
-  invoiceUrl!: string | null;
-
   @Column({ type: 'text', nullable: true })
   notes!: string | null;
+
+  // Ronda 7 — relación 1→N con archivos de factura. La columna `invoiceUrl`
+  // que vivía acá se eliminó; los datos se backfillearon en `purchase_invoices`.
+  @OneToMany(() => PurchaseInvoice, (inv) => inv.purchaseEntry, { cascade: false })
+  invoices?: PurchaseInvoice[];
 
   @ManyToOne(() => User, { onDelete: 'RESTRICT', nullable: false })
   @JoinColumn({ name: 'userId' })

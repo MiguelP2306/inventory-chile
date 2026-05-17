@@ -2,8 +2,10 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
+import Link from 'next/link';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { SimpleNameList } from '@/components/simple-name-list';
 import { Button } from '@/components/ui/button';
 import {
@@ -66,6 +68,9 @@ export default function VehiculosPage() {
           create={createVehicleMake}
           update={updateVehicleMake}
           remove={deleteVehicleMake}
+          // Ronda 7 — click en el nombre abre /vehiculos/marcas/[id] con los
+          // modelos de esa marca.
+          getDetailHref={(item) => `/vehiculos/marcas/${item.id}`}
         />
       </TabsContent>
       <TabsContent value="models">
@@ -94,6 +99,11 @@ function ModelsList() {
   );
   const [name, setName] = useState('');
   const [makeId, setMakeId] = useState<string>('');
+  const [deleteTarget, setDeleteTarget] = useState<{
+    id: string;
+    name: string;
+    makeName: string;
+  } | null>(null);
 
   const makes = useQuery({ queryKey: ['vehicle-makes'], queryFn: listVehicleMakes });
   const models = useQuery({
@@ -240,7 +250,16 @@ function ModelsList() {
             {items.map((m) => (
               <TableRow key={m.id}>
                 <TableCell>{m.make?.name ?? '—'}</TableCell>
-                <TableCell>{m.name}</TableCell>
+                {/* Ronda 7 — click en el nombre del modelo abre el detalle
+                    con los productos compatibles. */}
+                <TableCell>
+                  <Link
+                    href={`/vehiculos/modelos/${m.id}`}
+                    className="hover:underline"
+                  >
+                    {m.name}
+                  </Link>
+                </TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">
                     <Button
@@ -253,10 +272,13 @@ function ModelsList() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => {
-                        if (confirm(`¿Eliminar "${m.make?.name ?? ''} ${m.name}"?`))
-                          removeMut.mutate(m.id);
-                      }}
+                      onClick={() =>
+                        setDeleteTarget({
+                          id: m.id,
+                          name: m.name,
+                          makeName: m.make?.name ?? '',
+                        })
+                      }
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
@@ -338,6 +360,29 @@ function ModelsList() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title="¿Eliminar modelo de vehículo?"
+        description={
+          deleteTarget ? (
+            <>
+              Se eliminará{' '}
+              <strong>
+                {deleteTarget.makeName} {deleteTarget.name}
+              </strong>
+              . Si tiene compatibilidades de productos asociadas, la
+              operación va a fallar.
+            </>
+          ) : null
+        }
+        confirmLabel="Eliminar"
+        variant="destructive"
+        onConfirm={async () => {
+          if (deleteTarget) await removeMut.mutateAsync(deleteTarget.id);
+        }}
+      />
     </div>
   );
 }

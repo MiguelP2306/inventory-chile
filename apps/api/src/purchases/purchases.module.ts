@@ -5,6 +5,7 @@ import {
   CompanySettings,
   PurchaseEntry,
   PurchaseEntryItem,
+  PurchaseInvoice,
   Supplier,
   Warehouse,
 } from '../database/entities';
@@ -17,6 +18,7 @@ import { PurchasesService } from './purchases.service';
     TypeOrmModule.forFeature([
       PurchaseEntry,
       PurchaseEntryItem,
+      PurchaseInvoice,
       Supplier,
       Warehouse,
       CompanySettings,

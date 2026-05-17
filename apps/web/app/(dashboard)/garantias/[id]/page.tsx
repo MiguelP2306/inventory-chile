@@ -42,6 +42,17 @@ const TRANSITIONS: Record<
   RESOLVED: [],
 };
 
+// Ronda 7 — labels en español de los estados (antes el dialog title y los
+// mensajes de feedback mostraban los IDs internos como "IN_REVIEW → APPROVED",
+// que el operador no entiende).
+const STATUS_LABELS: Record<WarrantyStatusDto, string> = {
+  OPEN: 'Abierto',
+  IN_REVIEW: 'En revisión',
+  APPROVED: 'Aprobado',
+  REJECTED: 'Rechazado',
+  RESOLVED: 'Resuelto',
+};
+
 export default function GarantiaDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
@@ -245,7 +256,8 @@ export default function GarantiaDetailPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              Cambiar estado: {w.status} → {transitionTo}
+              Cambiar estado: {STATUS_LABELS[w.status]} →{' '}
+              {transitionTo ? STATUS_LABELS[transitionTo] : ''}
             </DialogTitle>
           </DialogHeader>
           <form

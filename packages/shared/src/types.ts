@@ -120,7 +120,10 @@ export interface MovementDto {
     | 'RETURN_IN'
     | 'RETURN_OUT'
     | 'TRANSFER_OUT'
-    | 'TRANSFER_IN';
+    | 'TRANSFER_IN'
+    // Ronda 7 — devolución de cliente con producto dañado: queda registrada
+    // como evento de auditoría pero NO modifica el stock.
+    | 'RETURN_IN_DAMAGED';
   qty: number;
   unitCost: string | null;
   reference: string | null;
@@ -279,16 +282,29 @@ export interface PurchaseEntryDto {
   warehouseId: string | null;
   date: string;
   total: string;
-  // Fase 5: descomposición IVA + factura adjunta.
+  // Fase 5: descomposición IVA.
   subtotal: string;
   taxAmount: string;
-  invoiceUrl: string | null;
   notes: string | null;
   userId: string;
   supplier?: SupplierDto;
   warehouse?: { id: string; name: string } | null;
   items?: PurchaseEntryItemDto[];
   user?: { id: string; name: string; email: string };
+  // Ronda 7 — archivos de factura (1→N). El frontend renderiza una lista en
+  // el detalle de la compra y permite agregar/borrar individualmente.
+  invoices?: PurchaseInvoiceDto[];
+}
+
+export interface PurchaseInvoiceDto {
+  id: string;
+  purchaseEntryId: string;
+  url: string;
+  filename: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  uploadedAt: string;
 }
 
 // ---------- Caja, gastos, settings (Fase 5) ----------

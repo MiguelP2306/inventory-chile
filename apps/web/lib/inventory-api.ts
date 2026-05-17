@@ -125,17 +125,22 @@ export interface PurchaseInput {
   warehouseId?: string;
   date?: string;
   notes?: string;
-  // Fase 5: factura adjunta + override del IVA cuando la factura del proveedor
-  // tiene un redondeo distinto del auto-calculado.
-  invoiceUrl?: string | null;
+  // Fase 5: factura adjunta (ahora N archivos, Ronda 7) + override del IVA
+  // cuando la factura del proveedor tiene un redondeo distinto del
+  // auto-calculado.
+  invoiceUrls?: string[];
   taxAmountOverride?: string;
   items: PurchaseItemInput[];
 }
 
 export interface ListPurchasesParams {
   supplierId?: string;
+  warehouseId?: string;
   dateFrom?: string;
   dateTo?: string;
+  // Ronda 7 — filtros por rango de total (bruto, con IVA).
+  totalMin?: string;
+  totalMax?: string;
   page?: number;
   pageSize?: number;
 }
@@ -150,3 +155,24 @@ export const getPurchase = (id: string) =>
 
 export const createPurchase = (input: PurchaseInput) =>
   api.post<PurchaseEntryDto>('/purchases', input).then((r) => r.data);
+
+// ---------- Ronda 7: facturas múltiples por compra ----------
+
+export interface AddInvoiceFile {
+  url: string;
+  filename: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+}
+
+export const addPurchaseInvoices = (purchaseId: string, files: AddInvoiceFile[]) =>
+  api
+    .post<import('@inventory/shared').PurchaseInvoiceDto[]>(
+      `/purchases/${purchaseId}/invoices`,
+      { files },
+    )
+    .then((r) => r.data);
+
+export const removePurchaseInvoice = (purchaseId: string, invoiceId: string) =>
+  api.delete(`/purchases/${purchaseId}/invoices/${invoiceId}`).then((r) => r.data);

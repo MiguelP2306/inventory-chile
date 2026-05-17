@@ -322,11 +322,15 @@ export class ReturnsService {
         });
         await manager.getRepository(ReturnItem).save(returnItem);
 
-        // Movimiento de stock solo si el producto es RESELLABLE.
-        // - CUSTOMER → RETURN_IN suma stock en bodega de la venta.
-        // - SUPPLIER → RETURN_OUT saca stock de la bodega seleccionada.
-        if (it.itemCondition === ReturnItemCondition.RESELLABLE) {
-          if (dto.type === ReturnType.CUSTOMER) {
+        // Movimiento de inventario:
+        // - CUSTOMER + RESELLABLE → RETURN_IN suma stock (vuelve al inventario).
+        // - CUSTOMER + DAMAGED → RETURN_IN_DAMAGED (Ronda 7): registra el
+        //   evento en /inventario/movimientos para auditoría pero NO toca
+        //   `stocks` (el producto se descarta).
+        // - SUPPLIER + RESELLABLE → RETURN_OUT descuenta stock.
+        // - SUPPLIER + DAMAGED → idem CUSTOMER (registra evento sin tocar stock).
+        if (dto.type === ReturnType.CUSTOMER) {
+          if (it.itemCondition === ReturnItemCondition.RESELLABLE) {
             await this.inventory.applyMovement(manager, {
               productId: it.productId,
               warehouseId,
@@ -338,11 +342,38 @@ export class ReturnsService {
               userId,
             });
           } else {
+            await this.inventory.recordMovementWithoutStockImpact(manager, {
+              productId: it.productId,
+              warehouseId,
+              type: InventoryMovementType.RETURN_IN_DAMAGED,
+              qty: +it.qty,
+              unitCost,
+              reference: number,
+              refId: saved.id,
+              userId,
+            });
+          }
+        } else {
+          if (it.itemCondition === ReturnItemCondition.RESELLABLE) {
             await this.inventory.applyMovement(manager, {
               productId: it.productId,
               warehouseId,
               type: InventoryMovementType.RETURN_OUT,
               qty: -it.qty,
+              unitCost,
+              reference: number,
+              refId: saved.id,
+              userId,
+            });
+          } else {
+            // Devolución a proveedor con producto dañado: el producto no
+            // estaba en nuestro stock (no descontamos), pero el evento
+            // queda registrado para auditoría.
+            await this.inventory.recordMovementWithoutStockImpact(manager, {
+              productId: it.productId,
+              warehouseId,
+              type: InventoryMovementType.RETURN_IN_DAMAGED,
+              qty: +it.qty,
               unitCost,
               reference: number,
               refId: saved.id,
@@ -405,9 +436,11 @@ export class ReturnsService {
         .getRepository(ReturnItem)
         .find({ where: { returnId: id } });
 
-      // Revertir movimientos de stock (solo los que SÍ emitimos, o sea
-      // los RESELLABLE). Los DAMAGED no movieron stock al crear, así que
-      // tampoco hay nada que revertir al cancelar.
+      // Revertir movimientos de stock (solo los que sí afectaron stock, o
+      // sea los RESELLABLE). Los DAMAGED emiten un movimiento informativo
+      // tipo RETURN_IN_DAMAGED que NO toca `stocks`, así que tampoco hay
+      // nada que revertir — la fila de auditoría queda en /inventario/
+      // movimientos y la cancelación se ve mirando el estado del Return.
       for (const it of items) {
         if (it.itemCondition !== ReturnItemCondition.RESELLABLE) continue;
         if (existing.type === ReturnType.CUSTOMER) {

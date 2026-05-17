@@ -5,11 +5,12 @@ import {
   PaymentMethod,
 } from '@inventory/shared';
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { Between, DataSource, Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { CashboxService } from '../cashbox/cashbox.service';
 import { dayRange } from '../common/date-range';
 import { InventoryService } from '../inventory/inventory.service';
@@ -17,6 +18,7 @@ import {
   CompanySettings,
   PurchaseEntry,
   PurchaseEntryItem,
+  PurchaseInvoice,
   Supplier,
   Warehouse,
 } from '../database/entities';
@@ -24,6 +26,14 @@ import {
   CreatePurchaseEntryDto,
   ListPurchasesQueryDto,
 } from './dto';
+
+export interface InvoiceFileInput {
+  url: string;
+  filename: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+}
 
 @Injectable()
 export class PurchasesService {
@@ -36,6 +46,8 @@ export class PurchasesService {
     private readonly warehouses: Repository<Warehouse>,
     @InjectRepository(CompanySettings)
     private readonly settingsRepo: Repository<CompanySettings>,
+    @InjectRepository(PurchaseInvoice)
+    private readonly invoiceRepo: Repository<PurchaseInvoice>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly inventory: InventoryService,
     private readonly cashbox: CashboxService,
@@ -44,20 +56,37 @@ export class PurchasesService {
   async list(query: ListPurchasesQueryDto) {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
-    const where: Record<string, unknown> = {};
-    if (query.supplierId) where.supplierId = query.supplierId;
+
+    // QueryBuilder en lugar de findAndCount para soportar filtros de
+    // rango (totalMin/totalMax) sobre el campo decimal. Mantenemos joins
+    // con supplier/user/warehouse y `invoices` (lo usa el detalle, y para
+    // mostrar el icono "tiene factura" en el listado).
+    const qb = this.entries
+      .createQueryBuilder('pe')
+      .leftJoinAndSelect('pe.supplier', 'supplier')
+      .leftJoinAndSelect('pe.user', 'user')
+      .leftJoinAndSelect('pe.warehouse', 'warehouse')
+      .leftJoinAndSelect('pe.invoices', 'invoices');
+
+    if (query.supplierId)
+      qb.andWhere('pe.supplierId = :sid', { sid: query.supplierId });
+    if (query.warehouseId)
+      qb.andWhere('pe.warehouseId = :wid', { wid: query.warehouseId });
     if (query.dateFrom || query.dateTo) {
       const { from, to } = dayRange(query.dateFrom, query.dateTo);
-      where.date = Between(from, to);
+      qb.andWhere('pe.date BETWEEN :from AND :to', { from, to });
+    }
+    if (query.totalMin !== undefined && query.totalMin !== '') {
+      qb.andWhere('pe.total >= :tmin', { tmin: query.totalMin });
+    }
+    if (query.totalMax !== undefined && query.totalMax !== '') {
+      qb.andWhere('pe.total <= :tmax', { tmax: query.totalMax });
     }
 
-    const [items, total] = await this.entries.findAndCount({
-      where,
-      relations: { supplier: true, user: true, warehouse: true },
-      order: { date: 'DESC' },
-      take: pageSize,
-      skip: (page - 1) * pageSize,
-    });
+    qb.orderBy('pe.date', 'DESC');
+    qb.take(pageSize).skip((page - 1) * pageSize);
+
+    const [items, total] = await qb.getManyAndCount();
     return { items, total, page, pageSize };
   }
 
@@ -69,6 +98,7 @@ export class PurchasesService {
         user: true,
         warehouse: true,
         items: { product: true },
+        invoices: true,
       },
     });
     if (!entry) throw new NotFoundException('Compra no encontrada');
@@ -77,13 +107,21 @@ export class PurchasesService {
 
   /**
    * Crea PurchaseEntry + items + movimientos de inventario PURCHASE_IN +
-   * transacción de caja (EXPENSE, source=PURCHASE) en una transacción atómica.
+   * transacción de caja (EXPENSE, source=PURCHASE) + 0..N facturas en
+   * una transacción atómica.
    *
    * IVA: los `unitCost` que llegan son BRUTO (incluyen IVA, igual que `product.cost`).
    * - `total` = suma de los items.
    * - `taxAmount` = `total - total / (1 + taxRate)` (auto), o sobreescrito por
    *   el operador si la factura tiene un redondeo distinto.
    * - `subtotal` = `total - taxAmount`.
+   *
+   * Multi-factura (Ronda 7): `dto.invoiceUrls` son las URLs relativas
+   * devueltas por POST /uploads/purchase-invoice (puede ser una sola call
+   * por archivo). Por cada URL se inserta una fila en `purchase_invoices`.
+   * Los metadatos (originalName, mimeType, size) acá quedan derivados de la
+   * URL — los reales se conservan cuando el frontend usa el endpoint
+   * dedicado `POST /purchases/:id/invoices` con multipart.
    *
    * Si falla cualquier paso, rollbackea todo.
    */
@@ -119,7 +157,6 @@ export class PurchasesService {
         total,
         subtotal,
         taxAmount,
-        invoiceUrl: dto.invoiceUrl ?? null,
         notes: dto.notes ?? null,
         userId,
       });
@@ -148,6 +185,23 @@ export class PurchasesService {
         });
       }
 
+      // Facturas (Ronda 7) — si el frontend ya subió archivos antes de
+      // confirmar la compra, los URLs llegan acá y los persistimos como
+      // rows en `purchase_invoices`.
+      if (dto.invoiceUrls && dto.invoiceUrls.length > 0) {
+        for (const url of dto.invoiceUrls) {
+          const inv = manager.create(PurchaseInvoice, {
+            purchaseEntryId: entry.id,
+            url,
+            filename: deriveFilenameFromUrl(url),
+            originalName: deriveFilenameFromUrl(url),
+            mimeType: deriveMimeFromUrl(url),
+            size: 0,
+          });
+          await manager.save(inv);
+        }
+      }
+
       // Egreso de caja por el TOTAL bruto. El IVA queda registrado en la
       // compra (no se duplica en caja) — se usa para el reporte de IVA crédito.
       await this.cashbox.recordTransaction(
@@ -174,6 +228,45 @@ export class PurchasesService {
   }
 
   /**
+   * Agrega archivos de factura a una compra existente (Ronda 7). El frontend
+   * llama POST /uploads/purchase-invoice por cada archivo y después POST
+   * /purchases/:id/invoices con la lista de metadatos.
+   */
+  async addInvoices(
+    purchaseId: string,
+    files: InvoiceFileInput[],
+  ): Promise<PurchaseInvoice[]> {
+    if (!files.length) {
+      throw new BadRequestException('Debe enviarse al menos 1 archivo.');
+    }
+    const entry = await this.entries.findOne({ where: { id: purchaseId } });
+    if (!entry) throw new NotFoundException('Compra no encontrada');
+
+    const created: PurchaseInvoice[] = [];
+    for (const f of files) {
+      const inv = this.invoiceRepo.create({
+        purchaseEntryId: purchaseId,
+        url: f.url,
+        filename: f.filename,
+        originalName: f.originalName,
+        mimeType: f.mimeType,
+        size: f.size,
+      });
+      await this.invoiceRepo.save(inv);
+      created.push(inv);
+    }
+    return created;
+  }
+
+  async removeInvoice(purchaseId: string, invoiceId: string): Promise<void> {
+    const inv = await this.invoiceRepo.findOne({
+      where: { id: invoiceId, purchaseEntryId: purchaseId },
+    });
+    if (!inv) throw new NotFoundException('Archivo no encontrado en esta compra.');
+    await this.invoiceRepo.delete({ id: inv.id });
+  }
+
+  /**
    * Bodega por defecto cuando el DTO no especifica una. Filtramos activas y
    * preferimos "Principal" explícitamente — antes el orden alfabético hacía
    * que "Mercado Libre Full" ganara contra "Principal" y las compras
@@ -195,4 +288,18 @@ export class PurchasesService {
     }
     return w.id;
   }
+}
+
+function deriveFilenameFromUrl(url: string): string {
+  const parts = url.split('/');
+  return parts[parts.length - 1] ?? url;
+}
+
+function deriveMimeFromUrl(url: string): string {
+  const lower = url.toLowerCase();
+  if (lower.endsWith('.pdf')) return 'application/pdf';
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  return 'application/octet-stream';
 }

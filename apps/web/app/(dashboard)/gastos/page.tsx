@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ban, Paperclip, Pencil, Plus } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { ExpenseFormDialog } from '@/components/forms/expense-form';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -109,6 +110,7 @@ export default function GastosPage() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ExpenseDto | null>(null);
+  const [voidTarget, setVoidTarget] = useState<ExpenseDto | null>(null);
 
   const voidMut = useMutation({
     mutationFn: (id: string) => voidExpense(id),
@@ -307,14 +309,7 @@ export default function GastosPage() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => {
-                            if (
-                              confirm(
-                                `¿Anular ${e.number}? Se generará una compensación en caja.`,
-                              )
-                            )
-                              voidMut.mutate(e.id);
-                          }}
+                          onClick={() => setVoidTarget(e)}
                           title="Anular"
                         >
                           <Ban className="h-4 w-4 text-destructive" />
@@ -366,6 +361,26 @@ export default function GastosPage() {
         open={dialogOpen}
         expense={editing}
         onClose={() => setDialogOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={!!voidTarget}
+        onOpenChange={(o) => !o && setVoidTarget(null)}
+        title="¿Anular gasto?"
+        description={
+          voidTarget ? (
+            <>
+              El gasto <strong>{voidTarget.number}</strong> se marcará como
+              anulado y se generará una transacción de compensación en caja
+              (ingreso por el mismo monto).
+            </>
+          ) : null
+        }
+        confirmLabel="Anular"
+        variant="destructive"
+        onConfirm={async () => {
+          if (voidTarget) await voidMut.mutateAsync(voidTarget.id);
+        }}
       />
     </div>
   );

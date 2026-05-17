@@ -2,8 +2,10 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
+import Link from 'next/link';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -49,6 +51,12 @@ interface Props {
   update: (id: string, input: { name: string }) => Promise<NamedItem>;
   remove: (id: string) => Promise<unknown>;
   pageSize?: number;
+  /**
+   * Ronda 7 — si está definido, el nombre se renderiza como link al
+   * detalle de la entidad. Usado por categorías, marcas y modelos de
+   * vehículos para abrir la página de productos asociados.
+   */
+  getDetailHref?: (item: NamedItem) => string;
 }
 
 export function SimpleNameList({
@@ -60,6 +68,7 @@ export function SimpleNameList({
   update,
   remove,
   pageSize = 20,
+  getDetailHref,
 }: Props) {
   const qc = useQueryClient();
   const filters = useUrlFilters({ q: '', page: '' });
@@ -71,6 +80,7 @@ export function SimpleNameList({
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<NamedItem | null>(null);
   const [name, setName] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<NamedItem | null>(null);
 
   const query = useQuery({
     queryKey: [queryKey, { q: debouncedQ, page }],
@@ -182,7 +192,18 @@ export function SimpleNameList({
             )}
             {items.map((item) => (
               <TableRow key={item.id}>
-                <TableCell>{item.name}</TableCell>
+                <TableCell>
+                  {getDetailHref ? (
+                    <Link
+                      href={getDetailHref(item)}
+                      className="hover:underline"
+                    >
+                      {item.name}
+                    </Link>
+                  ) : (
+                    item.name
+                  )}
+                </TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">
                     <Button variant="ghost" size="icon" onClick={() => startEdit(item)}>
@@ -191,9 +212,7 @@ export function SimpleNameList({
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => {
-                        if (confirm(`¿Eliminar "${item.name}"?`)) removeMut.mutate(item.id);
-                      }}
+                      onClick={() => setDeleteTarget(item)}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
@@ -230,6 +249,26 @@ export function SimpleNameList({
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title={`¿Eliminar ${resourceLabel}?`}
+        description={
+          deleteTarget ? (
+            <>
+              Se eliminará <strong>{deleteTarget.name}</strong>. Si tiene
+              productos asociados la operación va a fallar — primero
+              reasigná o eliminá los productos.
+            </>
+          ) : null
+        }
+        confirmLabel="Eliminar"
+        variant="destructive"
+        onConfirm={async () => {
+          if (deleteTarget) await removeMut.mutateAsync(deleteTarget.id);
+        }}
+      />
 
       <Dialog open={open} onOpenChange={(v) => (v ? setOpen(true) : closeDialog())}>
         <DialogContent>

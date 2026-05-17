@@ -5,6 +5,7 @@ import { Lock, Pencil, Plus, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -44,6 +45,8 @@ export default function CategoriasGastoPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<ExpenseCategoryDto | null>(null);
   const [name, setName] = useState('');
+  const [deleteTarget, setDeleteTarget] =
+    useState<ExpenseCategoryDto | null>(null);
 
   const createMut = useMutation({
     mutationFn: (n: string) => createExpenseCategory({ name: n }),
@@ -178,10 +181,7 @@ export default function CategoriasGastoPage() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => {
-                          if (confirm(`¿Eliminar "${c.name}"?`))
-                            removeMut.mutate(c.id);
-                        }}
+                        onClick={() => setDeleteTarget(c)}
                       >
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
@@ -225,6 +225,25 @@ export default function CategoriasGastoPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title="¿Eliminar categoría de gasto?"
+        description={
+          deleteTarget ? (
+            <>
+              Se eliminará <strong>{deleteTarget.name}</strong>. Si hay
+              gastos vinculados a esta categoría la operación va a fallar.
+            </>
+          ) : null
+        }
+        confirmLabel="Eliminar"
+        variant="destructive"
+        onConfirm={async () => {
+          if (deleteTarget) await removeMut.mutateAsync(deleteTarget.id);
+        }}
+      />
     </div>
   );
 }

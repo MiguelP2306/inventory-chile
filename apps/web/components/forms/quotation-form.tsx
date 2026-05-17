@@ -223,9 +223,13 @@ export function QuotationForm({
     () => items.map((it) => it.productId).filter(Boolean),
     [items],
   );
+  // Ronda 7 — Cotizaciones no se atan a una bodega específica (la conversión
+  // a venta es la que elige una), por eso pedimos el stock AGREGADO de todas
+  // las bodegas activas. Antes el endpoint devolvía solo el stock de la
+  // bodega default y subestimaba la disponibilidad real.
   const stockQuery = useQuery({
-    queryKey: ['quotation-available-stock', productIds.join(',')],
-    queryFn: () => getAvailableStock(productIds),
+    queryKey: ['quotation-available-stock-agg', productIds.join(',')],
+    queryFn: () => getAvailableStock(productIds, undefined, true),
     enabled: productIds.length > 0,
   });
   const stockMap = useMemo(() => {
@@ -834,10 +838,11 @@ export function QuotationForm({
                                   ? 'font-medium text-amber-700 dark:text-amber-300'
                                   : 'text-muted-foreground',
                               )}
+                              title="Stock total disponible sumando todas las bodegas activas"
                             >
                               {exceeds
-                                ? `Stock: ${available} (faltan ${it.qty - available})`
-                                : `Stock: ${available}`}
+                                ? `Stock total: ${available} (faltan ${it.qty - available})`
+                                : `Stock total: ${available}`}
                             </div>
                           )}
                         </div>

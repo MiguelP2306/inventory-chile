@@ -17,8 +17,11 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ArrayUnique,
   IsArray,
+  IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
 import {
   MAX_PRODUCT_IMAGE_BYTES,
@@ -42,6 +45,24 @@ class ReplaceCompatibleCodesDto {
   codes!: string[];
 }
 
+/**
+ * Ronda 7 — bulk update de categoría para N productos. Soporta:
+ *   - `categoryId: '<uuid>'` → mover los productos a esa categoría.
+ *   - `categoryId: null` → desvincular (productos sin categoría).
+ */
+class BulkUpdateCategoryDto {
+  @IsArray()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  productIds!: string[];
+
+  // `null` significa "quitar categoría". Usamos ValidateIf para permitir null.
+  @IsOptional()
+  @ValidateIf((o) => o.categoryId !== null)
+  @IsUUID()
+  categoryId!: string | null;
+}
+
 @Controller('products')
 export class ProductsController {
   constructor(private readonly svc: ProductsService) {}
@@ -59,6 +80,13 @@ export class ProductsController {
   @Get('quick-search')
   quickSearch(@Query() query: QuickSearchQueryDto) {
     return this.svc.quickSearch(query);
+  }
+
+  // Ronda 7 — bulk update de categoría. Ruta concreta antes que /:id
+  // para que `bulk-category` no matchee como un UUID.
+  @Patch('bulk-category')
+  bulkUpdateCategory(@Body() dto: BulkUpdateCategoryDto) {
+    return this.svc.bulkUpdateCategory(dto.productIds, dto.categoryId);
   }
 
   @Get(':id')

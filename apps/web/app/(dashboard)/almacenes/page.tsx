@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil, Plus, PowerOff, Trash2, Zap } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -38,6 +39,7 @@ export default function AlmacenesPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<WarehouseDto | null>(null);
   const [form, setForm] = useState({ name: '', address: '' });
+  const [deleteTarget, setDeleteTarget] = useState<WarehouseDto | null>(null);
 
   // En /almacenes mostramos TODAS (activas + inactivas) — el toggle por fila
   // permite reactivar/desactivar.
@@ -226,15 +228,7 @@ export default function AlmacenesPage() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => {
-                        if (
-                          confirm(
-                            `¿Eliminar bodega "${w.name}"? Si tiene movimientos, quedará desactivada en lugar de borrarse.`,
-                          )
-                        ) {
-                          removeMut.mutate(w.id);
-                        }
-                      }}
+                      onClick={() => setDeleteTarget(w)}
                       title="Eliminar"
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
@@ -290,6 +284,27 @@ export default function AlmacenesPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title="¿Eliminar bodega?"
+        description={
+          deleteTarget ? (
+            <>
+              Se intentará eliminar <strong>{deleteTarget.name}</strong>. Si
+              tiene movimientos de inventario asociados, quedará{' '}
+              <strong>desactivada</strong> en lugar de borrarse para preservar
+              el historial.
+            </>
+          ) : null
+        }
+        confirmLabel="Eliminar"
+        variant="destructive"
+        onConfirm={async () => {
+          if (deleteTarget) await removeMut.mutateAsync(deleteTarget.id);
+        }}
+      />
     </div>
   );
 }

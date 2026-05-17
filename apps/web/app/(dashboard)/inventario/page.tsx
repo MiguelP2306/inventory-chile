@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Settings2 } from 'lucide-react';
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { AdjustStockDialog } from '@/components/adjust-stock-dialog';
@@ -204,8 +205,25 @@ export default function InventarioPage() {
             )}
             {items.map((row) => (
               <TableRow key={row.product.id}>
-                <TableCell className="font-mono text-xs">{row.product.sku}</TableCell>
-                <TableCell>{row.product.name}</TableCell>
+                {/* Ronda 7 — SKU y nombre llevan al detalle del producto.
+                    Mantenemos el resto de las celdas no clickeables porque
+                    tienen interacciones propias (ubicación inline, ajustar). */}
+                <TableCell className="font-mono text-xs">
+                  <Link
+                    href={`/productos/${row.product.id}`}
+                    className="hover:underline"
+                  >
+                    {row.product.sku}
+                  </Link>
+                </TableCell>
+                <TableCell>
+                  <Link
+                    href={`/productos/${row.product.id}`}
+                    className="hover:underline"
+                  >
+                    {row.product.name}
+                  </Link>
+                </TableCell>
                 <TableCell>
                   <LocationCell
                     initialValue={row.locationCode}

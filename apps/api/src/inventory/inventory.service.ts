@@ -105,6 +105,38 @@ export class InventoryService {
     return movement;
   }
 
+  /**
+   * Inserta una fila en `inventory_movements` SIN modificar `stocks`. Usado
+   * para registrar eventos informativos que no mueven inventario real,
+   * como devoluciones de cliente con producto dañado (`RETURN_IN_DAMAGED`,
+   * Ronda 7). Comparte la misma firma que `applyMovement` para que el
+   * caller switchee entre uno y otro según la condición del item.
+   *
+   * NO valida `qty > 0` ni intenta upsertear el stock — solo persiste
+   * el registro de auditoría con la metadata que recibe.
+   */
+  async recordMovementWithoutStockImpact(
+    manager: EntityManager,
+    input: ApplyMovementInput,
+  ): Promise<InventoryMovement> {
+    const product = await manager.findOne(Product, { where: { id: input.productId } });
+    if (!product) throw new NotFoundException('Producto no encontrado');
+    const warehouse = await manager.findOne(Warehouse, { where: { id: input.warehouseId } });
+    if (!warehouse) throw new NotFoundException('Almacén no encontrado');
+
+    const movement = manager.create(InventoryMovement, {
+      productId: input.productId,
+      warehouseId: input.warehouseId,
+      type: input.type,
+      qty: input.qty,
+      unitCost: input.unitCost ?? null,
+      reference: input.reference ?? null,
+      refId: input.refId ?? null,
+      userId: input.userId,
+    });
+    return manager.save(movement);
+  }
+
   /** Endpoint de ajuste manual: corre applyMovement en una transacción nueva. */
   async adjust(dto: AdjustStockDto, userId: string) {
     const warehouseId = dto.warehouseId ?? (await this.defaultWarehouseId());
