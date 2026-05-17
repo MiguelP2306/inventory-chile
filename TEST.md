@@ -1,6 +1,6 @@
-# Guía de pruebas — Fases 6 → 8.5 + Ronda 4
+# Guía de pruebas — Fases 6 → 9
 
-Este documento es la guía de QA y testing manual para todo lo construido desde la **Fase 6 (Cotizaciones)** hasta la **Ronda 4 (Responsive móvil)**. Por cada fase encontrás:
+Este documento es la guía de QA y testing manual para todo lo construido desde la **Fase 6 (Cotizaciones)** hasta la **Fase 9 (Dashboard)**, incluyendo las Rondas transversales 4 (responsive móvil) y 7 (bundle de bugfixes). Por cada fase encontrás:
 
 1. **Qué es** — propósito del módulo en una línea.
 2. **Endpoints backend** — método, ruta, payload, respuesta esperada y errores comunes.
@@ -794,6 +794,155 @@ Ronda 4 es 100% frontend. No hay cambios en API ni en DB.
 
 ---
 
+## Fase 9 — Dashboard mobile-first
+
+### Qué es
+
+Pantalla principal `/` con **KPIs clicables** del día, embudo comercial, métricas del mes y alertas. Mobile-first: 1 columna en mobile, 2 en `md`, 4 en `lg`. Refresca cada 60s en background. Cada card es un `<Link>` que lleva al detalle filtrado.
+
+Iteración entregada: **9.1** (KPIs textuales + alertas). Iteración 9.2 (gráficos de tendencia, embudo visual con barras, top productos) queda como mejora futura.
+
+Incluye 1 reporte nuevo asociado: **/reportes/sin-movimiento**.
+
+### Endpoints
+
+#### `GET /api/dashboard/summary`
+
+Endpoint único agregado. 12 queries en paralelo dentro del servicio.
+
+```bash
+curl -b cookies.txt http://localhost:4000/api/dashboard/summary
+```
+
+**Respuesta 200 (ejemplo):**
+```json
+{
+  "today": {
+    "sales": { "count": 3, "amount": "450000.00" },
+    "quotations": { "count": 5, "amount": "780000.00" },
+    "cash": {
+      "total": "1250000.00",
+      "byMethod": { "CASH": "300000.00", "TRANSFER": "650000.00", "CARD": "300000.00" }
+    }
+  },
+  "lifecycle": {
+    "pendingFollowUp": 7,
+    "overdueFollowUp": 2,
+    "wonThisMonth": 12
+  },
+  "month": {
+    "profit": "2150000.00",
+    "salesSubtotal": "5600000.00",
+    "cogs": "2900000.00",
+    "expenses": "550000.00",
+    "inventoryValue": "8400000.00"
+  },
+  "alerts": {
+    "outOfStock": 4,
+    "lowStock": 11,
+    "noMovement30d": 23,
+    "inventoryTurnover": "0.35",
+    "inventoryTurnoverIsApprox": true
+  }
+}
+```
+
+**Errores comunes:**
+- `401` si la cookie expiró.
+- `500` si la DB está caída — body trae el mensaje técnico.
+
+#### `GET /api/reports/no-movement?days=30`
+
+Lista productos activos sin movimiento. Default `days=30`. Aceptados 1–365.
+
+```bash
+curl -b cookies.txt "http://localhost:4000/api/reports/no-movement?days=60"
+```
+
+**Respuesta 200:**
+```json
+{
+  "days": 60,
+  "totalProducts": 23,
+  "totalInventoryValue": "1200000.00",
+  "rows": [
+    {
+      "productId": "uuid",
+      "sku": "FIL-AC-203",
+      "name": "Filtro de aire Civic 2018",
+      "lastMovementAt": "2026-02-10T...",
+      "daysSinceLastMovement": 95,
+      "totalStock": 12,
+      "inventoryValue": "180000.00",
+      "categoryName": "Filtros",
+      "brandName": "Mahle"
+    }
+  ]
+}
+```
+
+**Casos borde:**
+- Producto sin ningún movimiento jamás → aparece igual con `lastMovementAt=null` y `daysSinceLastMovement=null`.
+- Productos inactivos → no se listan (filtro `isActive = TRUE`).
+
+#### `GET /api/reports/no-movement.csv?days=30`
+
+CSV con BOM UTF-8. Columnas: SKU, Producto, Categoria, Marca, Stock total, Valor inventario, Ultimo movimiento, Dias sin movimiento.
+
+```bash
+curl -b cookies.txt -o sin-mov.csv "http://localhost:4000/api/reports/no-movement.csv?days=30"
+```
+
+### Flujo UI — Dashboard
+
+1. Login → quedás en `/` automáticamente.
+2. **Esperado:** ves 4 secciones (Operación del día / Embudo comercial / Mes actual / Alertas). Cada sección con 3-4 cards.
+3. Cada card muestra: icono + título + valor grande + sublabel/subvalue chiquito.
+4. **Hover** sobre cualquier card → aparece una flecha (`→`) en la esquina superior derecha.
+5. **Click en cualquier card:**
+   - **"Ventas del día"** → `/ventas?dateFrom=<hoy>&dateTo=<hoy>` (filtro pre-aplicado).
+   - **"Cotizaciones del día"** → `/cotizaciones?dateFrom=<hoy>&dateTo=<hoy>`.
+   - **"Caja disponible"** → `/caja`.
+   - **"Pendientes de seguimiento"** → `/seguimiento?tab=pendientes`.
+   - **"Vencidos"** → `/seguimiento?tab=vencidos`.
+   - **"Ventas ganadas del mes"** → `/ventas?status=PAID&dateFrom=<inicio-mes>&dateTo=<hoy>`.
+   - **"Utilidad del mes"** → `/reportes/ventas?dateFrom=<inicio-mes>&dateTo=<hoy>`.
+   - **"Valor inventario"** → `/inventario`.
+   - **"Gastos del mes"** → `/gastos?dateFrom=<inicio-mes>&dateTo=<hoy>`.
+   - **"Stock crítico"** → `/inventario?status=out`.
+   - **"Bajo stock"** → `/inventario?status=low`.
+   - **"Sin movimiento 30d"** → `/reportes/sin-movimiento`.
+   - **"Rotación de inventario"** → `/reportes/sin-movimiento`.
+6. **Acentos visuales esperados:**
+   - "Pendientes" → borde ámbar al hover si > 0, gris si == 0.
+   - "Vencidos" → borde destructivo (rojo) al hover si > 0.
+   - "Stock crítico" → ícono rojo si > 0.
+   - "Bajo stock" → ícono ámbar si > 0.
+   - "Utilidad del mes" → ícono `TrendingUp` verde si ≥ 0, `TrendingDown` rojo si < 0.
+7. **Mobile (DevTools 375×667):** los cards se apilan en 1 columna. El sidebar desktop se oculta (Ronda 4) y queda el hamburger.
+8. **Refresh automático:** dejá la pantalla abierta y registrá una venta en otra pestaña. Volvé al dashboard sin recargar → los números se actualizan en ≤ 60s.
+
+### Flujo UI — Reporte sin movimiento
+
+1. Ir a **Reportes → Sin movimiento** (sidebar) o click desde el dashboard.
+2. **Esperado:** 2 cards arriba (Productos sin movimiento + Valor inmovilizado).
+3. Selector "Últimos N días" — opciones 30/60/90/180. Cambiar a 60 → tabla se actualiza.
+4. Tabla con 8 columnas: SKU (link al producto), Producto (link), Categoría, Marca, Stock total, Valor, Último movimiento, Días.
+5. **Click "Exportar CSV"** → descarga `sin-movimiento-30d.csv`. Abrir en Excel — los acentos se ven OK (BOM UTF-8).
+6. **Producto que nunca tuvo movimiento:** aparece con "nunca" en cursiva + "∞" en columna Días.
+7. **Sin resultados:** mensaje "Todos los productos tuvieron movimiento en los últimos 30 días."
+
+### Casos borde
+
+- **Base recién seedeada (sin ventas/cotizaciones):** todos los KPIs en 0/`$0`. Cards en color neutro. Sin errores.
+- **Producto sin stock en ninguna bodega:** se cuenta en "Stock crítico" y también en "Sin movimiento" si hace > 30 días que no tuvo activity.
+- **Cliente que volvió de `LOST`:** queda como `DRAFT_QUOTE`/`QUOTED` y aparece en "Pendientes" (ya no en LOST).
+- **Mes con solo cancelled sales:** `profit` queda negativo (solo cuentan gastos). UI muestra TrendingDown rojo.
+- **`inventoryTurnoverIsApprox: true`:** el card muestra "aprox. (COGS mes / inventario actual)" en la sublínea. Una vez que se implemente el snapshot diario, pasa a `false` y la sublínea dice "COGS mes / inventario promedio".
+- **`dateFrom > dateTo` en sub-pantallas:** los filtros del dashboard nunca generan ese estado (siempre es `start of month` o `today`), así que no se prueba acá. Los endpoints reciben el rango ya saneado.
+
+---
+
 ## Apéndice — Inspeccionar la base de datos
 
 Comandos útiles para verificar el estado durante el testing:
@@ -829,6 +978,36 @@ WHERE p.sku = 'FIL-001';
 -- Transacciones de caja
 SELECT id, type, source, paymentMethod, amount, description, isVoided
 FROM cash_transaction ORDER BY createdAt DESC LIMIT 20;
+
+-- Fase 9: contar ventas del día (debe coincidir con el card "Ventas del día")
+SELECT COUNT(*) AS count, COALESCE(SUM(total), 0) AS amount
+FROM sales
+WHERE date >= CURDATE() AND date < CURDATE() + INTERVAL 1 DAY
+  AND status != 'CANCELLED';
+
+-- Fase 9: utilidad del mes desglosada
+SELECT
+  (SELECT COALESCE(SUM(subtotal),0) FROM sales
+    WHERE date >= DATE_FORMAT(CURDATE(), '%Y-%m-01') AND status != 'CANCELLED') AS ventas_neto,
+  (SELECT COALESCE(SUM(si.unitCost * si.qty),0) FROM sale_items si
+    INNER JOIN sales s ON s.id = si.saleId
+    WHERE s.date >= DATE_FORMAT(CURDATE(), '%Y-%m-01') AND s.status != 'CANCELLED') AS cogs,
+  (SELECT COALESCE(SUM(amount),0) FROM expenses
+    WHERE date >= DATE_FORMAT(CURDATE(), '%Y-%m-01') AND isVoided = FALSE) AS gastos;
+
+-- Fase 9: productos sin movimiento en últimos 30 días
+SELECT COUNT(DISTINCT p.id) AS sin_movimiento
+FROM products p
+WHERE p.isActive = TRUE
+  AND NOT EXISTS (
+    SELECT 1 FROM inventory_movements m
+    WHERE m.productId = p.id AND m.createdAt >= NOW() - INTERVAL 30 DAY
+  );
+
+-- Fase 9: clientes pendientes de seguimiento (debe coincidir con "Pendientes")
+SELECT lifecycleStatus, COUNT(*) FROM customers
+WHERE lifecycleStatus IN ('QUOTED', 'FOLLOW_UP')
+GROUP BY lifecycleStatus;
 ```
 
 ---

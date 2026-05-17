@@ -9,6 +9,7 @@ import { CashboxModule } from './cashbox/cashbox.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CommunesModule } from './communes/communes.module';
 import { CustomersModule } from './customers/customers.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 import { dataSourceOptions } from './database/data-source';
 import { DispatchModule } from './dispatch/dispatch.module';
 import { ExpenseCategoriesModule } from './expense-categories/expense-categories.module';
@@ -77,6 +78,7 @@ import { WarrantiesModule } from './warranties/warranties.module';
     ReportsModule,
     LifecycleModule,
     HubspotModule,
+    DashboardModule,
   ],
   controllers: [HealthController],
   providers: [],

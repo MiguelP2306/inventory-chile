@@ -1,12 +1,13 @@
 import { SaleStatus } from '@inventory/shared';
 import type {
+  NoMovementReportDto,
   ReportCashFlowResponseDto,
   ReportIvaResponseDto,
   ReportSalesResponseDto,
 } from '@inventory/shared';
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Between, Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { Between, DataSource, Repository } from 'typeorm';
 import { dayRange } from '../common/date-range';
 import {
   CashTransaction,
@@ -35,6 +36,7 @@ export class ReportsService {
     private readonly purchases: Repository<PurchaseEntry>,
     @InjectRepository(CashTransaction)
     private readonly cashTxs: Repository<CashTransaction>,
+    @InjectDataSource() private readonly ds: DataSource,
   ) {}
 
   async sales_report(query: {
@@ -190,6 +192,90 @@ export class ReportsService {
       totalIncome: totalIncome.toFixed(2),
       totalExpense: totalExpense.toFixed(2),
       net: (totalIncome - totalExpense).toFixed(2),
+    };
+  }
+
+  /**
+   * Fase 9 — Reporte de productos sin movimiento en los últimos N días.
+   * "Sin movimiento" = no aparece como `productId` en ninguna fila reciente
+   * de `inventory_movements`. Productos NUEVOS (que nunca tuvieron
+   * movimiento) también se incluyen porque típicamente son stock estancado.
+   *
+   * Para cada fila:
+   *   - `lastMovementAt` = fecha del movimiento más reciente (null si nunca).
+   *   - `totalStock` = suma de stock sobre todas las bodegas activas.
+   *   - `inventoryValue` = totalStock × product.cost.
+   *
+   * Default `days = 30`. Soporta también 60/90 para análisis más profundo.
+   */
+  async noMovement(days: number): Promise<NoMovementReportDto> {
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    // Raw SQL — TypeORM queryBuilder con `from()` sin entity + subqueries
+    // correlacionadas genera SQL mal aliasado en algunas versiones. Más
+    // robusto ir directo a SQL parametrizado.
+    const rows: Array<{
+      productId: string;
+      sku: string;
+      name: string;
+      cost: string;
+      categoryName: string | null;
+      brandName: string | null;
+      lastMovementAt: Date | null;
+      totalStock: string;
+    }> = await this.ds.query(
+      `SELECT
+         p.id AS productId,
+         p.sku AS sku,
+         p.name AS name,
+         p.cost AS cost,
+         c.name AS categoryName,
+         b.name AS brandName,
+         (SELECT MAX(m.createdAt) FROM inventory_movements m WHERE m.productId = p.id) AS lastMovementAt,
+         (SELECT COALESCE(SUM(s.quantity), 0) FROM stocks s WHERE s.productId = p.id) AS totalStock
+       FROM products p
+       LEFT JOIN categories c ON c.id = p.categoryId
+       LEFT JOIN brands b ON b.id = p.brandId
+       WHERE p.isActive = TRUE
+         AND NOT EXISTS (
+           SELECT 1 FROM inventory_movements m2
+           WHERE m2.productId = p.id AND m2.createdAt >= ?
+         )
+       ORDER BY totalStock DESC, p.name ASC`,
+      [cutoff],
+    );
+
+    const now = Date.now();
+    let totalInventoryValue = 0;
+    const mapped = rows.map((r) => {
+      const stock = Number(r.totalStock);
+      const cost = Number(r.cost);
+      const value = stock * cost;
+      totalInventoryValue += value;
+      const lastMovAt = r.lastMovementAt
+        ? new Date(r.lastMovementAt).toISOString()
+        : null;
+      const daysSince = r.lastMovementAt
+        ? Math.floor((now - new Date(r.lastMovementAt).getTime()) / 86_400_000)
+        : null;
+      return {
+        productId: r.productId,
+        sku: r.sku,
+        name: r.name,
+        lastMovementAt: lastMovAt,
+        daysSinceLastMovement: daysSince,
+        totalStock: stock,
+        inventoryValue: value.toFixed(2),
+        categoryName: r.categoryName,
+        brandName: r.brandName,
+      };
+    });
+
+    return {
+      days,
+      rows: mapped,
+      totalProducts: mapped.length,
+      totalInventoryValue: totalInventoryValue.toFixed(2),
     };
   }
 }

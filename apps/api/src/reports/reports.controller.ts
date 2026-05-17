@@ -1,7 +1,7 @@
 import { Controller, Get, Query, Res } from '@nestjs/common';
 import { stringify } from 'csv-stringify/sync';
 import type { Response } from 'express';
-import { ReportDateRangeQueryDto } from './dto';
+import { NoMovementQueryDto, ReportDateRangeQueryDto } from './dto';
 import { ReportsService } from './reports.service';
 
 /**
@@ -84,6 +84,41 @@ export class ReportsController {
       quoted_string: true,
     });
     sendCsv(res, csv, `iva-${rangeSlug(query)}.csv`);
+  }
+
+  // ---------- Sin movimiento (Fase 9) ----------
+
+  @Get('no-movement')
+  async noMovement(@Query() query: NoMovementQueryDto) {
+    return this.svc.noMovement(query.days ?? 30);
+  }
+
+  @Get('no-movement.csv')
+  async noMovementCsv(
+    @Query() query: NoMovementQueryDto,
+    @Res() res: Response,
+  ) {
+    const days = query.days ?? 30;
+    const data = await this.svc.noMovement(days);
+    const csv = stringify(
+      data.rows.map((r): Record<string, string> => ({
+        SKU: r.sku,
+        Producto: r.name,
+        Categoria: r.categoryName ?? '',
+        Marca: r.brandName ?? '',
+        'Stock total': String(r.totalStock),
+        'Valor inventario': r.inventoryValue,
+        'Ultimo movimiento': r.lastMovementAt
+          ? r.lastMovementAt.slice(0, 10)
+          : 'Nunca',
+        'Dias sin movimiento':
+          r.daysSinceLastMovement !== null
+            ? String(r.daysSinceLastMovement)
+            : 'N/A',
+      })),
+      { header: true, bom: true, quoted_string: true },
+    );
+    sendCsv(res, csv, `sin-movimiento-${days}d.csv`);
   }
 
   // ---------- Flujo de caja ----------

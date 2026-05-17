@@ -27,7 +27,7 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 | 8 | Reportes + proyección de stock + lista de productos críticos (CSV/Excel) | ✅ |
 | 8.5 | **Lead lifecycle + Seguimiento comercial + HubSpot push** (WhatsApp como identificador, lifecycle automático `NEW`/`QUOTED`/`FOLLOW_UP`/`WON`/`LOST`, bandeja `/seguimiento`, sync one-way a HubSpot **off-by-default — stub listo, falta `@hubspot/api-client` cuando el cliente provea API key**) | ✅ |
 | — | **Ronda 4** (transversal antes de Fase 9): responsive móvil — sidebar drawer + tablas optimizadas + revisión de forms en mobile | ✅ |
-| 9 | Dashboard mobile-first con KPIs **clicables** del día + alertas + gráficos (depende de Fase 8.5 para "Pendientes de seguimiento") | pendiente |
+| 9 | Dashboard mobile-first con KPIs **clicables** del día + alertas (iteración 9.1; gráficos 9.2 pendiente) | ✅ |
 | 10 | Carga masiva Excel | pendiente |
 | 11 | Códigos de barras + etiquetas + refinamiento de plantillas | pendiente |
 | 12 | Deploy (Railway + Vercel + Resend) | pendiente |
@@ -1306,6 +1306,72 @@ En [`packages/shared/src/types.ts`](packages/shared/src/types.ts):
 - **Envío por email al transportista**: agregar un campo de email del transportista (en la sugerencia) o catálogo de transportistas con datos de contacto, para enviar la guía por email directamente desde el sistema. Hoy se descarga el PDF y se adjunta manualmente.
 - **Despachos parciales** (1:N): si el cliente eventualmente necesita despachar items de una venta en múltiples envíos (ej: 2 productos hoy con Chilexpress, 3 mañana con Starken), agregar `dispatch_note_items` con subset de items + qty, validar suma ≤ vendido, soportar "cuánto queda por despachar" en la UI. Mayor scope, mejor postergar hasta que aparezca el caso real.
 - **Refinamiento del PDF de la guía** (Fase 11): pulir el layout con branding final, agregar barcode CODE128 del número de tracking, ajustar el espacio para firma según uso real.
+
+---
+
+## Fase 9 — Dashboard mobile-first con KPIs clicables
+
+> Iteración **9.1** entregada (KPIs textuales + alertas). Iteración 9.2 (gráficos) queda como mejora futura si el cliente la pide tras usar el MVP.
+
+### Qué incluye
+
+La pantalla `/` deja de ser un placeholder y pasa a ser el **panel operativo principal**. Mobile-first: grid `grid-cols-1` en mobile, `md:grid-cols-2`, `lg:grid-cols-4`. **Todos los cards son clicables** — cada uno navega al detalle filtrado correspondiente.
+
+Cuatro secciones:
+
+1. **Operación del día** (granularidad nueva — la operación diaria):
+   - **Ventas del día** (count + monto facturado) → `/ventas?dateFrom=hoy&dateTo=hoy`.
+   - **Cotizaciones del día** (count + monto cotizado) → `/cotizaciones?dateFrom=hoy&dateTo=hoy`.
+   - **Caja disponible** (total + desglose por método CASH/TRANSFER/CARD) → `/caja`.
+
+2. **Embudo comercial** (depende de Fase 8.5):
+   - **Pendientes de seguimiento** (`QUOTED + FOLLOW_UP`) — ámbar si > 0 → `/seguimiento?tab=pendientes`.
+   - **Vencidos** (`FOLLOW_UP`) — destructivo si > 0 → `/seguimiento?tab=vencidos`.
+   - **Ventas ganadas del mes** (clientes `WON` con `lastContactAt` en el mes) → `/ventas?status=PAID&dateFrom=mes-actual`.
+
+3. **Mes actual**:
+   - **Utilidad del mes** = `subtotal_ventas_no_canceladas − COGS − gastos_no_anulados`. Decisión: dejar el IVA débito afuera porque no es ganancia operativa real (se balancea contra IVA crédito en el reporte de IVA). Verde si ≥ 0, destructivo si < 0.
+   - **Valor inventario**: `SUM(stock.quantity × product.cost)` sobre productos activos.
+   - **Gastos del mes**: suma de `expense.amount` excluyendo anulados.
+
+4. **Alertas**:
+   - **Stock crítico** (count productos `out`) — destructivo si > 0 → `/inventario?status=out`.
+   - **Bajo stock** (count `low`) — ámbar si > 0 → `/inventario?status=low`.
+   - **Sin movimiento 30d** (productos activos sin ningún movimiento en los últimos 30 días) → `/reportes/sin-movimiento`.
+   - **Rotación de inventario** (`COGS_mes / inventario_actual`, marcado como aprox. mientras no exista snapshot histórico) → `/reportes/sin-movimiento`.
+
+### Backend
+
+[`GET /api/dashboard/summary`](apps/api/src/dashboard/dashboard.controller.ts) — endpoint único agregado. Llama `Promise.all` con todas las queries (12 paralelas) y devuelve un objeto con los 4 grupos. El frontend lo cachea con TanStack Query (refetch cada 60s).
+
+```ts
+type DashboardSummaryDto = {
+  today: { sales, quotations, cash };
+  lifecycle: { pendingFollowUp, overdueFollowUp, wonThisMonth };
+  month: { profit, salesSubtotal, cogs, expenses, inventoryValue };
+  alerts: { outOfStock, lowStock, noMovement30d, inventoryTurnover, inventoryTurnoverIsApprox };
+};
+```
+
+[`GET /api/reports/no-movement?days=30|60|90|180`](apps/api/src/reports/reports.service.ts) — reporte nuevo de productos sin movimiento. Devuelve fila por producto con `sku`, nombre, categoría, marca, stock total agregado, valor inmovilizado, fecha del último movimiento y días transcurridos. También `GET /api/reports/no-movement.csv` exporta a CSV con BOM UTF-8.
+
+### Frontend
+
+- [`apps/web/app/(dashboard)/page.tsx`](apps/web/app/(dashboard)/page.tsx) — dashboard principal, client component que usa `useQuery({ refetchInterval: 60_000 })`. Estructura: 4 `<Section>` con cards `<KpiCard>`. Cards usan `<Link>` (no `<button>`) para soportar middle-click y prefetch.
+- [`apps/web/app/(dashboard)/reportes/sin-movimiento/page.tsx`](apps/web/app/(dashboard)/reportes/sin-movimiento/page.tsx) — listado tabular con selector de días (30/60/90/180), 2 cards de totales (productos + valor inmovilizado), botón "Exportar CSV".
+- [`apps/web/lib/dashboard-api.ts`](apps/web/lib/dashboard-api.ts) — wrappers axios + `getNoMovementCsvUrl()`.
+- Entrada en el sidebar bajo **Reportes**: "Sin movimiento".
+
+### Cómo testear
+
+Ver [TEST.md](TEST.md#fase-9--dashboard) — sección "Fase 9".
+
+### Decisiones de diseño
+
+- **Un endpoint vs varios**: elegido endpoint agregado por mobile-first (menos round trips). Hay 12 queries en paralelo en backend; el response típico pesa ~1 KB.
+- **Refresh automático cada 60s**: balance entre datos frescos y costo. El operador puede pull-to-refresh manualmente si quiere ver cambios instantáneos.
+- **Rotación de inventario aproximada**: `COGS_mes / inventario_ACTUAL` (no promedio del mes) — single-point. La fórmula correcta requiere un job diario que snapshote stock, lo que aún no tenemos. Marcamos `inventoryTurnoverIsApprox: true` en el response y la UI muestra "aprox." debajo del número.
+- **"Ventas ganadas del mes"**: conteo de clientes `WON` con `lastContactAt` en el mes (no de ventas individuales) — coincide con la semántica del embudo de Fase 8.5.
 
 ---
 

@@ -15,6 +15,7 @@ import {
   LineChart,
   MessageCircle,
   Package,
+  PackageX,
   Receipt,
   RotateCcw,
   Settings,
@@ -167,6 +168,13 @@ const SECTIONS: NavSection[] = [
         label: 'Flujo de caja',
         icon: LineChart,
         matchPrefix: ['/reportes/flujo-caja'],
+      },
+      // Fase 9 — productos sin movimiento.
+      {
+        href: '/reportes/sin-movimiento',
+        label: 'Sin movimiento',
+        icon: PackageX,
+        matchPrefix: ['/reportes/sin-movimiento'],
       },
     ],
   },

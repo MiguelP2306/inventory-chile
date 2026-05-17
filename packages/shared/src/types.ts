@@ -963,3 +963,67 @@ export interface CreateDispatchNoteInput {
 export interface VoidDispatchNoteInput {
   reason: string;
 }
+
+// ---------- Fase 9 — Dashboard ----------
+
+export interface DashboardSummaryDto {
+  today: {
+    sales: { count: number; amount: string };
+    quotations: { count: number; amount: string };
+    cash: {
+      total: string;
+      byMethod: Record<PaymentMethodDto, string>;
+    };
+  };
+  lifecycle: {
+    // Clientes en QUOTED + FOLLOW_UP (independiente de nextFollowUpAt). Es
+    // el universo del embudo abierto.
+    pendingFollowUp: number;
+    // Subset: solo FOLLOW_UP (vencidos por el cron).
+    overdueFollowUp: number;
+    // Conteo de clientes WON cuyo último contacto cae en el mes actual.
+    wonThisMonth: number;
+  };
+  month: {
+    // Utilidad operativa = subtotal_ventas_neto − COGS − gastos.
+    profit: string;
+    salesSubtotal: string;
+    cogs: string;
+    expenses: string;
+    inventoryValue: string;
+  };
+  alerts: {
+    outOfStock: number;
+    lowStock: number;
+    noMovement30d: number;
+    // Cociente COGS_mes / inventario actual. Marcado como `isApprox` mientras
+    // no haya snapshot histórico para promediar inventario.
+    inventoryTurnover: string;
+    inventoryTurnoverIsApprox: boolean;
+  };
+}
+
+// ---------- Fase 9 — Reporte sin movimiento ----------
+
+export interface NoMovementRowDto {
+  productId: string;
+  sku: string;
+  name: string;
+  // Última vez que el producto tuvo cualquier movimiento (entrada, salida,
+  // ajuste, transfer). Null si nunca tuvo.
+  lastMovementAt: string | null;
+  daysSinceLastMovement: number | null;
+  // Stock actual sumando todas las bodegas activas.
+  totalStock: number;
+  // Costo total del stock detenido: quantity × product.cost.
+  inventoryValue: string;
+  categoryName: string | null;
+  brandName: string | null;
+}
+
+export interface NoMovementReportDto {
+  days: number;
+  rows: NoMovementRowDto[];
+  totalProducts: number;
+  totalInventoryValue: string;
+}

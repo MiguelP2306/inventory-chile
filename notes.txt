@@ -6,8 +6,14 @@ Probar de no borrar almacen si tiene relacion
 ==========================
 
 Bugs Actuales:
-Toda la pagina esta en acento arg
 Genere una gia de despacho a una venta y no se vio reflejada en "movimientos"
 Anule una gia de despacho de una venta y no se vio reflejada en "movimientos"
 Cancele la devolucion de una venta con el tipo de devolucion "dañada" y no se vio reflejada en "movimientos"
 En compras agregar filtro por rango de precio hay un deley muy grande en lo que tecleo el numero, si tipeo muy rapido se pierde informacion
+
+=========================
+
+Puntos a futuro:
+Toda la pagina esta en acento arg
+Mejorar Dashboard con graficos
+Toggle de modal de Ventas (%/$) mejorar en UX
