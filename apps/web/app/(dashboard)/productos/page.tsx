@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Plus } from 'lucide-react';
+import { FileSpreadsheet, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { useMemo } from 'react';
 import { ProductThumbnail } from '@/components/product-thumbnail';
@@ -135,6 +135,12 @@ export default function ProductosPage() {
               Limpiar filtros
             </Button>
           )}
+          <Button asChild variant="outline">
+            <Link href="/productos/importar">
+              <FileSpreadsheet className="h-4 w-4" />
+              Importar Excel
+            </Link>
+          </Button>
           <Button asChild>
             <Link href="/productos/nuevo">
               <Plus className="h-4 w-4" />

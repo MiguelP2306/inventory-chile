@@ -1,6 +1,6 @@
-# Guía de pruebas — Fases 6 → 9
+# Guía de pruebas — Fases 6 → 10
 
-Este documento es la guía de QA y testing manual para todo lo construido desde la **Fase 6 (Cotizaciones)** hasta la **Fase 9 (Dashboard)**, incluyendo las Rondas transversales 4 (responsive móvil) y 7 (bundle de bugfixes). Por cada fase encontrás:
+Este documento es la guía de QA y testing manual para todo lo construido desde la **Fase 6 (Cotizaciones)** hasta la **Fase 10 (Carga masiva Excel)**, incluyendo las Rondas transversales 4 (responsive móvil) y 7 (bundle de bugfixes). Por cada fase encontrás:
 
 1. **Qué es** — propósito del módulo en una línea.
 2. **Endpoints backend** — método, ruta, payload, respuesta esperada y errores comunes.
@@ -940,6 +940,180 @@ curl -b cookies.txt -o sin-mov.csv "http://localhost:4000/api/reports/no-movemen
 - **Mes con solo cancelled sales:** `profit` queda negativo (solo cuentan gastos). UI muestra TrendingDown rojo.
 - **`inventoryTurnoverIsApprox: true`:** el card muestra "aprox. (COGS mes / inventario actual)" en la sublínea. Una vez que se implemente el snapshot diario, pasa a `false` y la sublínea dice "COGS mes / inventario promedio".
 - **`dateFrom > dateTo` en sub-pantallas:** los filtros del dashboard nunca generan ese estado (siempre es `start of month` o `today`), así que no se prueba acá. Los endpoints reciben el rango ya saneado.
+
+---
+
+## Fase 10 — Carga masiva Excel
+
+### Qué es
+
+Importador de productos en bloque desde un archivo `.xlsx`. Flujo de **2 pasos**:
+
+1. **Preview**: parsea el Excel, valida cada fila, devuelve conteos + primeras 10 filas + lista de errores + categorías/marcas que se crearían.
+2. **Confirm**: ejecuta el upsert + auto-create. Partial success — si una fila falla, las demás siguen.
+
+Estrategia: **UPSERT por SKU** (si existe se actualiza, si no se crea). Categorías y marcas faltantes se crean automáticamente al confirmar.
+
+### Endpoints
+
+#### `GET /api/imports/products/template.xlsx`
+
+Descarga la plantilla con headers + 1 fila de ejemplo + hoja "Instrucciones".
+
+```bash
+curl -b cookies.txt -o plantilla.xlsx \
+  http://localhost:4000/api/imports/products/template.xlsx
+```
+
+#### `POST /api/imports/products/preview`
+
+Multipart con `file` (.xlsx, máx 5 MB). NO modifica nada — solo parsea.
+
+```bash
+curl -b cookies.txt -F "file=@productos.xlsx" \
+  http://localhost:4000/api/imports/products/preview
+```
+
+**Respuesta 200 (ejemplo):**
+```json
+{
+  "totalRows": 50,
+  "validCount": 47,
+  "createCount": 32,
+  "updateCount": 15,
+  "errorCount": 3,
+  "previewRows": [
+    {
+      "rowNumber": 2,
+      "action": "create",
+      "sku": "FIL-AC-001",
+      "name": "Filtro de aire Toyota Corolla 2018",
+      "categoryName": "Filtros",
+      "brandName": "Mahle",
+      "cost": "8000.00",
+      "price": "15000.00",
+      "productKind": "ORIGINAL",
+      "compatibleCodes": ["A12345", "B67890"],
+      "existingProductId": null
+    }
+  ],
+  "errors": [
+    { "rowNumber": 7, "sku": null, "message": "SKU vacío" },
+    { "rowNumber": 12, "sku": "ABC", "message": "Costo no es un número válido" },
+    { "rowNumber": 23, "sku": "DEF", "message": "SKU duplicado dentro del mismo Excel" }
+  ],
+  "newCategories": ["Filtros", "Aceites"],
+  "newBrands": ["Mahle"]
+}
+```
+
+**Errores comunes:**
+- `400` — archivo faltante (campo `file` no enviado).
+- `400` — archivo vacío.
+- `400` — mimetype no es `.xlsx`.
+- `400` — extensión no es `.xlsx`.
+- `400` — el archivo no tiene hojas o falta el header "SKU" / "Nombre".
+- `413` — archivo supera 5 MB.
+
+#### `POST /api/imports/products/confirm`
+
+Multipart idéntico al preview. **Sí modifica** la DB.
+
+```bash
+curl -b cookies.txt -F "file=@productos.xlsx" \
+  http://localhost:4000/api/imports/products/confirm
+```
+
+**Respuesta 200 (ejemplo):**
+```json
+{
+  "importedCount": 47,
+  "createdCount": 32,
+  "updatedCount": 15,
+  "failedCount": 3,
+  "errors": [
+    { "rowNumber": 7, "sku": null, "message": "SKU vacío" },
+    { "rowNumber": 12, "sku": "ABC", "message": "Costo no es un número válido" },
+    { "rowNumber": 23, "sku": "DEF", "message": "SKU duplicado dentro del mismo Excel" }
+  ],
+  "createdCategories": ["Filtros", "Aceites"],
+  "createdBrands": ["Mahle"]
+}
+```
+
+**Convenciones de números:**
+- Costo/precio: acepta `8000` o `8.000` (separador miles) o `8,00` (decimal coma). Default 0.
+- Stock min/max: enteros ≥ 0. Vacío = sin límite (en max) o 0 (en min).
+
+**productKind:**
+- Valor válido: `ORIGINAL`, `ALTERNATIVE` (también acepta `ALTERNATIVO` en español).
+- Default: `ORIGINAL`.
+
+**Códigos compatibles:**
+- Lista separada por `;` (punto y coma). Espacios alrededor se ignoran.
+- Estrategia replace: al actualizar un producto existente, se borran los códigos previos y se reinsertan los del Excel.
+
+### Flujo UI
+
+#### 1. Descargar plantilla
+
+1. Login → **Productos** (sidebar Catálogo).
+2. Header → botón **"Importar Excel"** → abre `/productos/importar`.
+3. Botón **"Descargar plantilla"** (esquina superior derecha) → descarga `plantilla-productos.xlsx`.
+4. Abrir en Excel. Hoja 1: headers + 1 fila de ejemplo. Hoja 2: instrucciones con descripción de cada columna.
+
+#### 2. Subir Excel + preview
+
+1. Completar offline (mínimo: `SKU` + `Nombre` por fila).
+2. Volver a `/productos/importar`.
+3. **Drag&drop el archivo** sobre la zona punteada, o click "Elegir archivo".
+4. **Esperado:** se muestra spinner breve, luego el preview:
+   - 4 cards de conteo: Total filas / A crear / A actualizar / Errores.
+   - Si hay categorías o marcas nuevas: bloque violeta "Se crearán automáticamente: 5 categorías, 3 marcas: Filtros, Aceites, ...".
+   - Si hay errores: bloque rojo "3 filas con errores (no se importarán): Fila 7 (sin SKU)...".
+   - Tabla con las primeras 10 filas válidas, cada una con badge "Nuevo" (verde) o "Actualizar" (azul).
+5. Click **"Cancelar"** → vuelve a la zona de drop. **"Confirmar e importar N productos"** → ejecuta.
+
+#### 3. Resultado
+
+1. Card verde "Importación completada — 47 productos (32 creados, 15 actualizados). 3 filas con errores no se importaron".
+2. 4 cards: Productos creados / actualizados / Categorías nuevas / Marcas nuevas.
+3. Si se crearon categorías/marcas: bloque con la lista.
+4. Si hubo errores: bloque rojo con detalle fila por fila.
+5. Botones **"Ver catálogo"** (vuelve a `/productos`) / **"Importar otro Excel"** (reset).
+
+### Casos borde
+
+- **Excel con headers renombrados (ej. "sku" en minúscula, "Costo" sin "(bruto)"):** se reconoce igual gracias a normalización (lowercase + sin acentos + sin caracteres especiales). Headers obligatorios: solo "SKU" y "Nombre".
+- **Categoría con tilde** (ej. "Bujías"): se preserva tal cual. Si ya existía como "Bujias" (sin tilde), se considera distinta — el operador debe unificar antes.
+- **Mismo SKU dos veces dentro del mismo Excel:** la 2da fila se reporta como error "SKU duplicado dentro del mismo Excel" (no se procesa para evitar conflictos de versión).
+- **Producto existente con códigos compatibles previos:** al actualizar se REEMPLAZAN (los anteriores se borran). Si el operador NO incluye la columna `Codigos compatibles` en el Excel, los códigos previos del producto **se borran**. Para preservarlos hay que repetirlos en el Excel.
+- **Costo vacío:** se guarda como 0. La validación de RUT/numéricos solo falla si el campo viene con texto no numérico.
+- **Filas vacías:** se ignoran silenciosamente (no cuentan en totalRows). Permite dejar filas blancas entre bloques sin que rompan la importación.
+- **Excel > 5 MB:** respuesta `413 Payload Too Large`. Dividir en varios archivos.
+- **Excel sin hoja "Productos":** se procesa la primera hoja del workbook (cualquier nombre). Solo importa que el header coincida con los nombres esperados.
+
+### Verificación en DB después del confirm
+
+```sql
+-- Productos creados (los más nuevos al final)
+SELECT sku, name, categoryId, brandId, cost, price, productKind
+FROM products ORDER BY createdAt DESC LIMIT 10;
+
+-- Códigos compatibles agregados
+SELECT pc.productId, p.sku, pc.code
+FROM product_codes pc
+JOIN products p ON p.id = pc.productId
+WHERE pc.kind = 'COMPATIBLE'
+ORDER BY p.sku LIMIT 20;
+
+-- Categorías/marcas creadas como efecto colateral (sin productos previos)
+SELECT 'cat' AS tipo, c.name FROM categories c
+WHERE NOT EXISTS (SELECT 1 FROM products p WHERE p.categoryId = c.id AND p.createdAt < c.createdAt - INTERVAL 1 MINUTE)
+UNION
+SELECT 'brand', b.name FROM brands b
+WHERE NOT EXISTS (SELECT 1 FROM products p WHERE p.brandId = b.id AND p.createdAt < b.createdAt - INTERVAL 1 MINUTE);
+```
 
 ---
 

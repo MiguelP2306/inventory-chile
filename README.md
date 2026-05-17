@@ -28,7 +28,7 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 | 8.5 | **Lead lifecycle + Seguimiento comercial + HubSpot push** (WhatsApp como identificador, lifecycle automático `NEW`/`QUOTED`/`FOLLOW_UP`/`WON`/`LOST`, bandeja `/seguimiento`, sync one-way a HubSpot **off-by-default — stub listo, falta `@hubspot/api-client` cuando el cliente provea API key**) | ✅ |
 | — | **Ronda 4** (transversal antes de Fase 9): responsive móvil — sidebar drawer + tablas optimizadas + revisión de forms en mobile | ✅ |
 | 9 | Dashboard mobile-first con KPIs **clicables** del día + alertas (iteración 9.1; gráficos 9.2 pendiente) | ✅ |
-| 10 | Carga masiva Excel | pendiente |
+| 10 | Carga masiva Excel (upsert por SKU + auto-create categorías/marcas) | ✅ |
 | 11 | Códigos de barras + etiquetas + refinamiento de plantillas | pendiente |
 | 12 | Deploy (Railway + Vercel + Resend) | pendiente |
 | 13 | HubSpot refinamientos post-MVP (webhook inverso + Deals + sync histórico) — base ya en Fase 8.5 | pendiente |
@@ -1372,6 +1372,65 @@ Ver [TEST.md](TEST.md#fase-9--dashboard) — sección "Fase 9".
 - **Refresh automático cada 60s**: balance entre datos frescos y costo. El operador puede pull-to-refresh manualmente si quiere ver cambios instantáneos.
 - **Rotación de inventario aproximada**: `COGS_mes / inventario_ACTUAL` (no promedio del mes) — single-point. La fórmula correcta requiere un job diario que snapshote stock, lo que aún no tenemos. Marcamos `inventoryTurnoverIsApprox: true` en el response y la UI muestra "aprox." debajo del número.
 - **"Ventas ganadas del mes"**: conteo de clientes `WON` con `lastContactAt` en el mes (no de ventas individuales) — coincide con la semántica del embudo de Fase 8.5.
+
+---
+
+## Fase 10 — Carga masiva Excel
+
+Importador de productos en bloque para acelerar la carga inicial del catálogo o actualizaciones masivas (precio, costo, códigos compatibles). Flujo de 2 pasos: **subir → preview → confirmar**.
+
+### Decisiones de diseño
+
+- **Estrategia: UPSERT por SKU.** Si el SKU del Excel ya existe en el sistema, la fila lo **actualiza**; si no, lo **crea**. Permite cargar planillas incrementales sin duplicados ni errores. El preview marca cada fila como "Nuevo" (badge verde) o "Actualizar" (badge azul) antes de confirmar.
+- **Auto-create de categorías y marcas.** Si la columna `Categoria` trae un nombre que no existe en el sistema, se crea automáticamente al confirmar. Idem `Marca`. El preview los lista como "Se crearán automáticamente: 5 categorías, 3 marcas" para que el operador no se sorprenda.
+- **Partial success.** Si una fila tiene error (SKU vacío, costo no numérico, etc.), se reporta en el preview con número de fila + motivo. Al confirmar, **las filas válidas se importan y las inválidas se omiten** — no se aborta el batch. La pantalla de resultado lista cada error para que el operador corrija y re-suba si quiere.
+- **No carga stock inicial.** El Excel solo define metadata del catálogo. Stock arranca en 0 en todas las bodegas. Para cargar stock inicial el operador hace una compra histórica o un ajuste manual desde `/inventario`.
+- **Solo .xlsx (no .csv).** Aprovecha celdas tipadas y soporte nativo de Excel/Numbers. Tamaño máximo 5 MB.
+
+### Plantilla
+
+[`GET /api/imports/products/template.xlsx`](apps/api/src/imports/imports.service.ts) — descarga una plantilla con:
+
+- **Hoja "Productos"** con headers en español + 1 fila de ejemplo.
+- **Hoja "Instrucciones"** con descripción de cada columna y cuáles son obligatorias.
+
+### Columnas
+
+| Columna del Excel | Obligatoria | Descripción |
+| --- | --- | --- |
+| `SKU` | ✅ | Código único interno. Sirve de clave para upsert. |
+| `Nombre` | ✅ | Nombre comercial. |
+| `PartNumber` | — | Código de pieza del fabricante. Indexado para búsqueda. |
+| `Codigo de barras` | — | Barcode escaneado. |
+| `Codigo universal` | — | Código universal (Fase 4B). Compartido entre productos equivalentes. |
+| `Descripcion` | — | Texto libre. |
+| `Categoria` | — | Nombre. Si no existe, se crea. Si vacío, producto sin categoría. |
+| `Marca` | — | Nombre. Si no existe, se crea. |
+| `Costo (bruto)` | — | CLP con IVA. Acepta `8000` o `8.000` o `8,00`. Default 0. |
+| `Precio (bruto)` | — | CLP con IVA. Default 0. |
+| `Stock minimo` | — | Entero ≥ 0. Default 0. |
+| `Stock maximo` | — | Entero ≥ 0. Vacío = sin límite. |
+| `Ubicacion (deprecated)` | — | Deprecated desde Fase 7.5. Usar `locationCode` por bodega. |
+| `Tipo (ORIGINAL/ALTERNATIVE)` | — | Default ORIGINAL. Acepta también "ALTERNATIVO". |
+| `Codigos compatibles (separados por ;)` | — | Lista de equivalencias separados por punto y coma. Ej: `A123; B456; XYZ-789`. Estrategia replace: borra los anteriores y reinserta. |
+
+### Endpoints
+
+- [`POST /api/imports/products/preview`](apps/api/src/imports/imports.controller.ts) — multipart con `file`. Parsea, valida, devuelve `ProductImportPreviewDto` (conteos + primeras 10 filas + errores + categorías/marcas a crear).
+- [`POST /api/imports/products/confirm`](apps/api/src/imports/imports.controller.ts) — mismo multipart. Ejecuta el upsert + auto-create. Devuelve `ProductImportResultDto` (importedCount, createdCount, updatedCount, failedCount, errors).
+- [`GET /api/imports/products/template.xlsx`](apps/api/src/imports/imports.controller.ts) — descarga la plantilla.
+
+### UI
+
+- **`/productos/importar`** ([apps/web/app/(dashboard)/productos/importar/page.tsx](apps/web/app/(dashboard)/productos/importar/page.tsx)) — drag&drop o file picker. Tres estados:
+  1. **Subir**: zona drop con borde punteado. Acepta solo `.xlsx`.
+  2. **Preview**: 4 cards de conteo + lista de categorías/marcas a crear + lista de errores + tabla con primeras 10 filas válidas + botones "Cancelar" / "Confirmar e importar N productos".
+  3. **Resultado**: card verde de éxito + 4 cards de conteo final + lista de errores no resueltos + botones "Ver catálogo" / "Importar otro Excel".
+- Botón **"Importar Excel"** en el header de `/productos` que abre la pantalla.
+
+### Cómo testear
+
+Ver [TEST.md](TEST.md#fase-10--carga-masiva-excel) — sección "Fase 10".
 
 ---
 

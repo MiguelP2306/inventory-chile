@@ -16,6 +16,7 @@ import { ExpenseCategoriesModule } from './expense-categories/expense-categories
 import { ExpensesModule } from './expenses/expenses.module';
 import { HealthController } from './health.controller';
 import { HubspotModule } from './hubspot/hubspot.module';
+import { ImportsModule } from './imports/imports.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { LifecycleModule } from './lifecycle/lifecycle.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -79,6 +80,7 @@ import { WarrantiesModule } from './warranties/warranties.module';
     LifecycleModule,
     HubspotModule,
     DashboardModule,
+    ImportsModule,
   ],
   controllers: [HealthController],
   providers: [],

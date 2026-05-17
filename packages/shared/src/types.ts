@@ -1027,3 +1027,87 @@ export interface NoMovementReportDto {
   totalProducts: number;
   totalInventoryValue: string;
 }
+
+// ---------- Fase 10 — Carga masiva Excel ----------
+
+/**
+ * Acción que el importador planea ejecutar para una fila del Excel:
+ *  - `create` → SKU no existe en el catálogo, se va a crear.
+ *  - `update` → SKU ya existe, se va a actualizar (upsert por SKU).
+ *  - `skip`   → fila inválida o vacía, no se procesa.
+ */
+export type ProductImportAction = 'create' | 'update' | 'skip';
+
+/**
+ * Fila parseada del Excel ya validada y lista para mostrar en el preview.
+ * Los campos coinciden con el DTO de creación de productos. `null` indica
+ * que la columna estaba vacía o no aplica.
+ */
+export interface ProductImportRowDto {
+  rowNumber: number; // número de fila en el Excel (2 = primera fila de datos)
+  action: ProductImportAction;
+  sku: string;
+  name: string;
+  partNumber: string | null;
+  barcode: string | null;
+  universalCode: string | null;
+  description: string | null;
+  // Nombre tal como vino en el Excel; al confirmar, si la categoría/marca no
+  // existe se crea automáticamente.
+  categoryName: string | null;
+  brandName: string | null;
+  cost: string | null;
+  price: string | null;
+  minStock: number | null;
+  maxStock: number | null;
+  location: string | null;
+  productKind: 'ORIGINAL' | 'ALTERNATIVE' | null;
+  // Lista de códigos compatibles ya parseados (separados por `;` en el Excel).
+  compatibleCodes: string[];
+  // Si `action='update'`, el id del producto existente. Null si es create.
+  existingProductId: string | null;
+}
+
+export interface ProductImportErrorDto {
+  rowNumber: number;
+  sku: string | null;
+  message: string;
+}
+
+/**
+ * Resumen del preview: lo que el operador ve ANTES de confirmar. Incluye
+ * conteos por tipo de acción, primeras 10 filas para inspección visual,
+ * lista completa de errores y los nombres de categorías/marcas que se
+ * crearían automáticamente al confirmar.
+ */
+export interface ProductImportPreviewDto {
+  totalRows: number;
+  validCount: number;
+  createCount: number;
+  updateCount: number;
+  errorCount: number;
+  // Primeras 10 filas válidas para que el operador inspeccione antes de
+  // confirmar. Si hay menos de 10 válidas, devuelve las que haya.
+  previewRows: ProductImportRowDto[];
+  errors: ProductImportErrorDto[];
+  // Nombres de categorías/marcas que aparecen en el Excel y todavía NO
+  // existen en el sistema. Al confirmar se crean automáticamente.
+  newCategories: string[];
+  newBrands: string[];
+}
+
+/**
+ * Resultado al confirmar la importación. Reporta cuántas filas se procesaron
+ * con éxito (separadas en created/updated) y cuántas fallaron con su detalle.
+ * Las filas fallidas NO bloquean las exitosas (partial success).
+ */
+export interface ProductImportResultDto {
+  importedCount: number;
+  createdCount: number;
+  updatedCount: number;
+  failedCount: number;
+  errors: ProductImportErrorDto[];
+  // Categorías/marcas que se crearon como efecto colateral.
+  createdCategories: string[];
+  createdBrands: string[];
+}
