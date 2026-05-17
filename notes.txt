@@ -1,23 +1,11 @@
+Dudas:
 No entiendo nada referente a Marcar como perdido al cliente 
 Probar de nuevo la devolucion de una venta confirmar que regresa el stock
 Probar de no borrar almacen si tiene relacion
 
 ==========================
 
-
-
-==========================
-
-Bug actuales 
-
-Seguimiento / Clientes:id
-
-    Cuando le hago la cotizacion a un cliente pero lo dejo como borrador, el badge que muestra en volver al detalle del cliente y en seguimiento aparece como "Cotizado", esto es incorrecto y puede crear confusion, el cliente se le hizo la cotizacion efectivamente pero no fue enviada, solo se guardo esa cotizacion de ese cliente en borradores, deberia tener otro estado que haga referencia a que la cotizacion fue creada pero guardada en borradores. Cuando la cotizacion es enviada el badge correcto que deberia de tener estas dos partes es la que tiene actualmente "Cotizado"
-    Cuando presiono en "Ver cotizacion del cliente" me envia a la ruta de cotizaciones pero sin el id de la cotizacion, solo me abre la lista de todas las cotizaciones, debe de abrirme la cotizacion que seleccione con el id
-
-
-==========================
-
+Bugs Actuales:
 Toda la pagina esta en acento arg
 Genere una gia de despacho a una venta y no se vio reflejada en "movimientos"
 Anule una gia de despacho de una venta y no se vio reflejada en "movimientos"
