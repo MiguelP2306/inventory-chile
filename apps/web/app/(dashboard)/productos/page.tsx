@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { FileSpreadsheet, Plus } from 'lucide-react';
+import { FileDown, FileSpreadsheet, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { useMemo } from 'react';
 import { ProductThumbnail } from '@/components/product-thumbnail';
@@ -23,6 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { apiAbsoluteUrl } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
 import {
   listBrands,
@@ -54,6 +55,9 @@ const filterDefaults = {
   vmake: '',
   vmodel: '',
   vyear: '',
+  // Ronda 9 — filtros por fecha de creación.
+  createdFrom: '',
+  createdTo: '',
   page: '',
 } as const;
 
@@ -68,6 +72,8 @@ export default function ProductosPage() {
   const vehMakeId = values.vmake || ALL;
   const vehModelId = values.vmodel || ALL;
   const vehYear = values.vyear ?? '';
+  const createdFrom = values.createdFrom ?? '';
+  const createdTo = values.createdTo ?? '';
   const page = Number(values.page || '1');
 
   const debouncedQ = (values.q ?? '').trim();
@@ -79,9 +85,14 @@ export default function ProductosPage() {
     categoryId !== ALL ||
     brandId !== ALL ||
     productKind !== ALL ||
+    createdFrom !== '' ||
+    createdTo !== '' ||
     vehicleSearchActive;
 
-  const categories = useQuery({ queryKey: ['categories'], queryFn: listCategories });
+  const categories = useQuery({
+    queryKey: ['categories'],
+    queryFn: () => listCategories(),
+  });
   const brands = useQuery({ queryKey: ['brands'], queryFn: listBrands });
   const makes = useQuery({ queryKey: ['vehicle-makes'], queryFn: listVehicleMakes });
   const models = useQuery({
@@ -91,7 +102,18 @@ export default function ProductosPage() {
   });
 
   const list = useQuery({
-    queryKey: ['products', { q: debouncedQ, categoryId, brandId, productKind, page }],
+    queryKey: [
+      'products',
+      {
+        q: debouncedQ,
+        categoryId,
+        brandId,
+        productKind,
+        createdFrom,
+        createdTo,
+        page,
+      },
+    ],
     queryFn: () =>
       listProducts({
         q: debouncedQ || undefined,
@@ -99,6 +121,8 @@ export default function ProductosPage() {
         brandId: brandId === ALL ? undefined : brandId,
         productKind:
           productKind === ALL ? undefined : (productKind as ProductKindDto),
+        createdFrom: createdFrom || undefined,
+        createdTo: createdTo || undefined,
         page,
         pageSize: PAGE_SIZE,
       }),
@@ -135,6 +159,28 @@ export default function ProductosPage() {
               Limpiar filtros
             </Button>
           )}
+          {/* Ronda 10 — exportar catálogo PDF con los filtros activos.
+              Ronda 12 — apuntar al API backend (no a Next.js) usando
+              `apiAbsoluteUrl`. */}
+          <Button asChild variant="outline">
+            <a
+              href={apiAbsoluteUrl(
+                `products/catalog.pdf${buildCatalogQuery({
+                  q: debouncedQ,
+                  categoryId: categoryId === ALL ? undefined : categoryId,
+                  brandId: brandId === ALL ? undefined : brandId,
+                  productKind: productKind === ALL ? undefined : productKind,
+                  createdFrom: createdFrom || undefined,
+                  createdTo: createdTo || undefined,
+                })}`,
+              )}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <FileDown className="h-4 w-4" />
+              Catálogo PDF
+            </a>
+          </Button>
           <Button asChild variant="outline">
             <Link href="/productos/importar">
               <FileSpreadsheet className="h-4 w-4" />
@@ -166,11 +212,34 @@ export default function ProductosPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={ALL}>Todas las categorías</SelectItem>
-            {categories.data?.map((c) => (
-              <SelectItem key={c.id} value={c.id}>
-                {c.name}
-              </SelectItem>
-            ))}
+            {/* Ronda 10 — render jerárquico: raíces con sus hijas debajo.
+                Filtrar por la raíz incluye productos de cualquiera de
+                sus subcategorías (resuelto en backend). */}
+            {(() => {
+              const all = categories.data ?? [];
+              const roots = all.filter((c) => c.parentId == null);
+              const childrenByParent = new Map<string, typeof all>();
+              for (const c of all) {
+                if (!c.parentId) continue;
+                const arr = childrenByParent.get(c.parentId) ?? [];
+                arr.push(c);
+                childrenByParent.set(c.parentId, arr);
+              }
+              return roots.map((r) => [
+                <SelectItem key={r.id} value={r.id}>
+                  {r.name}
+                </SelectItem>,
+                ...(childrenByParent.get(r.id) ?? []).map((child) => (
+                  <SelectItem
+                    key={child.id}
+                    value={child.id}
+                    className="pl-8"
+                  >
+                    {r.name} › {child.name}
+                  </SelectItem>
+                )),
+              ]);
+            })()}
           </SelectContent>
         </Select>
         <Select
@@ -202,6 +271,30 @@ export default function ProductosPage() {
             <SelectItem value="ALTERNATIVE">Alternativos</SelectItem>
           </SelectContent>
         </Select>
+      </div>
+
+      {/* Ronda 9 — filtro por fecha de creación. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Creados desde</label>
+          <Input
+            type="date"
+            value={createdFrom}
+            onChange={(e) =>
+              setFilters({ createdFrom: e.target.value || null, page: null })
+            }
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Creados hasta</label>
+          <Input
+            type="date"
+            value={createdTo}
+            onChange={(e) =>
+              setFilters({ createdTo: e.target.value || null, page: null })
+            }
+          />
+        </div>
       </div>
 
       {/* Búsqueda por vehículo */}
@@ -383,4 +476,17 @@ export default function ProductosPage() {
       )}
     </div>
   );
+}
+
+/**
+ * Ronda 10 — arma la query string para el endpoint `/api/products/catalog.pdf`
+ * a partir de los filtros activos en la pantalla. Omite los `undefined` y
+ * vacíos para que la URL quede limpia.
+ */
+function buildCatalogQuery(params: Record<string, string | undefined>): string {
+  const entries = Object.entries(params).filter(
+    ([, v]) => v != null && v !== '',
+  ) as [string, string][];
+  if (entries.length === 0) return '';
+  return '?' + entries.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
 }

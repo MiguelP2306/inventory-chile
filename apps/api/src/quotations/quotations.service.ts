@@ -210,7 +210,12 @@ export class QuotationsService {
       if (!c) throw new NotFoundException('Cliente no encontrado');
     }
 
-    await this.assertProductsExist(dto.items.map((i) => i.productId));
+    // Ronda 9 — separar items reales (con productId) vs temporales para
+    // validar de manera distinta.
+    this.assertItemsValid(dto.items);
+    await this.assertProductsExist(
+      dto.items.map((i) => i.productId).filter(Boolean) as string[],
+    );
 
     const settings = await this.getSettings();
     const taxRate = parseFloat(settings.taxRate);
@@ -257,7 +262,13 @@ export class QuotationsService {
         const lineTotals = totals.lines[i]!;
         const item = manager.getRepository(QuotationItem).create({
           quotationId: saved.id,
-          productId: it.productId,
+          productId: it.productId ?? null,
+          // Ronda 9 — snapshots de productos temporales.
+          tempProductName: it.productId ? null : it.tempProductName?.trim() ?? null,
+          tempProductSku: it.productId ? null : it.tempProductSku?.trim() ?? null,
+          tempProductPartNumber: it.productId
+            ? null
+            : it.tempProductPartNumber?.trim() ?? null,
           qty: it.qty,
           unitPrice: it.unitPrice,
           discount: lineTotals.discountAmount,
@@ -308,7 +319,10 @@ export class QuotationsService {
     }
 
     if (dto.items) {
-      await this.assertProductsExist(dto.items.map((i) => i.productId));
+      this.assertItemsValid(dto.items);
+      await this.assertProductsExist(
+        dto.items.map((i) => i.productId).filter(Boolean) as string[],
+      );
     }
 
     const settings = await this.getSettings();
@@ -362,7 +376,16 @@ export class QuotationsService {
           const lineTotals = totals.lines[i]!;
           const item = manager.getRepository(QuotationItem).create({
             quotationId: id,
-            productId: it.productId,
+            productId: it.productId ?? null,
+            tempProductName: it.productId
+              ? null
+              : it.tempProductName?.trim() ?? null,
+            tempProductSku: it.productId
+              ? null
+              : it.tempProductSku?.trim() ?? null,
+            tempProductPartNumber: it.productId
+              ? null
+              : it.tempProductPartNumber?.trim() ?? null,
             qty: it.qty,
             unitPrice: it.unitPrice,
             discount: lineTotals.discountAmount,
@@ -493,6 +516,18 @@ export class QuotationsService {
     }
     const items =
       (await this.fetchItemsForQuotations([id])).get(id) ?? [];
+
+    // Ronda 9 — la venta no acepta items temporales (productId null). El
+    // operador tiene que registrarlos en el catálogo o quitarlos antes de
+    // convertir. Devolvemos un 409 explicativo en lugar de un 500 al fallar
+    // el insert de SaleItem con NOT NULL.
+    const tempItems = items.filter((it) => !it.productId);
+    if (tempItems.length > 0) {
+      throw new ConflictException(
+        `Esta cotización tiene ${tempItems.length} producto${tempItems.length === 1 ? '' : 's'} temporal${tempItems.length === 1 ? '' : 'es'}. Registralos en el catálogo o quitalos antes de convertir a venta.`,
+      );
+    }
+
     return {
       prefill: {
         quotationId: q.id,
@@ -504,7 +539,8 @@ export class QuotationsService {
           taxId: q.customerTaxIdSnapshot,
         },
         items: items.map((it) => ({
-          productId: it.productId,
+          // Sabemos que productId no es null acá porque chequeamos arriba.
+          productId: it.productId!,
           qty: it.qty,
           unitPrice: it.unitPrice,
           discount: it.discount,
@@ -564,6 +600,23 @@ export class QuotationsService {
       );
     }
     return first;
+  }
+
+  /**
+   * Ronda 9 — valida cada item: si tiene productId, OK; si es temporal,
+   * debe traer al menos `tempProductName`.
+   */
+  private assertItemsValid(items: { productId?: string | null; tempProductName?: string | null }[]) {
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i]!;
+      if (!it.productId) {
+        if (!it.tempProductName || it.tempProductName.trim() === '') {
+          throw new BadRequestException(
+            `Item ${i + 1}: debe llevar productId o tempProductName (producto temporal).`,
+          );
+        }
+      }
+    }
   }
 
   private async assertProductsExist(productIds: string[]): Promise<void> {
@@ -664,6 +717,10 @@ export class QuotationsService {
     const itemDtos: QuotationItemDto[] = items.map((it) => ({
       id: it.id,
       productId: it.productId,
+      isTemporary: it.productId == null,
+      tempProductName: it.tempProductName,
+      tempProductSku: it.tempProductSku,
+      tempProductPartNumber: it.tempProductPartNumber,
       qty: it.qty,
       unitPrice: it.unitPrice,
       discount: it.discount,

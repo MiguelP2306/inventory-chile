@@ -3,9 +3,11 @@ import {
   CashTransactionType,
   InventoryMovementType,
   PaymentMethod,
+  RefundMode,
   ReturnDto,
   ReturnItemCondition,
   ReturnItemDto,
+  ReturnReplacementItemDto,
   ReturnStatus,
   ReturnType,
   ReturnedQtyDto,
@@ -25,15 +27,18 @@ import { CountersService } from '../common/counters.service';
 import { dayRange } from '../common/date-range';
 import {
   CashTransaction,
+  Product,
   PurchaseEntry,
   PurchaseEntryItem,
   Return,
   ReturnItem,
+  ReturnReplacementItem,
   Sale,
   SaleItem,
   Warehouse,
 } from '../database/entities';
 import { InventoryService } from '../inventory/inventory.service';
+import { SupplierCreditsService } from '../supplier-credits/supplier-credits.service';
 import {
   CancelReturnDto,
   CreateReturnDto,
@@ -65,6 +70,7 @@ export class ReturnsService {
     private readonly counters: CountersService,
     private readonly inventory: InventoryService,
     private readonly cashbox: CashboxService,
+    private readonly supplierCredits: SupplierCreditsService,
   ) {}
 
   // ---------------- reads ----------------
@@ -104,9 +110,19 @@ export class ReturnsService {
     qb.take(pageSize).skip((page - 1) * pageSize);
 
     const [items, total] = await qb.getManyAndCount();
-    const itemsByReturn = await this.fetchItemsFor(items.map((r) => r.id));
+    const returnIds = items.map((r) => r.id);
+    const [itemsByReturn, replacementsByReturn] = await Promise.all([
+      this.fetchItemsFor(returnIds),
+      this.fetchReplacementsFor(returnIds),
+    ]);
     return {
-      items: items.map((r) => this.toDto(r, itemsByReturn.get(r.id) ?? [])),
+      items: items.map((r) =>
+        this.toDto(
+          r,
+          itemsByReturn.get(r.id) ?? [],
+          replacementsByReturn.get(r.id) ?? [],
+        ),
+      ),
       total,
       page,
       pageSize,
@@ -125,8 +141,11 @@ export class ReturnsService {
       },
     });
     if (!r) throw new NotFoundException('Devolución no encontrada');
-    const items = (await this.fetchItemsFor([r.id])).get(r.id) ?? [];
-    return this.toDto(r, items);
+    const [items, replacements] = await Promise.all([
+      this.fetchItemsFor([r.id]).then((m) => m.get(r.id) ?? []),
+      this.fetchReplacementsFor([r.id]).then((m) => m.get(r.id) ?? []),
+    ]);
+    return this.toDto(r, items, replacements);
   }
 
   /**
@@ -147,6 +166,32 @@ export class ReturnsService {
       .getRawMany();
     return rows.map((r) => ({
       saleItemId: r.saleItemId,
+      qty: Number(r.total ?? 0),
+    }));
+  }
+
+  /**
+   * Ronda 11 — análogo a `returnedQtyBySale` para devoluciones a proveedor.
+   * Devuelve la qty acumulada ya devuelta por cada `purchaseEntryItemId`.
+   * Solo cuenta returns con status COMPLETED. El frontend lo usa para
+   * limitar la qty máxima por línea (anti-doble-devolución).
+   */
+  async returnedQtyByPurchase(
+    purchaseEntryId: string,
+  ): Promise<Array<{ purchaseEntryItemId: string; qty: number }>> {
+    const rows: Array<{ purchaseEntryItemId: string; total: string }> =
+      await this.itemRepo
+        .createQueryBuilder('ri')
+        .innerJoin('returns', 'r', 'r.id = ri.returnId')
+        .select('ri.purchaseEntryItemId', 'purchaseEntryItemId')
+        .addSelect('SUM(ri.qty)', 'total')
+        .where('r.purchaseEntryId = :pid', { pid: purchaseEntryId })
+        .andWhere('r.status = :st', { st: ReturnStatus.COMPLETED })
+        .andWhere('ri.purchaseEntryItemId IS NOT NULL')
+        .groupBy('ri.purchaseEntryItemId')
+        .getRawMany();
+    return rows.map((r) => ({
+      purchaseEntryItemId: r.purchaseEntryItemId,
       qty: Number(r.total ?? 0),
     }));
   }
@@ -241,8 +286,6 @@ export class ReturnsService {
           'Cada item debe traer `purchaseEntryItemId` en devolución a proveedor',
         );
       }
-      // Validamos que pertenezcan a la compra (anti-doble-devolución no se
-      // implementa para SUPPLIER en este MVP — caso menos frecuente).
       const purchaseItems = await this.purchaseItemRepo.find({
         where: { id: In(purchaseItemIds), entryId: purchase.id },
       });
@@ -252,13 +295,85 @@ export class ReturnsService {
         );
       }
 
-      // Para SUPPLIER, default warehouseId = bodega Principal.
-      const w = await this.warehouseRepo.findOne({
-        where: { isActive: true },
-        order: { name: 'ASC' },
+      // Ronda 11 — anti-doble-devolución para SUPPLIER (simétrico al de
+      // CUSTOMER). La suma de qty devuelta + nueva qty no puede exceder
+      // lo originalmente comprado.
+      const alreadyReturned = await this.returnedQtyByPurchase(purchase.id);
+      const returnedMap = new Map(
+        alreadyReturned.map((r) => [r.purchaseEntryItemId, r.qty]),
+      );
+      const purchaseItemById = new Map(purchaseItems.map((pi) => [pi.id, pi]));
+      for (const it of dto.items) {
+        const pi = purchaseItemById.get(it.purchaseEntryItemId!);
+        if (!pi) continue;
+        const alreadyQty = returnedMap.get(pi.id) ?? 0;
+        if (alreadyQty + it.qty > pi.qty) {
+          throw new ConflictException(
+            `Se intentó devolver ${it.qty} de un item con ${pi.qty} compradas y ${alreadyQty} ya devueltas. Disponible para devolver: ${pi.qty - alreadyQty}.`,
+          );
+        }
+      }
+
+      // Ronda 11 — la bodega del RETURN_OUT es la misma de la compra
+      // (donde llegó el stock originalmente). Antes caía al fallback
+      // "Principal", lo que descontaba stock de la bodega equivocada
+      // cuando la compra había ido a ML Full u otra bodega.
+      //
+      // `purchase.warehouseId` puede ser null en compras históricas
+      // anteriores a Ronda 7 (sin warehouse asignado). En ese caso
+      // caemos al fallback "primera bodega activa".
+      if (purchase.warehouseId) {
+        warehouseId = purchase.warehouseId;
+      } else {
+        const w = await this.warehouseRepo.findOne({
+          where: { isActive: true },
+          order: { name: 'ASC' },
+        });
+        if (!w) {
+          throw new NotFoundException(
+            'No hay bodegas activas configuradas',
+          );
+        }
+        warehouseId = w.id;
+      }
+    }
+
+    // Ronda 9 — validación de refundMode + combinatorias.
+    const refundMode = dto.refundMode ?? RefundMode.MONEY;
+    if (refundMode === RefundMode.CREDIT && dto.type !== ReturnType.SUPPLIER) {
+      throw new BadRequestException(
+        'El modo CREDIT sólo aplica a devoluciones a proveedor.',
+      );
+    }
+    if (refundMode === RefundMode.EXCHANGE && dto.type !== ReturnType.CUSTOMER) {
+      throw new BadRequestException(
+        'El modo EXCHANGE sólo aplica a devoluciones de cliente.',
+      );
+    }
+    if (refundMode === RefundMode.EXCHANGE) {
+      if (!dto.replacementItems || dto.replacementItems.length === 0) {
+        throw new BadRequestException(
+          'El modo EXCHANGE requiere al menos un item de reemplazo.',
+        );
+      }
+    } else if (dto.replacementItems && dto.replacementItems.length > 0) {
+      throw new BadRequestException(
+        'Sólo el modo EXCHANGE puede llevar items de reemplazo.',
+      );
+    }
+
+    // Validar stock de los productos de reemplazo (existencia, no qty — el
+    // applyMovement se encarga del lock pesimista por bodega).
+    if (dto.replacementItems && dto.replacementItems.length > 0) {
+      const replIds = [...new Set(dto.replacementItems.map((r) => r.productId))];
+      const products = await this.ds.getRepository(Product).find({
+        where: { id: In(replIds) },
       });
-      if (!w) throw new NotFoundException('No hay bodegas activas configuradas');
-      warehouseId = w.id;
+      if (products.length !== replIds.length) {
+        throw new NotFoundException(
+          'Algún producto de reemplazo no existe.',
+        );
+      }
     }
 
     const date = dto.date ? new Date(dto.date) : new Date();
@@ -273,6 +388,15 @@ export class ReturnsService {
         0,
       );
 
+      // Si EXCHANGE: sum de replacements. Diferencia = replacements − refund.
+      // > 0 cliente paga, < 0 cliente recibe, = 0 sin cash transaction.
+      const replacementTotal = (dto.replacementItems ?? []).reduce(
+        (acc, r) => acc + r.qty * parseFloat(r.unitPrice),
+        0,
+      );
+      const exchangeDifference =
+        refundMode === RefundMode.EXCHANGE ? replacementTotal - refundAmount : 0;
+
       const ret = manager.getRepository(Return).create({
         number,
         type: dto.type,
@@ -284,6 +408,9 @@ export class ReturnsService {
         notes: dto.notes?.trim() || null,
         refundAmount: refundAmount.toFixed(2),
         paymentMethod: dto.paymentMethod,
+        refundMode,
+        supplierCreditId: null,
+        exchangeDifference: exchangeDifference.toFixed(2),
         status: ReturnStatus.COMPLETED,
         userId,
       });
@@ -383,10 +510,50 @@ export class ReturnsService {
         }
       }
 
-      // Cash transaction:
-      // - CUSTOMER → EXPENSE (le devolvemos plata al cliente).
-      // - SUPPLIER → INCOME (el proveedor nos devuelve plata).
-      if (refundAmount > 0) {
+      // Ronda 9 — items de reemplazo (sólo EXCHANGE): SALE_OUT por cada uno.
+      if (refundMode === RefundMode.EXCHANGE && dto.replacementItems) {
+        for (const r of dto.replacementItems) {
+          const product = await manager.getRepository(Product).findOne({
+            where: { id: r.productId },
+          });
+          const unitCost = product?.cost ?? '0';
+          const subtotal = (r.qty * parseFloat(r.unitPrice)).toFixed(2);
+          const repl = manager.getRepository(ReturnReplacementItem).create({
+            returnId: saved.id,
+            productId: r.productId,
+            qty: r.qty,
+            unitPrice: r.unitPrice,
+            unitCost,
+            subtotal,
+          });
+          await manager.getRepository(ReturnReplacementItem).save(repl);
+
+          // Descontar stock por el producto de reemplazo. Reusamos SALE_OUT
+          // (semánticamente es una salida de venta — el cliente se lo lleva).
+          // El refId es el del Return para trazabilidad.
+          await this.inventory.applyMovement(manager, {
+            productId: r.productId,
+            warehouseId,
+            type: InventoryMovementType.SALE_OUT,
+            qty: -r.qty,
+            unitCost,
+            reference: number,
+            refId: saved.id,
+            userId,
+          });
+        }
+      }
+
+      // Ronda 9 — manejo de caja según refundMode:
+      //
+      //  MONEY  · CUSTOMER → EXPENSE (le devolvemos plata).
+      //  MONEY  · SUPPLIER → INCOME (el proveedor nos paga).
+      //  CREDIT · SUPPLIER → crea SupplierCredit. Sin movimiento de caja.
+      //  EXCHANGE · CUSTOMER → según exchangeDifference:
+      //    > 0  cliente paga la diferencia (INCOME).
+      //    < 0  cliente recibe la diferencia (EXPENSE).
+      //    = 0  sin movimiento de caja.
+      if (refundMode === RefundMode.MONEY && refundAmount > 0) {
         await this.cashbox.recordTransaction(
           {
             date,
@@ -404,6 +571,36 @@ export class ReturnsService {
                 ? `Reembolso devolución ${number}`
                 : `Cobro devolución a proveedor ${number}`,
             amount: refundAmount.toFixed(2),
+            paymentMethod: dto.paymentMethod,
+            expenseCategoryId: null,
+            userId,
+          },
+          manager,
+        );
+      } else if (refundMode === RefundMode.CREDIT && refundAmount > 0) {
+        // Generamos el SupplierCredit y lo linkeamos al return.
+        const credit = await this.supplierCredits.createFromReturn(manager, {
+          supplierId: purchase!.supplierId,
+          sourceReturnId: saved.id,
+          amount: refundAmount.toFixed(2),
+          userId,
+        });
+        saved.supplierCreditId = credit.id;
+        await manager.getRepository(Return).save(saved);
+      } else if (refundMode === RefundMode.EXCHANGE && exchangeDifference !== 0) {
+        const isIncome = exchangeDifference > 0;
+        await this.cashbox.recordTransaction(
+          {
+            date,
+            type: isIncome
+              ? CashTransactionType.INCOME
+              : CashTransactionType.EXPENSE,
+            source: CashTransactionSource.SALE_RETURN,
+            sourceId: saved.id,
+            description: isIncome
+              ? `Diferencia a favor por cambio ${number}`
+              : `Diferencia a devolver por cambio ${number}`,
+            amount: Math.abs(exchangeDifference).toFixed(2),
             paymentMethod: dto.paymentMethod,
             expenseCategoryId: null,
             userId,
@@ -435,14 +632,57 @@ export class ReturnsService {
       const items = await manager
         .getRepository(ReturnItem)
         .find({ where: { returnId: id } });
+      // Ronda 9 — para EXCHANGE necesitamos revertir también los SALE_OUT
+      // de los replacement items.
+      const replacements = await manager
+        .getRepository(ReturnReplacementItem)
+        .find({ where: { returnId: id } });
 
-      // Revertir movimientos de stock (solo los que sí afectaron stock, o
-      // sea los RESELLABLE). Los DAMAGED emiten un movimiento informativo
-      // tipo RETURN_IN_DAMAGED que NO toca `stocks`, así que tampoco hay
-      // nada que revertir — la fila de auditoría queda en /inventario/
-      // movimientos y la cancelación se ve mirando el estado del Return.
+      // Si la devolución usó CRÉDITO, validamos que el crédito no se haya
+      // gastado todavía. Si ya se aplicó a una compra, no se puede cancelar.
+      if (
+        existing.refundMode === RefundMode.CREDIT &&
+        existing.supplierCreditId
+      ) {
+        await this.supplierCredits.voidCredit(
+          existing.supplierCreditId,
+          manager,
+        );
+      }
+
+      // Revertir SALE_OUT de los replacement items (devuelve stock).
+      for (const r of replacements) {
+        await this.inventory.applyMovement(manager, {
+          productId: r.productId,
+          warehouseId: existing.warehouseId,
+          type: InventoryMovementType.RETURN_IN,
+          qty: +r.qty,
+          unitCost: r.unitCost,
+          reference: existing.number,
+          refId: existing.id,
+          userId,
+        });
+      }
+
+      // Revertir movimientos de stock para los RESELLABLE. Los DAMAGED
+      // originalmente emitieron un RETURN_IN_DAMAGED audit-only (no tocaron
+      // `stocks`), así que al cancelar registramos un RETURN_DAMAGED_CANCELLED
+      // también audit-only — la cancelación queda visible en el historial
+      // sin alterar inventario.
       for (const it of items) {
-        if (it.itemCondition !== ReturnItemCondition.RESELLABLE) continue;
+        if (it.itemCondition !== ReturnItemCondition.RESELLABLE) {
+          await this.inventory.recordMovementWithoutStockImpact(manager, {
+            productId: it.productId,
+            warehouseId: existing.warehouseId,
+            type: InventoryMovementType.RETURN_DAMAGED_CANCELLED,
+            qty: -it.qty,
+            unitCost: it.unitCost,
+            reference: existing.number,
+            refId: existing.id,
+            userId,
+          });
+          continue;
+        }
         if (existing.type === ReturnType.CUSTOMER) {
           // Habíamos sumado stock (RETURN_IN) — al cancelar lo sacamos (RETURN_OUT).
           await this.inventory.applyMovement(manager, {
@@ -515,7 +755,33 @@ export class ReturnsService {
     return map;
   }
 
-  private toDto(r: Return, items: ReturnItem[]): ReturnDto {
+  /**
+   * Carga los items de reemplazo (Ronda 9, EXCHANGE) en batch para los
+   * returnIds dados. Usa el repo del DataSource para no requerir un manager.
+   */
+  private async fetchReplacementsFor(
+    returnIds: string[],
+  ): Promise<Map<string, ReturnReplacementItem[]>> {
+    const map = new Map<string, ReturnReplacementItem[]>();
+    if (returnIds.length === 0) return map;
+    const items = await this.ds.getRepository(ReturnReplacementItem).find({
+      where: { returnId: In(returnIds) },
+      relations: { product: true },
+      order: { id: 'ASC' },
+    });
+    for (const it of items) {
+      const arr = map.get(it.returnId) ?? [];
+      arr.push(it);
+      map.set(it.returnId, arr);
+    }
+    return map;
+  }
+
+  private toDto(
+    r: Return,
+    items: ReturnItem[],
+    replacements: ReturnReplacementItem[] = [],
+  ): ReturnDto {
     return {
       id: r.id,
       number: r.number,
@@ -537,6 +803,27 @@ export class ReturnsService {
       notes: r.notes,
       refundAmount: r.refundAmount,
       paymentMethod: r.paymentMethod as PaymentMethod,
+      refundMode: r.refundMode,
+      supplierCreditId: r.supplierCreditId,
+      exchangeDifference: r.exchangeDifference,
+      replacementItems: replacements.map(
+        (it): ReturnReplacementItemDto => ({
+          id: it.id,
+          productId: it.productId,
+          qty: it.qty,
+          unitPrice: it.unitPrice,
+          unitCost: it.unitCost,
+          subtotal: it.subtotal,
+          product: it.product
+            ? {
+                id: it.product.id,
+                sku: it.product.sku,
+                name: it.product.name,
+                partNumber: it.product.partNumber,
+              }
+            : undefined,
+        }),
+      ),
       status: r.status,
       cancelledAt: r.cancelledAt ? r.cancelledAt.toISOString() : null,
       cancelReason: r.cancelReason,

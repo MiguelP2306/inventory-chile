@@ -34,6 +34,17 @@ export class ReturnsController {
     return this.svc.returnedQtyBySale(saleId);
   }
 
+  /**
+   * Ronda 11 — análogo para devoluciones a proveedor. Devuelve qty
+   * acumulada por `purchaseEntryItemId`.
+   */
+  @Get('by-purchase/:purchaseEntryId/returned-qty')
+  returnedQtyByPurchase(
+    @Param('purchaseEntryId', new ParseUUIDPipe()) purchaseEntryId: string,
+  ) {
+    return this.svc.returnedQtyByPurchase(purchaseEntryId);
+  }
+
   @Get(':id')
   getOne(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.svc.getOne(id);

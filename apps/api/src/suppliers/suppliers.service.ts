@@ -29,8 +29,12 @@ export class SuppliersService {
   async list(query: ListSuppliersQueryDto = {}) {
     const qb = this.repo.createQueryBuilder('s').orderBy('s.name', 'ASC');
     if (query.q) {
+      // Ronda 9 — busqueda extendida con razón social y persona de contacto.
       qb.andWhere(
-        '(s.name LIKE :q OR s.taxId LIKE :q OR s.email LIKE :q OR s.phone LIKE :q)',
+        `(
+          s.name LIKE :q OR s.taxId LIKE :q OR s.email LIKE :q OR s.phone LIKE :q
+          OR s.legalName LIKE :q OR s.contactPerson LIKE :q
+        )`,
         { q: `%${query.q}%` },
       );
     }
@@ -68,6 +72,9 @@ export class SuppliersService {
       this.repo.create({
         ...dto,
         taxId,
+        // Ronda 9 — legalName y contactPerson son texto libre opcional.
+        legalName: dto.legalName?.trim() || null,
+        contactPerson: dto.contactPerson?.trim() || null,
         phone: dto.phone ? normalizePhone(dto.phone) : null,
       }),
     );
@@ -96,6 +103,9 @@ export class SuppliersService {
       }
     }
     if (dto.name !== undefined) entity.name = dto.name;
+    if (dto.legalName !== undefined) entity.legalName = dto.legalName?.trim() || null;
+    if (dto.contactPerson !== undefined)
+      entity.contactPerson = dto.contactPerson?.trim() || null;
     if (dto.email !== undefined) entity.email = dto.email ?? null;
     if (dto.phone !== undefined) {
       entity.phone = dto.phone ? normalizePhone(dto.phone) : null;

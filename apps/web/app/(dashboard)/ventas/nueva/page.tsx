@@ -1,13 +1,15 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMemo } from 'react';
+import { toast } from 'sonner';
 import { SaleForm } from '@/components/forms/sale-form';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { createDispatchNote } from '@/lib/dispatch-api';
 import { getQuotation } from '@/lib/quotations-api';
 
 /**
@@ -24,6 +26,23 @@ export default function NuevaVentaPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const fromQuotationId = searchParams.get('fromQuotation');
+  // Ronda 9 — si llega `generateDispatch=1`, después de crear la venta se
+  // dispara la creación automática de una guía con datos mínimos (sin
+  // dirección custom — el operador puede editarla desde /guias/[id]).
+  const generateDispatch = searchParams.get('generateDispatch') === '1';
+
+  const dispatchMut = useMutation({
+    mutationFn: (saleId: string) => createDispatchNote({ saleId }),
+    onSuccess: (note) => {
+      toast.success(`Guía ${note.number} generada`);
+      router.push(`/guias/${note.id}`);
+    },
+    onError: () => {
+      toast.error(
+        'La venta se creó pero la guía no. Generá la guía desde el detalle.',
+      );
+    },
+  });
 
   const quotation = useQuery({
     queryKey: ['quotation', fromQuotationId],
@@ -55,15 +74,20 @@ export default function NuevaVentaPage() {
       quotationId: q.id,
       customer: q.customer ?? null,
       customerSnapshot,
-      items: (q.items ?? []).map((it) => ({
-        productId: it.productId,
-        sku: it.product?.sku ?? '',
-        name: it.product?.name ?? '',
-        qty: it.qty,
-        unitPrice: it.unitPrice,
-        discount: it.discount,
-        discountPercent: it.discountPercent,
-      })),
+      // Ronda 9 — los items temporales (productId null) no se pueden convertir
+      // a venta. El backend ya valida con 409, pero los filtramos acá también
+      // para no pasar entradas inválidas al SaleForm.
+      items: (q.items ?? [])
+        .filter((it): it is typeof it & { productId: string } => !!it.productId)
+        .map((it) => ({
+          productId: it.productId,
+          sku: it.product?.sku ?? '',
+          name: it.product?.name ?? '',
+          qty: it.qty,
+          unitPrice: it.unitPrice,
+          discount: it.discount,
+          discountPercent: it.discountPercent,
+        })),
       notes: q.notes,
     };
   }, [fromQuotationId, quotation.data]);
@@ -99,7 +123,17 @@ export default function NuevaVentaPage() {
 
       <SaleForm
         prefillFromQuotation={prefill}
-        onSuccess={(sale) => router.push(`/ventas/${sale.id}`)}
+        onSuccess={(sale) => {
+          // Ronda 9 — flujo "convertir y generar guía". Tras confirmar la
+          // venta, generamos la guía con datos mínimos y redirigimos a su
+          // detalle. Si falla la guía, el toast lo indica y queda la venta
+          // creada (el operador puede generar la guía manualmente).
+          if (generateDispatch) {
+            dispatchMut.mutate(sale.id);
+          } else {
+            router.push(`/ventas/${sale.id}`);
+          }
+        }}
         onCancel={() =>
           router.push(
             fromQuotationId ? `/cotizaciones/${fromQuotationId}` : '/ventas',

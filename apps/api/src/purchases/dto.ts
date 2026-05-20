@@ -1,8 +1,10 @@
+import { PaymentMethod } from '@inventory/shared';
 import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
   IsDateString,
+  IsEnum,
   IsInt,
   IsNumberString,
   IsOptional,
@@ -12,6 +14,14 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+
+export class CreditApplicationInputDto {
+  @IsUUID()
+  supplierCreditId!: string;
+
+  @IsNumberString({ no_symbols: false })
+  amount!: string;
+}
 
 export class PurchaseItemInputDto {
   @IsUUID()
@@ -56,6 +66,20 @@ export class CreatePurchaseEntryDto {
   @IsNumberString({ no_symbols: false })
   taxAmountOverride?: string;
 
+  // Ronda 9 — método de pago de la compra. Default TRANSFER. Permite cobros
+  // con tarjeta o efectivo cuando aplica.
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  paymentMethod?: PaymentMethod;
+
+  // Ronda 9 — aplicación de créditos a favor del proveedor. Se descuenta
+  // del total efectivamente pagado en caja.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreditApplicationInputDto)
+  creditApplications?: CreditApplicationInputDto[];
+
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
@@ -90,7 +114,28 @@ export class AddInvoicesDto {
   files!: AddInvoiceFileDto[];
 }
 
+/**
+ * Ronda 9 — query para KPIs de compras. Sin parámetros → KPIs del mes
+ * actual (1ro al último día). Con dateFrom/dateTo → KPIs del período pedido.
+ */
+export class PurchasesKpisQueryDto {
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
+}
+
 export class ListPurchasesQueryDto {
+  // Ronda 11 — búsqueda libre para el PurchaseSearchCombobox (devoluciones
+  // a proveedor). Matchea por nombre del proveedor, RUT, o por notas de la
+  // compra.
+  @IsOptional()
+  @IsString()
+  q?: string;
+
   @IsOptional()
   @IsUUID()
   supplierId?: string;

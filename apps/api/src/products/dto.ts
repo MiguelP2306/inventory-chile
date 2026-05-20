@@ -5,6 +5,7 @@ import {
   ArrayUnique,
   IsArray,
   IsBoolean,
+  IsDateString,
   IsEnum,
   IsInt,
   IsNumberString,
@@ -36,15 +37,18 @@ export class FitmentInputDto {
 }
 
 export class CreateProductDto {
-  @IsString()
-  @MinLength(1)
-  @MaxLength(60)
-  sku!: string;
-
+  // Ronda 9 — SKU opcional. Si llega vacío/null, ProductsService autogenera
+  // `AUTO-AAAA-NNNNN` vía CountersService.
   @IsOptional()
   @IsString()
+  @MaxLength(60)
+  sku?: string | null;
+
+  // Ronda 9 — partNumber pasa a obligatorio junto con `name`.
+  @IsString()
+  @MinLength(1)
   @MaxLength(80)
-  partNumber?: string | null;
+  partNumber!: string;
 
   @IsOptional()
   @IsString()
@@ -146,6 +150,15 @@ export class ListProductsQueryDto {
   @IsOptional()
   @IsEnum(ProductKind)
   productKind?: ProductKind;
+
+  // Ronda 9 — filtros por fecha de creación.
+  @IsOptional()
+  @IsDateString()
+  createdFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  createdTo?: string;
 
   @IsOptional()
   @Type(() => Number)

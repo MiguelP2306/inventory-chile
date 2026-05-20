@@ -22,10 +22,13 @@ export class CreateCustomerDto {
   @MaxLength(180)
   name!: string;
 
-  // RUT obligatorio. Se acepta con o sin puntos; el service lo normaliza.
+  // Ronda 9 — RUT opcional. Permite registrar clientes "lite" sólo con
+  // WhatsApp. Si se completa, debe ser válido (formato + DV). SalesService
+  // bloquea facturar sin RUT.
+  @IsOptional()
   @IsString()
   @IsValidRut()
-  taxId!: string;
+  taxId?: string | null;
 
   @IsOptional()
   @IsEmail({}, { message: 'Email inválido' })

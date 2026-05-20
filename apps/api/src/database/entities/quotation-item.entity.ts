@@ -25,13 +25,27 @@ export class QuotationItem {
   @Column({ type: 'char', length: 36 })
   quotationId!: string;
 
-  @ManyToOne(() => Product, { onDelete: 'RESTRICT', nullable: false })
+  // Ronda 9 — productId puede ser NULL para "productos temporales" que el
+  // operador inventa en el momento de cotizar sin registrarlos en el
+  // catálogo. Si es null, los campos `tempProduct*` deben estar presentes
+  // y la línea muestra un badge "Temporal" en la UI.
+  @ManyToOne(() => Product, { onDelete: 'RESTRICT', nullable: true })
   @JoinColumn({ name: 'productId' })
-  product?: Product;
+  product?: Product | null;
 
   @Index('idx_quotation_items_product')
-  @Column({ type: 'char', length: 36 })
-  productId!: string;
+  @Column({ type: 'char', length: 36, nullable: true })
+  productId!: string | null;
+
+  // Snapshot de datos del producto temporal. Sólo se usan si productId es null.
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  tempProductName!: string | null;
+
+  @Column({ type: 'varchar', length: 60, nullable: true })
+  tempProductSku!: string | null;
+
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  tempProductPartNumber!: string | null;
 
   @Column({ type: 'int' })
   qty!: number;

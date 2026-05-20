@@ -45,3 +45,19 @@ export const getReturnedQtyBySale = (saleId: string) =>
   api
     .get<ReturnedQtyDto[]>(`/returns/by-sale/${saleId}/returned-qty`)
     .then((r) => r.data);
+
+/**
+ * Ronda 11 — análogo para compras. Devuelve qty acumulada devuelta por
+ * cada `purchaseEntryItemId`. Lo consume el SupplierReturnForm para
+ * limitar el máximo permitido por línea (anti-doble-devolución).
+ */
+export interface ReturnedQtyByPurchaseDto {
+  purchaseEntryItemId: string;
+  qty: number;
+}
+export const getReturnedQtyByPurchase = (purchaseEntryId: string) =>
+  api
+    .get<ReturnedQtyByPurchaseDto[]>(
+      `/returns/by-purchase/${purchaseEntryId}/returned-qty`,
+    )
+    .then((r) => r.data);

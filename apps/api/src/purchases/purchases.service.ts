@@ -3,6 +3,8 @@ import {
   CashTransactionType,
   InventoryMovementType,
   PaymentMethod,
+  PurchasesKpisDto,
+  ReturnType,
 } from '@inventory/shared';
 import {
   BadRequestException,
@@ -10,21 +12,24 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { Between, DataSource, In, Repository } from 'typeorm';
 import { CashboxService } from '../cashbox/cashbox.service';
 import { dayRange } from '../common/date-range';
 import { InventoryService } from '../inventory/inventory.service';
+import { SupplierCreditsService } from '../supplier-credits/supplier-credits.service';
 import {
   CompanySettings,
   PurchaseEntry,
   PurchaseEntryItem,
   PurchaseInvoice,
+  Return,
   Supplier,
   Warehouse,
 } from '../database/entities';
 import {
   CreatePurchaseEntryDto,
   ListPurchasesQueryDto,
+  PurchasesKpisQueryDto,
 } from './dto';
 
 export interface InvoiceFileInput {
@@ -48,9 +53,12 @@ export class PurchasesService {
     private readonly settingsRepo: Repository<CompanySettings>,
     @InjectRepository(PurchaseInvoice)
     private readonly invoiceRepo: Repository<PurchaseInvoice>,
+    @InjectRepository(Return)
+    private readonly returnsRepo: Repository<Return>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly inventory: InventoryService,
     private readonly cashbox: CashboxService,
+    private readonly supplierCredits: SupplierCreditsService,
   ) {}
 
   async list(query: ListPurchasesQueryDto) {
@@ -81,6 +89,13 @@ export class PurchasesService {
     }
     if (query.totalMax !== undefined && query.totalMax !== '') {
       qb.andWhere('pe.total <= :tmax', { tmax: query.totalMax });
+    }
+    if (query.q) {
+      // Ronda 11 — búsqueda libre por nombre/RUT del proveedor o notas.
+      qb.andWhere(
+        '(supplier.name LIKE :q OR supplier.taxId LIKE :q OR pe.notes LIKE :q)',
+        { q: `%${query.q}%` },
+      );
     }
 
     qb.orderBy('pe.date', 'DESC');
@@ -202,29 +217,126 @@ export class PurchasesService {
         }
       }
 
-      // Egreso de caja por el TOTAL bruto. El IVA queda registrado en la
-      // compra (no se duplica en caja) — se usa para el reporte de IVA crédito.
-      await this.cashbox.recordTransaction(
-        {
-          date: entry.date,
-          type: CashTransactionType.EXPENSE,
-          source: CashTransactionSource.PURCHASE,
-          sourceId: entry.id,
-          description: `Compra a ${supplier.name}`,
-          amount: total,
-          // Default a TRANSFER (lo más usual con proveedores). Próximamente:
-          // hacer el método configurable en el formulario de compra.
-          paymentMethod: PaymentMethod.TRANSFER,
-          expenseCategoryId: null,
-          userId,
-        },
-        manager,
-      );
+      // Ronda 9 — aplicación de créditos a favor del proveedor. La suma
+      // aplicada se descuenta del egreso de caja (el sistema ya tenía
+      // ese dinero "guardado" como crédito; el cash flow no se mueve por
+      // esa porción). Se valida dentro de la misma transacción.
+      let creditApplied = 0;
+      if (dto.creditApplications && dto.creditApplications.length > 0) {
+        creditApplied = await this.supplierCredits.applyCreditsToPurchase(
+          manager,
+          {
+            purchaseEntryId: entry.id,
+            supplierId: dto.supplierId,
+            applications: dto.creditApplications,
+            maxAmount: totalNum,
+          },
+        );
+      }
+
+      const cashAmount = totalNum - creditApplied;
+      // Egreso de caja por el TOTAL bruto menos el crédito aplicado. El IVA
+      // queda registrado en la compra (no se duplica en caja). Si el crédito
+      // cubrió el 100% del total, no se inserta cash transaction.
+      if (cashAmount > 0.005) {
+        await this.cashbox.recordTransaction(
+          {
+            date: entry.date,
+            type: CashTransactionType.EXPENSE,
+            source: CashTransactionSource.PURCHASE,
+            sourceId: entry.id,
+            description:
+              creditApplied > 0
+                ? `Compra a ${supplier.name} (crédito aplicado ${creditApplied.toFixed(2)})`
+                : `Compra a ${supplier.name}`,
+            amount: cashAmount.toFixed(2),
+            paymentMethod: dto.paymentMethod ?? PaymentMethod.TRANSFER,
+            expenseCategoryId: null,
+            userId,
+          },
+          manager,
+        );
+      }
 
       return entry.id;
     });
 
     return this.getOne(entryId);
+  }
+
+  /**
+   * Ronda 9 — KPIs de compras para el dashboard de `/compras`. Calcula totales
+   * del período pedido (default = mes actual). Aplica filtros sólo de fecha.
+   */
+  async kpis(query: PurchasesKpisQueryDto = {}): Promise<PurchasesKpisDto> {
+    // Default = mes actual.
+    let from: Date;
+    let to: Date;
+    if (query.dateFrom || query.dateTo) {
+      const range = dayRange(query.dateFrom, query.dateTo);
+      from = range.from;
+      to = range.to;
+    } else {
+      const now = new Date();
+      from = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      to = new Date(
+        now.getFullYear(),
+        now.getMonth() + 1,
+        0,
+        23,
+        59,
+        59,
+        999,
+      );
+    }
+
+    const purchases = await this.entries.find({
+      where: { date: Between(from, to) },
+      select: ['id', 'total'],
+    });
+    const count = purchases.length;
+    const totalAmount = purchases.reduce(
+      (acc, p) => acc + parseFloat(p.total),
+      0,
+    );
+    const averageAmount = count > 0 ? totalAmount / count : 0;
+
+    // Devoluciones a proveedor del mismo período (no canceladas).
+    const supplierReturns = await this.returnsRepo
+      .createQueryBuilder('r')
+      .where('r.type = :tp', { tp: ReturnType.SUPPLIER })
+      .andWhere('r.status <> :cancelled', { cancelled: 'CANCELLED' })
+      .andWhere('r.date BETWEEN :from AND :to', { from, to })
+      .select(['r.id', 'r.refundAmount'])
+      .getMany();
+    const returnsAmount = supplierReturns.reduce(
+      (acc, r) => acc + parseFloat(r.refundAmount),
+      0,
+    );
+
+    const last = await this.entries.findOne({
+      where: {},
+      relations: { supplier: true },
+      order: { date: 'DESC' },
+    });
+
+    return {
+      totalAmount: totalAmount.toFixed(2),
+      count,
+      averageAmount: averageAmount.toFixed(2),
+      returnsAmount: returnsAmount.toFixed(2),
+      returnsCount: supplierReturns.length,
+      lastPurchase: last
+        ? {
+            id: last.id,
+            date: last.date.toISOString(),
+            total: last.total,
+            supplierName: last.supplier?.name ?? '',
+          }
+        : null,
+      periodFrom: from.toISOString(),
+      periodTo: to.toISOString(),
+    };
   }
 
   /**

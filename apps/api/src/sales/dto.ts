@@ -121,3 +121,18 @@ export class GeneratePdfQueryDto {
   @IsEnum(['letter', 'thermal80'])
   format?: 'letter' | 'thermal80';
 }
+
+/**
+ * Ronda 12 — query para KPIs de ventas. Sin parámetros → KPIs del mes
+ * actual. Con `dateFrom`/`dateTo` → período custom. Excluye ventas
+ * canceladas siempre.
+ */
+export class SalesKpisQueryDto {
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
+}

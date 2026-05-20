@@ -19,6 +19,14 @@ export class Supplier {
   @Column({ type: 'varchar', length: 60, nullable: true })
   taxId!: string | null;
 
+  // Ronda 9 — Razón social formal (cuando difiere del nombre comercial).
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  legalName!: string | null;
+
+  // Ronda 9 — Nombre del vendedor / contacto humano dentro del proveedor.
+  @Column({ type: 'varchar', length: 180, nullable: true })
+  contactPerson!: string | null;
+
   @Column({ type: 'varchar', length: 180, nullable: true })
   email!: string | null;
 

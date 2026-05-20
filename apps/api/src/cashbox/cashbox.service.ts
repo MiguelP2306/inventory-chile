@@ -164,29 +164,37 @@ export class CashboxService {
       .addGroupBy('tx.type')
       .getRawMany();
 
+    // Ronda 9 — un bucket por método (5 valores tras el split del CARD).
     const byMethod: Record<PaymentMethod, number> = {
       [PaymentMethod.CASH]: 0,
       [PaymentMethod.TRANSFER]: 0,
-      [PaymentMethod.CARD]: 0,
+      [PaymentMethod.CARD_DEBIT]: 0,
+      [PaymentMethod.CARD_CREDIT]: 0,
+      [PaymentMethod.PAYMENT_LINK]: 0,
     };
     let income = 0;
     let expense = 0;
     for (const r of rows) {
       const amount = parseFloat(r.sum ?? '0');
       const signed = r.type === CashTransactionType.INCOME ? amount : -amount;
-      byMethod[r.paymentMethod] = (byMethod[r.paymentMethod] ?? 0) + signed;
+      const m = r.paymentMethod as PaymentMethod;
+      if (m in byMethod) {
+        byMethod[m] = byMethod[m] + signed;
+      }
       if (r.type === CashTransactionType.INCOME) income += amount;
       else expense += amount;
     }
 
-    const total = byMethod.CASH + byMethod.TRANSFER + byMethod.CARD;
+    const total = Object.values(byMethod).reduce((acc, v) => acc + v, 0);
     const fmt = (n: number) => n.toFixed(2);
     return {
       total: fmt(total),
       byMethod: {
-        [PaymentMethod.CASH]: fmt(byMethod.CASH),
-        [PaymentMethod.TRANSFER]: fmt(byMethod.TRANSFER),
-        [PaymentMethod.CARD]: fmt(byMethod.CARD),
+        [PaymentMethod.CASH]: fmt(byMethod[PaymentMethod.CASH]),
+        [PaymentMethod.TRANSFER]: fmt(byMethod[PaymentMethod.TRANSFER]),
+        [PaymentMethod.CARD_DEBIT]: fmt(byMethod[PaymentMethod.CARD_DEBIT]),
+        [PaymentMethod.CARD_CREDIT]: fmt(byMethod[PaymentMethod.CARD_CREDIT]),
+        [PaymentMethod.PAYMENT_LINK]: fmt(byMethod[PaymentMethod.PAYMENT_LINK]),
       },
       income: fmt(income),
       expense: fmt(expense),

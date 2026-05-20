@@ -1,4 +1,4 @@
-import { PaymentMethod, ReturnStatus, ReturnType } from '@inventory/shared';
+import { PaymentMethod, RefundMode, ReturnStatus, ReturnType } from '@inventory/shared';
 import {
   Column,
   CreateDateColumn,
@@ -79,6 +79,28 @@ export class Return {
   // el operador puede cambiarlo (ej. venta fue con tarjeta, devuelven efectivo).
   @Column({ type: 'enum', enum: PaymentMethod })
   paymentMethod!: PaymentMethod;
+
+  // Ronda 9 — modo de reembolso. Default MONEY mantiene comportamiento
+  // histórico. CREDIT solo aplica a SUPPLIER (genera SupplierCredit);
+  // EXCHANGE solo aplica a CUSTOMER (requiere replacement items).
+  @Column({
+    type: 'enum',
+    enum: RefundMode,
+    default: RefundMode.MONEY,
+  })
+  refundMode!: RefundMode;
+
+  // Si refundMode=CREDIT, apunta al SupplierCredit generado.
+  @Column({ type: 'char', length: 36, nullable: true })
+  supplierCreditId!: string | null;
+
+  // Si refundMode=EXCHANGE, esta es la diferencia bruta:
+  //   = sum(replacement_items.subtotal) - refundAmount.
+  // > 0 → cliente paga la diferencia (cash transaction INCOME).
+  // < 0 → cliente recibe reembolso (cash transaction EXPENSE).
+  // = 0 → sin movimiento de caja.
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  exchangeDifference!: string;
 
   @Index('idx_returns_status')
   @Column({ type: 'enum', enum: ReturnStatus, default: ReturnStatus.COMPLETED })

@@ -21,7 +21,8 @@ import { adjustStock } from '@/lib/inventory-api';
 type Mode = 'increase' | 'decrease' | 'set';
 
 interface Props {
-  product: { id: string; sku: string; name: string };
+  // Ronda 9 — sku puede ser null para productos creados sin SKU manual.
+  product: { id: string; sku: string | null; name: string };
   currentQty: number;
   // Bodega contextual heredada de la pantalla `/inventario` (Ronda 7). Es
   // obligatoria para que el ajuste vaya a la bodega que el usuario está

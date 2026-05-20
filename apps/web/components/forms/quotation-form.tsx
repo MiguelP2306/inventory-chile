@@ -15,6 +15,7 @@ import { Controller, useForm, type FieldErrors } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { ProductPicker } from '@/components/product-picker';
+import { TemporaryProductButton } from '@/components/temporary-product-button';
 import { Button } from '@/components/ui/button';
 import {
   Command,
@@ -69,13 +70,19 @@ type ClientType = 'catalog' | 'free';
 type DiscountKind = '$' | '%';
 
 interface ItemRow {
-  productId: string;
-  sku: string;
+  // Ronda 9 — productId puede ser null para productos temporales creados
+  // al vuelo desde el ProductPicker. sku también es string|null porque puede
+  // ser un SKU auto-generado del catálogo o el snapshot del producto temporal.
+  productId: string | null;
+  sku: string | null;
   name: string;
   qty: number;
   unitPrice: string;
   discountKind: DiscountKind;
   discountValue: string;
+  // Ronda 9 — snapshot del producto temporal cuando productId es null.
+  tempProductPartNumber?: string | null;
+  isTemporary?: boolean;
 }
 
 const schema = z
@@ -155,9 +162,16 @@ export function QuotationForm({
 }: Props) {
   const qc = useQueryClient();
   const [items, setItems] = useState<ItemRow[]>(() => itemsFromQuotation(initialData));
-  const [activeTab, setActiveTab] = useState<'cliente' | 'items' | 'notas'>(
-    'cliente',
+  // Ronda 10 — tabs simplificadas: la sección "Cliente" y la tabla de items
+  // viven en la misma tab para que el flujo sea más rápido. La tab "Notas"
+  // queda aparte. Cuando una validación apunta a "items" o "cliente", todo
+  // resuelve a 'principal'.
+  const [activeTab, setActiveTab] = useState<'principal' | 'notas'>(
+    'principal',
   );
+  // Card del cliente colapsable. Empieza abierta; el operador la cierra
+  // con un click una vez que ya cargó los datos para ganar espacio.
+  const [clientOpen, setClientOpen] = useState(true);
 
   // Cliente seleccionado del catálogo (necesario para validar contacto antes
   // de "Guardar y enviar"). Sólo se popula en modo catalog.
@@ -220,7 +234,9 @@ export function QuotationForm({
   // Si el operador agrega más cantidad que el disponible se muestra warning
   // ámbar — el stock se vuelve a validar al convertir a venta.
   const productIds = useMemo(
-    () => items.map((it) => it.productId).filter(Boolean),
+    // Ronda 9 — sólo IDs reales (productos temporales tienen productId=null).
+    (): string[] =>
+      items.map((it) => it.productId).filter((id): id is string => !!id),
     [items],
   );
   // Ronda 7 — Cotizaciones no se atan a una bodega específica (la conversión
@@ -266,12 +282,15 @@ export function QuotationForm({
   // — solo informa. El stock se vuelve a chequear al convertir a venta.
   const stockShortages = items
     .map((it) => {
+      // Ronda 9 — productos temporales no consumen stock (no existen en
+      // el catálogo). Se omiten del warning.
+      if (!it.productId) return null;
       const available = stockMap.get(it.productId);
       if (available == null) return null;
       if (it.qty > available) {
         return {
           productId: it.productId,
-          sku: it.sku,
+          sku: it.sku ?? '',
           name: it.name,
           requested: it.qty,
           available,
@@ -307,8 +326,15 @@ export function QuotationForm({
       } else {
         discount = Math.max(0, dv);
       }
+      // Ronda 9 — si el item es temporal (sin productId), enviamos los
+      // campos snapshot para que el backend los persista en quotation_items.
       return {
         productId: it.productId,
+        tempProductName: it.productId ? null : it.name,
+        tempProductSku: it.productId ? null : it.sku ?? null,
+        tempProductPartNumber: it.productId
+          ? null
+          : it.tempProductPartNumber ?? null,
         qty,
         unitPrice: unit.toFixed(2),
         discount: discount.toFixed(2),
@@ -318,12 +344,12 @@ export function QuotationForm({
 
     if (clean.length === 0) {
       toast.error('Agregá al menos un item');
-      setActiveTab('items');
+      setActiveTab('principal');
       return null;
     }
     if (clean.some((i) => i.qty < 1 || Number(i.unitPrice) <= 0)) {
       toast.error('Revisá cantidad y precio unitario de los items');
-      setActiveTab('items');
+      setActiveTab('principal');
       return null;
     }
 
@@ -385,7 +411,8 @@ export function QuotationForm({
       errors.customerEmailSnapshot ||
       errors.customerTaxIdSnapshot
     ) {
-      setActiveTab('cliente');
+      setActiveTab('principal');
+      setClientOpen(true);
     }
   }
 
@@ -409,7 +436,8 @@ export function QuotationForm({
         ? catalogCustomer?.email?.trim() ?? ''
         : (values.customerEmailSnapshot ?? '').trim();
       if (!email) {
-        setActiveTab('cliente');
+        setActiveTab('principal');
+      setClientOpen(true);
         if (fromCatalog && catalogCustomer) {
           toast.error('Este cliente no tiene email guardado.', {
             action: {
@@ -436,7 +464,8 @@ export function QuotationForm({
         ? catalogCustomer?.phone?.trim() ?? ''
         : (values.customerPhoneSnapshot ?? '').trim();
       if (!rawPhone || !isValidPhone(rawPhone)) {
-        setActiveTab('cliente');
+        setActiveTab('principal');
+      setClientOpen(true);
         if (fromCatalog && catalogCustomer) {
           toast.error(
             rawPhone
@@ -630,13 +659,40 @@ export function QuotationForm({
         onValueChange={(v) => setActiveTab(v as typeof activeTab)}
       >
         <TabsList>
-          <TabsTrigger value="cliente">Cliente</TabsTrigger>
-          <TabsTrigger value="items">Items ({items.length})</TabsTrigger>
+          {/* Ronda 10 — 2 tabs: Cliente + productos en una sola vista,
+              Notas en otra. La sección del cliente vive arriba del listado
+              y se puede colapsar. */}
+          <TabsTrigger value="principal">
+            Cliente y productos ({items.length})
+          </TabsTrigger>
           <TabsTrigger value="notas">Notas</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="cliente" className="space-y-4">
-          <div className="rounded-md border bg-card p-6 space-y-4">
+        <TabsContent value="principal" className="space-y-4">
+          <div className="rounded-md border bg-card">
+            <button
+              type="button"
+              onClick={() => setClientOpen((o) => !o)}
+              className="flex w-full items-center justify-between border-b p-4 text-left hover:bg-accent/30"
+            >
+              <div>
+                <h2 className="font-medium">Datos del cliente</h2>
+                <p className="text-xs text-muted-foreground">
+                  {clientType === 'catalog'
+                    ? catalogCustomer
+                      ? `${catalogCustomer.name}${catalogCustomer.taxId ? ` · ${catalogCustomer.taxId}` : ''}`
+                      : 'Sin cliente seleccionado'
+                    : form.getValues('customerNameSnapshot')
+                      ? form.getValues('customerNameSnapshot')
+                      : 'Cliente libre (sin datos cargados)'}
+                </p>
+              </div>
+              <span className="text-xs text-muted-foreground">
+                {clientOpen ? 'Ocultar ▴' : 'Editar ▾'}
+              </span>
+            </button>
+            {clientOpen && (
+              <div className="space-y-4 p-6">
             <Controller
               control={form.control}
               name="clientType"
@@ -742,34 +798,57 @@ export function QuotationForm({
                 <Input type="date" {...form.register('validUntil')} />
               </Field>
             </div>
+              </div>
+            )}
           </div>
-        </TabsContent>
 
-        <TabsContent value="items" className="space-y-4">
+          {/* Items debajo del cliente, en el mismo tab (Ronda 10). */}
+          <div className="space-y-4">
           <div className="rounded-md border bg-card">
-            <div className="flex items-center justify-between border-b p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b p-4">
               <h2 className="font-medium">Items de la cotización</h2>
-              <ProductPicker
-                buttonLabel="Agregar producto"
-                onPick={(p) => {
-                  if (items.some((i) => i.productId === p.id)) {
-                    toast.info('El producto ya está en la lista');
-                    return;
+              <div className="flex flex-wrap items-center gap-2">
+                <ProductPicker
+                  buttonLabel="Agregar producto"
+                  onPick={(p) => {
+                    if (items.some((i) => i.productId === p.id)) {
+                      toast.info('El producto ya está en la lista');
+                      return;
+                    }
+                    setItems((prev) => [
+                      ...prev,
+                      {
+                        productId: p.id,
+                        sku: p.sku,
+                        name: p.name,
+                        qty: 1,
+                        unitPrice: p.price ?? '0',
+                        discountKind: '$',
+                        discountValue: '0',
+                      },
+                    ]);
+                  }}
+                />
+                {/* Ronda 9 — producto temporal (no toca catálogo). */}
+                <TemporaryProductButton
+                  onAdd={(tp) =>
+                    setItems((prev) => [
+                      ...prev,
+                      {
+                        productId: null,
+                        sku: tp.sku,
+                        name: tp.name,
+                        qty: 1,
+                        unitPrice: tp.unitPrice,
+                        discountKind: '$',
+                        discountValue: '0',
+                        tempProductPartNumber: tp.partNumber,
+                        isTemporary: true,
+                      },
+                    ])
                   }
-                  setItems((prev) => [
-                    ...prev,
-                    {
-                      productId: p.id,
-                      sku: p.sku,
-                      name: p.name,
-                      qty: 1,
-                      unitPrice: p.price ?? '0',
-                      discountKind: '$',
-                      discountValue: '0',
-                    },
-                  ]);
-                }}
-              />
+                />
+              </div>
             </div>
             <Table>
               <TableHeader>
@@ -798,21 +877,33 @@ export function QuotationForm({
                 )}
                 {items.map((it, idx) => {
                   const calc = itemsForCalc[idx];
-                  const available = stockMap.get(it.productId);
+                  // Ronda 9 — productos temporales no tienen entry en stockMap.
+                  const available = it.productId
+                    ? stockMap.get(it.productId)
+                    : undefined;
                   const stockLoaded = available != null;
                   const exceeds = stockLoaded && it.qty > available;
                   return (
                     <TableRow
-                      key={`${it.productId}-${idx}`}
+                      key={`${it.productId ?? 'temp'}-${idx}`}
                       className={
                         exceeds
                           ? 'bg-amber-500/5 hover:bg-amber-500/10'
                           : undefined
                       }
                     >
-                      <TableCell className="font-mono text-xs">{it.sku}</TableCell>
-                      <TableCell className="max-w-[260px] truncate">
-                        {it.name}
+                      <TableCell className="font-mono text-xs">
+                        {it.sku ?? '—'}
+                      </TableCell>
+                      <TableCell className="max-w-[260px]">
+                        <div className="flex flex-col gap-1">
+                          <span className="truncate">{it.name}</span>
+                          {it.isTemporary && (
+                            <span className="inline-flex w-fit items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+                              Producto temporal · no descuenta stock
+                            </span>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="space-y-1">
@@ -937,6 +1028,7 @@ export function QuotationForm({
               </p>
             </div>
           )}
+          </div>
         </TabsContent>
 
         <TabsContent value="notas" className="space-y-2">

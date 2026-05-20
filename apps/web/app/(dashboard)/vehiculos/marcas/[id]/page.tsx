@@ -1,10 +1,26 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft } from 'lucide-react';
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
+import { ArrowLeft, Pencil, Plus, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import { useState } from 'react';
+import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -15,22 +31,26 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
+  apiErrorMessage,
+  createVehicleModel,
+  deleteVehicleModel,
   listVehicleMakes,
   listVehicleModels,
   productsByVehicle,
+  updateVehicleModel,
 } from '@/lib/catalog-api';
 import { formatCurrency } from '@/lib/format';
+import type { VehicleModelDto } from '@inventory/shared';
 
 /**
- * Ronda 7 — Detalle de marca de vehículo. Muestra:
- *  - Modelos de esa marca (lista corta).
+ * Detalle de marca de vehículo. Muestra:
+ *  - Modelos de esa marca con CRUD inline (Ronda 9).
  *  - Productos compatibles con cualquier modelo de esa marca (lista grande).
- *
- * Sin selección múltiple ni acciones masivas.
  */
 export default function VehicleMakeDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
+  const qc = useQueryClient();
 
   const makesQ = useQuery({
     queryKey: ['vehicle-makes'],
@@ -44,6 +64,52 @@ export default function VehicleMakeDetailPage() {
     enabled: !!id,
   });
   const models = modelsQ.data ?? [];
+
+  // Ronda 9 — estado del dialog de crear/editar modelo.
+  const [editing, setEditing] = useState<VehicleModelDto | null>(null);
+  const [modelDialogOpen, setModelDialogOpen] = useState(false);
+  const [modelName, setModelName] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<VehicleModelDto | null>(null);
+
+  function startCreate() {
+    setEditing(null);
+    setModelName('');
+    setModelDialogOpen(true);
+  }
+  function startEdit(m: VehicleModelDto) {
+    setEditing(m);
+    setModelName(m.name);
+    setModelDialogOpen(true);
+  }
+
+  const createMut = useMutation({
+    mutationFn: () => createVehicleModel({ makeId: id, name: modelName.trim() }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['vehicle-models'] });
+      toast.success('Modelo creado');
+      setModelDialogOpen(false);
+    },
+    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo crear')),
+  });
+  const updateMut = useMutation({
+    mutationFn: () =>
+      updateVehicleModel(editing!.id, { name: modelName.trim() }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['vehicle-models'] });
+      toast.success('Modelo actualizado');
+      setModelDialogOpen(false);
+    },
+    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo actualizar')),
+  });
+  const deleteMut = useMutation({
+    mutationFn: (mid: string) => deleteVehicleModel(mid),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['vehicle-models'] });
+      toast.success('Modelo eliminado');
+      setDeleteTarget(null);
+    },
+    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo eliminar')),
+  });
 
   // Productos compatibles con cualquier modelo de esta marca.
   const productsQ = useQuery({
@@ -71,29 +137,37 @@ export default function VehicleMakeDetailPage() {
         </div>
       </div>
 
-      {/* Modelos */}
+      {/* Modelos — Ronda 9 con CRUD inline. */}
       <div className="rounded-md border bg-card">
-        <div className="border-b p-4">
+        <div className="flex items-center justify-between border-b p-4">
           <h2 className="font-medium">Modelos de {make?.name ?? '—'}</h2>
+          <Button size="sm" onClick={startCreate}>
+            <Plus className="h-4 w-4" />
+            Nuevo modelo
+          </Button>
         </div>
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Modelo</TableHead>
+              <TableHead className="w-[180px] text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {modelsQ.isLoading && (
               <TableRow>
-                <TableCell>
+                <TableCell colSpan={2}>
                   <Skeleton className="h-4 w-40" />
                 </TableCell>
               </TableRow>
             )}
             {!modelsQ.isLoading && models.length === 0 && (
               <TableRow>
-                <TableCell className="text-center text-muted-foreground">
-                  Sin modelos.
+                <TableCell
+                  colSpan={2}
+                  className="text-center text-muted-foreground"
+                >
+                  Sin modelos. Usá «Nuevo modelo» arriba para agregar.
                 </TableCell>
               </TableRow>
             )}
@@ -107,11 +181,95 @@ export default function VehicleMakeDetailPage() {
                     {m.name}
                   </Link>
                 </TableCell>
+                <TableCell className="text-right">
+                  <div className="flex justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => startEdit(m)}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setDeleteTarget(m)}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </div>
+
+      {/* Dialog crear/editar modelo */}
+      <Dialog open={modelDialogOpen} onOpenChange={setModelDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {editing ? `Editar ${editing.name}` : 'Nuevo modelo'}
+            </DialogTitle>
+          </DialogHeader>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!modelName.trim()) return;
+              if (editing) updateMut.mutate();
+              else createMut.mutate();
+            }}
+            className="space-y-3"
+          >
+            <div className="space-y-1">
+              <Label htmlFor="model-name">Nombre del modelo</Label>
+              <Input
+                id="model-name"
+                autoFocus
+                value={modelName}
+                onChange={(e) => setModelName(e.target.value)}
+                placeholder="ej: Corolla, Hilux, S10"
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setModelDialogOpen(false)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={
+                  !modelName.trim() ||
+                  createMut.isPending ||
+                  updateMut.isPending
+                }
+              >
+                {editing ? 'Guardar' : 'Crear'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title="¿Eliminar modelo?"
+        description={
+          deleteTarget
+            ? `Esto eliminará el modelo "${deleteTarget.name}". Si está referenciado por productos, la operación devolverá un error.`
+            : ''
+        }
+        confirmLabel="Eliminar"
+        variant="destructive"
+        onConfirm={async () => {
+          if (deleteTarget) await deleteMut.mutateAsync(deleteTarget.id);
+        }}
+      />
 
       {/* Productos compatibles */}
       <div className="rounded-md border bg-card">

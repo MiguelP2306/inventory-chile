@@ -1,6 +1,7 @@
 import {
   DispatchNoteDto,
   DispatchStatus,
+  InventoryMovementType,
   SaleStatus,
 } from '@inventory/shared';
 import {
@@ -19,7 +20,9 @@ import {
   Customer,
   DispatchNote,
   Sale,
+  SaleItem,
 } from '../database/entities';
+import { InventoryService } from '../inventory/inventory.service';
 import {
   CreateDispatchNoteDto,
   ListDispatchNotesQueryDto,
@@ -45,6 +48,7 @@ export class DispatchService {
     private readonly communeRepo: Repository<Commune>,
     @InjectDataSource() private readonly ds: DataSource,
     private readonly counters: CountersService,
+    private readonly inventory: InventoryService,
   ) {}
 
   // ---------------- reads ----------------
@@ -198,10 +202,58 @@ export class DispatchService {
         userId,
       });
       const saved = await manager.getRepository(DispatchNote).save(note);
+
+      // Audit-only: el SALE_OUT real ya bajó stock al confirmar la venta.
+      // Acá dejamos rastro del despacho físico en /inventario/movimientos
+      // para trazabilidad, sin volver a tocar `stocks`.
+      await this.recordSaleItemAudit(
+        manager,
+        sale.id,
+        sale.warehouseId,
+        InventoryMovementType.DISPATCH_OUT,
+        number,
+        saved.id,
+        userId,
+      );
+
       return saved.id;
     });
 
     return this.getOne(id);
+  }
+
+  /**
+   * Recorre los items de la venta y registra un movimiento audit-only por
+   * cada uno. Se usa al generar y al anular guías (mismo formato, distinto
+   * `type` y signo). NO modifica `stocks`.
+   */
+  private async recordSaleItemAudit(
+    manager: EntityManager,
+    saleId: string,
+    warehouseId: string,
+    type: InventoryMovementType,
+    reference: string,
+    refId: string,
+    userId: string,
+  ): Promise<void> {
+    const items = await manager.getRepository(SaleItem).find({
+      where: { saleId },
+    });
+    // DISPATCH_OUT: qty negativa (salida); DISPATCH_VOIDED: qty positiva
+    // (reversa). El registro es informativo — el stock real no se toca.
+    const sign = type === InventoryMovementType.DISPATCH_OUT ? -1 : 1;
+    for (const it of items) {
+      await this.inventory.recordMovementWithoutStockImpact(manager, {
+        productId: it.productId,
+        warehouseId,
+        type,
+        qty: sign * it.qty,
+        unitCost: it.unitCost ?? null,
+        reference,
+        refId,
+        userId,
+      });
+    }
   }
 
   // ---------------- void ----------------
@@ -216,11 +268,33 @@ export class DispatchService {
     if (existing.status === DispatchStatus.VOIDED) {
       throw new ConflictException('La guía ya está anulada');
     }
-    existing.status = DispatchStatus.VOIDED;
-    existing.voidedAt = new Date();
-    existing.voidReason = dto.reason.trim();
-    existing.voidedById = userId;
-    await this.repo.save(existing);
+
+    await this.ds.transaction(async (manager) => {
+      existing.status = DispatchStatus.VOIDED;
+      existing.voidedAt = new Date();
+      existing.voidReason = dto.reason.trim();
+      existing.voidedById = userId;
+      await manager.getRepository(DispatchNote).save(existing);
+
+      // Audit-only: dejamos rastro del cambio de estado en el historial
+      // de movimientos. No revertimos stock (el SALE_OUT sigue vigente
+      // mientras la venta no se cancele).
+      const sale = await manager.getRepository(Sale).findOne({
+        where: { id: existing.saleId },
+      });
+      if (sale) {
+        await this.recordSaleItemAudit(
+          manager,
+          sale.id,
+          sale.warehouseId,
+          InventoryMovementType.DISPATCH_VOIDED,
+          existing.number,
+          existing.id,
+          userId,
+        );
+      }
+    });
+
     return this.getOne(id);
   }
 
@@ -244,6 +318,23 @@ export class DispatchService {
     active.voidReason = reason;
     active.voidedById = userId;
     await manager.getRepository(DispatchNote).save(active);
+
+    // Audit-only del cambio de estado, usando el manager del caller para
+    // mantener atomicidad con la cancelación de la venta.
+    const sale = await manager.getRepository(Sale).findOne({
+      where: { id: saleId },
+    });
+    if (sale) {
+      await this.recordSaleItemAudit(
+        manager,
+        sale.id,
+        sale.warehouseId,
+        InventoryMovementType.DISPATCH_VOIDED,
+        active.number,
+        active.id,
+        userId,
+      );
+    }
   }
 
   // ---------------- helpers ----------------

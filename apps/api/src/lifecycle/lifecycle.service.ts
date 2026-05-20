@@ -304,11 +304,52 @@ export class LifecycleService {
     const pageSize = query.pageSize ?? 20;
     const now = new Date();
 
+    // Ronda 10 — /seguimiento se enfoca solo en cotizaciones del día actual.
+    // Calculamos los límites del día en hora local del servidor.
+    const startOfDay = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      0,
+      0,
+      0,
+      0,
+    );
+    const endOfDay = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      23,
+      59,
+      59,
+      999,
+    );
+
     const qb = this.customers
       .createQueryBuilder('c')
       .where('c.lifecycleStatus IN (:...statuses)', {
         statuses: [LifecycleStatus.QUOTED, LifecycleStatus.FOLLOW_UP],
-      });
+      })
+      // Ronda 10 — filtro adicional: solo clientes con AL MENOS una
+      // cotización abierta creada hoy. Mantiene el seguimiento enfocado
+      // en la actividad del día.
+      .andWhere(
+        `EXISTS (
+          SELECT 1 FROM quotations q
+          WHERE q.customerId = c.id
+            AND q.createdAt BETWEEN :dayStart AND :dayEnd
+            AND q.status IN (:...openStatuses)
+        )`,
+        {
+          dayStart: startOfDay,
+          dayEnd: endOfDay,
+          openStatuses: [
+            QuotationStatus.DRAFT,
+            QuotationStatus.SENT,
+            QuotationStatus.APPROVED,
+          ],
+        },
+      );
 
     if (tab === 'pendientes') {
       qb.andWhere('c.nextFollowUpAt IS NOT NULL').andWhere(
@@ -348,10 +389,20 @@ export class LifecycleService {
     qb.take(pageSize).skip((page - 1) * pageSize);
     const [customers, total] = await qb.getManyAndCount();
 
-    // Hidratamos la última cotización abierta de cada cliente en 1 sola
-    // query. Si no tiene cotizaciones abiertas, queda null.
+    // Ronda 10 — hidratamos la última cotización abierta de HOY. El
+    // EXISTS arriba garantiza que cada customer tiene al menos una,
+    // y acá traemos sus campos (número, status, etc).
     const customerIds = customers.map((c) => c.id);
-    const latestQuotations = customerIds.length
+    type LatestQRow = {
+      customerId: string;
+      id: string;
+      number: string;
+      total: string;
+      publicToken: string;
+      status: string;
+      createdAt: Date;
+    };
+    const latestQuotations: LatestQRow[] = customerIds.length
       ? await this.ds
           .createQueryBuilder()
           .select([
@@ -360,6 +411,8 @@ export class LifecycleService {
             'q.number AS number',
             'q.total AS total',
             'q.publicToken AS publicToken',
+            'q.status AS status',
+            'q.createdAt AS createdAt',
           ])
           .from('quotations', 'q')
           .where('q.customerId IN (:...ids)', { ids: customerIds })
@@ -370,43 +423,50 @@ export class LifecycleService {
               QuotationStatus.APPROVED,
             ],
           })
+          // Restringimos al día actual para que el badge refleje la
+          // cotización de hoy (no una vieja abierta).
+          .andWhere('q.createdAt BETWEEN :dayStart AND :dayEnd', {
+            dayStart: startOfDay,
+            dayEnd: endOfDay,
+          })
           .orderBy('q.createdAt', 'DESC')
           .getRawMany()
-      : ([] as Array<{
-          customerId: string;
-          id: string;
-          number: string;
-          total: string;
-          publicToken: string;
-        }>);
+      : [];
 
-    const latestByCustomer = new Map<
-      string,
-      { id: string; number: string; total: string; publicToken: string }
-    >();
+    const latestByCustomer = new Map<string, LatestQRow>();
     for (const row of latestQuotations) {
       if (!latestByCustomer.has(row.customerId)) {
-        latestByCustomer.set(row.customerId, {
-          id: row.id,
-          number: row.number,
-          total: row.total,
-          publicToken: row.publicToken,
-        });
+        latestByCustomer.set(row.customerId, row);
       }
     }
 
-    const items: FollowUpRowDto[] = customers.map((c) => ({
-      customerId: c.id,
-      customerName: c.name,
-      customerTaxId: c.taxId,
-      whatsappPhone: c.whatsappPhone,
-      phone: c.phone,
-      email: c.email,
-      lifecycleStatus: c.lifecycleStatus,
-      lastContactAt: c.lastContactAt?.toISOString() ?? null,
-      nextFollowUpAt: c.nextFollowUpAt?.toISOString() ?? null,
-      latestQuotation: latestByCustomer.get(c.id) ?? null,
-    }));
+    const items: FollowUpRowDto[] = customers.map((c) => {
+      const q = latestByCustomer.get(c.id);
+      return {
+        customerId: c.id,
+        customerName: c.name,
+        customerTaxId: c.taxId,
+        whatsappPhone: c.whatsappPhone,
+        phone: c.phone,
+        email: c.email,
+        lifecycleStatus: c.lifecycleStatus,
+        lastContactAt: c.lastContactAt?.toISOString() ?? null,
+        nextFollowUpAt: c.nextFollowUpAt?.toISOString() ?? null,
+        latestQuotation: q
+          ? {
+              id: q.id,
+              number: q.number,
+              total: q.total,
+              publicToken: q.publicToken,
+              status: q.status as QuotationStatus,
+              createdAt:
+                q.createdAt instanceof Date
+                  ? q.createdAt.toISOString()
+                  : new Date(q.createdAt).toISOString(),
+            }
+          : null,
+      };
+    });
 
     return { items, total, page, pageSize };
   }

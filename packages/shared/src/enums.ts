@@ -13,6 +13,17 @@ export const InventoryMovementType = {
   // referencia informativa (cantidad reportada por el cliente). La tabla
   // `stocks` NO se modifica para este tipo.
   RETURN_IN_DAMAGED: 'RETURN_IN_DAMAGED',
+  // Ronda 8 — auditoría de guía de despacho. El stock real ya bajó con el
+  // `SALE_OUT` al confirmar la venta; estos tipos sólo dejan rastro en
+  // /inventario/movimientos para trazabilidad del despacho físico y su
+  // eventual anulación. La tabla `stocks` NO se modifica.
+  DISPATCH_OUT: 'DISPATCH_OUT',
+  DISPATCH_VOIDED: 'DISPATCH_VOIDED',
+  // Ronda 8 — cancelación de una devolución cuyo item era DAMAGED. El
+  // original tampoco tocó `stocks` (RETURN_IN_DAMAGED es audit-only), así
+  // que la cancelación queda como evento informativo para que el historial
+  // refleje el cambio de estado.
+  RETURN_DAMAGED_CANCELLED: 'RETURN_DAMAGED_CANCELLED',
 } as const;
 export type InventoryMovementType =
   (typeof InventoryMovementType)[keyof typeof InventoryMovementType];
@@ -43,9 +54,21 @@ export type SaleStatus = (typeof SaleStatus)[keyof typeof SaleStatus];
 export const PaymentMethod = {
   CASH: 'CASH',
   TRANSFER: 'TRANSFER',
-  CARD: 'CARD',
+  // Ronda 9 — desdoblamiento del antiguo `CARD`. Cada subtipo tiene su
+  // propia comisión configurable en `CompanySettings`. Las ventas
+  // históricas con `CARD` se migran a `CARD_CREDIT` (más conservador).
+  CARD_DEBIT: 'CARD_DEBIT',
+  CARD_CREDIT: 'CARD_CREDIT',
+  PAYMENT_LINK: 'PAYMENT_LINK',
 } as const;
 export type PaymentMethod = (typeof PaymentMethod)[keyof typeof PaymentMethod];
+
+/** Métodos de pago que pagan comisión (tarjeta + link). Útil para form/reportes. */
+export const PAYMENT_METHODS_WITH_COMMISSION: PaymentMethod[] = [
+  PaymentMethod.CARD_DEBIT,
+  PaymentMethod.CARD_CREDIT,
+  PaymentMethod.PAYMENT_LINK,
+];
 
 export const CashTransactionType = {
   INCOME: 'INCOME',
@@ -86,6 +109,34 @@ export const ReturnItemCondition = {
 } as const;
 export type ReturnItemCondition =
   (typeof ReturnItemCondition)[keyof typeof ReturnItemCondition];
+
+// Ronda 9 — modo de reembolso de una devolución.
+//  - MONEY: el cliente/proveedor recibe el dinero (default histórico).
+//  - CREDIT: solo aplica a devoluciones a proveedor → genera un
+//    `SupplierCredit` que se aplica como descuento en compras futuras.
+//  - EXCHANGE: solo aplica a devoluciones de cliente → el operador carga
+//    items de reemplazo en `return_replacement_items`. Si la diferencia
+//    bruta es positiva el cliente paga, si es negativa el sistema le
+//    reembolsa la diferencia.
+export const RefundMode = {
+  MONEY: 'MONEY',
+  CREDIT: 'CREDIT',
+  EXCHANGE: 'EXCHANGE',
+} as const;
+export type RefundMode = (typeof RefundMode)[keyof typeof RefundMode];
+
+// Estado de un saldo a favor con un proveedor.
+//  - ACTIVE: tiene balance disponible para aplicar.
+//  - SPENT: balance llegó a 0 — totalmente aplicado.
+//  - VOIDED: anulado manualmente (ej. cuando la devolución original se
+//    cancela y todavía no se había usado).
+export const SupplierCreditStatus = {
+  ACTIVE: 'ACTIVE',
+  SPENT: 'SPENT',
+  VOIDED: 'VOIDED',
+} as const;
+export type SupplierCreditStatus =
+  (typeof SupplierCreditStatus)[keyof typeof SupplierCreditStatus];
 
 export const WarrantyStatus = {
   OPEN: 'OPEN',

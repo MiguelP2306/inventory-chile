@@ -42,7 +42,7 @@ export class ProjectionController {
 
     const csv = stringify(
       data.rows.map((r): Record<string, string | number> => ({
-        SKU: r.sku,
+        SKU: r.sku ?? '',
         Producto: r.name,
         'Stock total': r.totalStock,
         'Consumo diario': r.dailyConsumption,

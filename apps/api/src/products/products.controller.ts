@@ -10,6 +10,7 @@ import {
   Post,
   Put,
   Query,
+  Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -23,6 +24,11 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator';
+import type { Response } from 'express';
+import { BrandsService } from '../brands/brands.service';
+import { CategoriesService } from '../categories/categories.service';
+import { PdfService } from '../notifications/pdf.service';
+import { SettingsService } from '../settings/settings.service';
 import {
   MAX_PRODUCT_IMAGE_BYTES,
   productImageFileFilter,
@@ -65,7 +71,13 @@ class BulkUpdateCategoryDto {
 
 @Controller('products')
 export class ProductsController {
-  constructor(private readonly svc: ProductsService) {}
+  constructor(
+    private readonly svc: ProductsService,
+    private readonly categories: CategoriesService,
+    private readonly brands: BrandsService,
+    private readonly pdf: PdfService,
+    private readonly settings: SettingsService,
+  ) {}
 
   @Get()
   list(@Query() query: ListProductsQueryDto) {
@@ -80,6 +92,99 @@ export class ProductsController {
   @Get('quick-search')
   quickSearch(@Query() query: QuickSearchQueryDto) {
     return this.svc.quickSearch(query);
+  }
+
+  /**
+   * Ronda 10 — catálogo en PDF. Respeta los mismos filtros del listado
+   * (`q`, `categoryId`, `brandId`, `productKind`, `createdFrom/To`) pero
+   * ignora paginación: exporta hasta 500 productos.
+   */
+  @Get('catalog.pdf')
+  async catalogPdf(
+    @Query() query: ListProductsQueryDto,
+    @Res() res: Response,
+  ) {
+    const [products, settings] = await Promise.all([
+      this.svc.listForCatalog(query),
+      this.settings.get(),
+    ]);
+
+    // Map de coverUrl absolutas para fetch desde el backend.
+    const coverByProduct = await this.svc.coverUrlsByProduct(
+      products.map((p) => p.id),
+    );
+
+    // Categorías (con padre) para componer "Padre › Hija".
+    const categoriesPlain = await this.categories.list();
+    const categoriesArr = Array.isArray(categoriesPlain)
+      ? categoriesPlain
+      : categoriesPlain.items;
+    const categoryById = new Map(categoriesArr.map((c) => [c.id, c]));
+
+    // Resumen de filtros para mostrar en la cabecera.
+    const filterParts: string[] = [];
+    if (query.q) filterParts.push(`búsqueda "${query.q}"`);
+    if (query.categoryId) {
+      const cat = categoryById.get(query.categoryId);
+      if (cat) {
+        const path = cat.parentName ? `${cat.parentName} › ${cat.name}` : cat.name;
+        filterParts.push(`categoría ${path}`);
+      }
+    }
+    if (query.brandId) {
+      const brand = await this.brands
+        .list()
+        .then((bs) => (Array.isArray(bs) ? bs : bs.items).find((b) => b.id === query.brandId));
+      if (brand) filterParts.push(`marca ${brand.name}`);
+    }
+    if (query.productKind) {
+      filterParts.push(
+        `tipo ${query.productKind === 'ORIGINAL' ? 'Original' : 'Alternativo'}`,
+      );
+    }
+
+    const lines = products.map((p) => {
+      const cat = p.categoryId ? categoryById.get(p.categoryId) : null;
+      const categoryPath =
+        cat && cat.parentName
+          ? `${cat.parentName} › ${cat.name}`
+          : (cat?.name ?? null);
+      return {
+        sku: p.sku,
+        name: p.name,
+        partNumber: p.partNumber,
+        description: p.description,
+        categoryName: cat?.name ?? null,
+        categoryPath,
+        brandName: p.brand?.name ?? null,
+        cost: p.cost,
+        price: p.price,
+        productKind: p.productKind,
+        coverUrl: coverByProduct.get(p.id) ?? null,
+      };
+    });
+
+    const buffer = await this.pdf.generateCatalog({
+      company: {
+        name: settings.name,
+        address: settings.address,
+        phone: settings.phone,
+        email: settings.email,
+        taxId: settings.taxId,
+        logoUrl: settings.logoUrl,
+        quotationFooter: settings.quotationFooter,
+      },
+      generatedAt: new Date().toISOString(),
+      filterSummary: filterParts.join(' · '),
+      products: lines,
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="catalogo-${new Date().toISOString().slice(0, 10)}.pdf"`,
+    );
+    res.send(buffer);
   }
 
   // Ronda 7 — bulk update de categoría. Ruta concreta antes que /:id

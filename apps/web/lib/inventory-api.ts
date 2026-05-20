@@ -33,6 +33,9 @@ export const getSupplier = (id: string) =>
 export interface SupplierInput {
   name: string;
   taxId?: string | null;
+  // Ronda 9 — razón social formal + nombre de contacto humano.
+  legalName?: string | null;
+  contactPerson?: string | null;
   email?: string | null;
   phone?: string | null;
   address?: string | null;
@@ -130,10 +133,15 @@ export interface PurchaseInput {
   // auto-calculado.
   invoiceUrls?: string[];
   taxAmountOverride?: string;
+  // Ronda 9 — método de pago (default TRANSFER) y créditos aplicados.
+  paymentMethod?: import('@inventory/shared').PaymentMethodDto;
+  creditApplications?: Array<{ supplierCreditId: string; amount: string }>;
   items: PurchaseItemInput[];
 }
 
 export interface ListPurchasesParams {
+  // Ronda 11 — búsqueda libre (proveedor por nombre/RUT, o notas).
+  q?: string;
   supplierId?: string;
   warehouseId?: string;
   dateFrom?: string;
@@ -155,6 +163,15 @@ export const getPurchase = (id: string) =>
 
 export const createPurchase = (input: PurchaseInput) =>
   api.post<PurchaseEntryDto>('/purchases', input).then((r) => r.data);
+
+// Ronda 9 — KPIs de compras para los cards arriba de la lista.
+import type { PurchasesKpisDto } from '@inventory/shared';
+export interface PurchasesKpisParams {
+  dateFrom?: string;
+  dateTo?: string;
+}
+export const getPurchasesKpis = (params: PurchasesKpisParams = {}) =>
+  api.get<PurchasesKpisDto>('/purchases/kpis', { params }).then((r) => r.data);
 
 // ---------- Ronda 7: facturas múltiples por compra ----------
 

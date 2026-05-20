@@ -8,13 +8,18 @@ import { toast } from 'sonner';
 import { QuotationFormDialog } from '@/components/forms/quotation-form-dialog';
 import { SaleFormDialog } from '@/components/forms/sale-form-dialog';
 import { OperationModal } from '@/components/operation-modal';
-import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 
-// El FAB está oculto cuando el operador está en la pantalla pública o en
-// pantallas donde la acción ya está embebida (no agrega valor).
+// Ronda 8 — el botón de nueva operación dejó de ser FAB flotante y vive
+// en el header junto al ThemeToggle. El cliente reportaba que el FAB
+// tapaba contenedores de totales en "nueva entrada de mercadería" (y
+// otras vistas con bloques al pie). El comportamiento sigue siendo el
+// mismo: abre el modal de elección Venta/Cotización.
+
+// Oculto en pantallas públicas y login (no aplica acción).
 const HIDDEN_PREFIXES = ['/p/', '/login'];
 
-export function OperationFab() {
+export function OperationButton() {
   const pathname = usePathname();
   const router = useRouter();
   const qc = useQueryClient();
@@ -28,21 +33,15 @@ export function OperationFab() {
 
   return (
     <>
-      <button
-        type="button"
+      <Button
+        size="sm"
+        onClick={() => setChooserOpen(true)}
         aria-label="Nueva operación"
         title="Nueva operación"
-        onClick={() => setChooserOpen(true)}
-        className={cn(
-          'fixed bottom-6 right-6 z-40',
-          'flex h-14 w-14 items-center justify-center rounded-full',
-          'bg-primary text-primary-foreground shadow-lg shadow-black/20',
-          'transition-transform hover:scale-105 hover:shadow-xl active:scale-95',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-        )}
       >
-        <Plus className="h-6 w-6" />
-      </button>
+        <Plus className="h-4 w-4" />
+        <span className="hidden sm:inline">Nuevo</span>
+      </Button>
 
       <OperationModal
         open={chooserOpen}

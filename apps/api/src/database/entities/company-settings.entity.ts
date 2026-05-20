@@ -43,10 +43,28 @@ export class CompanySettings {
   @Column({ type: 'decimal', precision: 5, scale: 4, default: 0.19 })
   taxRate!: string;
 
-  // Comisión que el agregador de tarjeta cobra al comerciante. Se descuenta
-  // automáticamente como egreso de caja al confirmar una venta con CARD.
+  /**
+   * @deprecated Desde Ronda 9 la comisión se desdobla por método de pago.
+   * Se conserva esta columna para no romper migraciones / código legacy,
+   * pero los cálculos nuevos usan `cardDebitCommissionRate`,
+   * `cardCreditCommissionRate` y `paymentLinkCommissionRate` según el
+   * `paymentMethod` de la venta.
+   */
   @Column({ type: 'decimal', precision: 5, scale: 4, default: 0.025 })
   cardCommissionRate!: string;
+
+  // Ronda 9 — comisión específica de débito. Default 1.5% (Chile típico).
+  @Column({ type: 'decimal', precision: 5, scale: 4, default: 0.015 })
+  cardDebitCommissionRate!: string;
+
+  // Ronda 9 — comisión específica de crédito. Default 2.5%.
+  @Column({ type: 'decimal', precision: 5, scale: 4, default: 0.025 })
+  cardCreditCommissionRate!: string;
+
+  // Ronda 9 — comisión del agregador cuando el cobro vino por link de pago
+  // (WebPay/Khipu/Flow). Default 3.5%.
+  @Column({ type: 'decimal', precision: 5, scale: 4, default: 0.035 })
+  paymentLinkCommissionRate!: string;
 
   // Fase 8 — umbral de días de cobertura para marcar un producto como crítico
   // en /proyeccion. Default 75 días (cubre el lead time 2-3 meses del cliente).

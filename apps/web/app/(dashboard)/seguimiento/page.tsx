@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { LifecycleBadge } from '@/components/lifecycle-badge';
+import { QuotationStatusBadge } from '@/components/quotation-status-badge';
 import { MarkLostDialog } from '@/components/mark-lost-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -115,9 +116,12 @@ export default function SeguimientoPage() {
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold">Seguimiento comercial</h1>
         <p className="text-sm text-muted-foreground">
-          Bandeja de clientes con cotización abierta. El lifecycle se
-          actualiza automáticamente al crear cotizaciones y confirmar
-          ventas.
+          Cotizaciones del día — {new Date().toLocaleDateString('es-CL', {
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long',
+          })}. Solo se muestran clientes con cotizaciones abiertas creadas
+          hoy. El badge refleja el estado actual de la cotización.
         </p>
       </div>
 
@@ -231,7 +235,16 @@ export default function SeguimientoPage() {
                     )}
                   </TableCell>
                   <TableCell>
-                    <LifecycleBadge status={row.lifecycleStatus} />
+                    {/* Ronda 10 — badge = estado de la cotización del día.
+                        Si no hay cotización (caso teórico, el EXISTS lo
+                        bloquea) cae al lifecycle del Customer. */}
+                    {row.latestQuotation ? (
+                      <QuotationStatusBadge
+                        status={row.latestQuotation.status}
+                      />
+                    ) : (
+                      <LifecycleBadge status={row.lifecycleStatus} />
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">

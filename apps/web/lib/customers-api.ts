@@ -33,7 +33,8 @@ import type { CustomerSourceDto } from '@inventory/shared';
 
 export interface CustomerInput {
   name: string;
-  taxId: string;
+  // Ronda 9 — RUT opcional (cliente lite por WhatsApp).
+  taxId?: string | null;
   email?: string | null;
   phone?: string | null;
   addressStreet?: string | null;

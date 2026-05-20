@@ -53,30 +53,21 @@ const ALL = '__all__';
 const PAGE_SIZE = 20;
 
 export default function VehiculosPage() {
+  // Ronda 9 — consolidada en una sola vista. Los modelos viven dentro del
+  // detalle de cada marca (`/vehiculos/marcas/[id]`), ya no como tab global.
   return (
-    <Tabs defaultValue="makes" className="space-y-4">
-      <TabsList>
-        <TabsTrigger value="makes">Marcas</TabsTrigger>
-        <TabsTrigger value="models">Modelos</TabsTrigger>
-      </TabsList>
-      <TabsContent value="makes">
-        <SimpleNameList
-          title="Marcas de vehículo"
-          resourceLabel="marca"
-          queryKey="vehicle-makes"
-          listPaginated={listVehicleMakesPaginated}
-          create={createVehicleMake}
-          update={updateVehicleMake}
-          remove={deleteVehicleMake}
-          // Ronda 7 — click en el nombre abre /vehiculos/marcas/[id] con los
-          // modelos de esa marca.
-          getDetailHref={(item) => `/vehiculos/marcas/${item.id}`}
-        />
-      </TabsContent>
-      <TabsContent value="models">
-        <ModelsList />
-      </TabsContent>
-    </Tabs>
+    <SimpleNameList
+      title="Marcas de vehículo"
+      resourceLabel="marca"
+      queryKey="vehicle-makes"
+      listPaginated={listVehicleMakesPaginated}
+      create={createVehicleMake}
+      update={updateVehicleMake}
+      remove={deleteVehicleMake}
+      // Click en el nombre abre /vehiculos/marcas/[id] con los modelos
+      // de esa marca + productos compatibles.
+      getDetailHref={(item) => `/vehiculos/marcas/${item.id}`}
+    />
   );
 }
 

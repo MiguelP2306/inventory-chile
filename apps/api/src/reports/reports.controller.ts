@@ -102,7 +102,7 @@ export class ReportsController {
     const data = await this.svc.noMovement(days);
     const csv = stringify(
       data.rows.map((r): Record<string, string> => ({
-        SKU: r.sku,
+        SKU: r.sku ?? '',
         Producto: r.name,
         Categoria: r.categoryName ?? '',
         Marca: r.brandName ?? '',

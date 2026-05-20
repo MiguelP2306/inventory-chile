@@ -58,7 +58,7 @@ export function CancelSaleDialog({ sale, open, onOpenChange }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Cancelar venta {sale.number}</DialogTitle>
+          <DialogTitle>Venta a nota crédito · {sale.number}</DialogTitle>
         </DialogHeader>
         <form
           onSubmit={(e) => {
@@ -100,7 +100,7 @@ export function CancelSaleDialog({ sale, open, onOpenChange }: Props) {
               variant="destructive"
               disabled={!valid || mut.isPending}
             >
-              {mut.isPending ? 'Cancelando...' : 'Cancelar venta'}
+              {mut.isPending ? 'Procesando...' : 'Emitir nota crédito'}
             </Button>
           </DialogFooter>
         </form>

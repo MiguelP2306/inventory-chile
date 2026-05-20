@@ -114,6 +114,8 @@ export default function ProveedoresPage() {
     setForm({
       name: s.name,
       taxId: s.taxId ?? '',
+      legalName: s.legalName ?? '',
+      contactPerson: s.contactPerson ?? '',
       email: s.email ?? '',
       phone: s.phone ?? '',
       address: s.address ?? '',
@@ -306,6 +308,25 @@ export default function ProveedoresPage() {
                 <Input
                   value={form.address ?? ''}
                   onChange={(e) => setForm({ ...form, address: e.target.value })}
+                />
+              </Field>
+              {/* Ronda 9 — razón social + persona de contacto. */}
+              <Field label="Razón social">
+                <Input
+                  value={form.legalName ?? ''}
+                  onChange={(e) =>
+                    setForm({ ...form, legalName: e.target.value })
+                  }
+                  placeholder="ej: Comercializadora del Sur SpA"
+                />
+              </Field>
+              <Field label="Contacto (vendedor)">
+                <Input
+                  value={form.contactPerson ?? ''}
+                  onChange={(e) =>
+                    setForm({ ...form, contactPerson: e.target.value })
+                  }
+                  placeholder="ej: María González"
                 />
               </Field>
             </div>

@@ -30,7 +30,9 @@ const SOURCE_LABEL: Record<string, string> = {
 const METHOD_LABEL: Record<string, string> = {
   CASH: 'Efectivo',
   TRANSFER: 'Transferencia',
-  CARD: 'Tarjeta',
+  CARD_DEBIT: 'Débito',
+  CARD_CREDIT: 'Crédito',
+  PAYMENT_LINK: 'Link de pago',
 };
 
 export default function ReporteFlujoCajaPage() {

@@ -103,7 +103,14 @@ export default function DashboardHome() {
               <Send className="mr-1 inline h-3 w-3" />
               {formatCurrency(s.today.cash.byMethod.TRANSFER)} transf ·{' '}
               <CreditCard className="mr-1 inline h-3 w-3" />
-              {formatCurrency(s.today.cash.byMethod.CARD)} tarj
+              {formatCurrency(
+                String(
+                  Number(s.today.cash.byMethod.CARD_DEBIT ?? '0') +
+                    Number(s.today.cash.byMethod.CARD_CREDIT ?? '0') +
+                    Number(s.today.cash.byMethod.PAYMENT_LINK ?? '0'),
+                ),
+              )}{' '}
+              tarj
             </span>
           }
         />

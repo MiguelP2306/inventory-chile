@@ -36,12 +36,14 @@ import {
   listSuppliers,
   type PurchaseInput,
 } from '@/lib/inventory-api';
+import { listAvailableSupplierCredits } from '@/lib/supplier-credits-api';
 import { listWarehouses } from '@/lib/warehouses-api';
 import type { WarehouseDto } from '@inventory/shared';
 
 interface ItemRow {
   productId: string;
-  sku: string;
+  // Ronda 9 — sku puede ser null si el producto se creó sin SKU manual.
+  sku: string | null;
   name: string;
   qty: number;
   unitCost: string;
@@ -115,11 +117,45 @@ export default function NuevaCompraPage() {
   const taxAmount = taxOverride !== null ? Number(taxOverride) : autoTax;
   const subtotalNeto = totalBruto - taxAmount;
 
+  // Ronda 9 — créditos a favor disponibles para el proveedor seleccionado.
+  // Sólo se cargan cuando hay un proveedor elegido. La card se renderiza
+  // solo si hay al menos un crédito con balance > 0.
+  const creditsQ = useQuery({
+    queryKey: ['supplier-credits', 'available', supplierId],
+    queryFn: () => listAvailableSupplierCredits(supplierId),
+    enabled: !!supplierId,
+  });
+  const availableCredits = creditsQ.data ?? [];
+
+  // Map<creditId, monto a aplicar>. Empieza vacío; el operador tilda los
+  // créditos y opcionalmente edita el monto (default = balance del crédito).
+  const [creditApplications, setCreditApplications] = useState<
+    Record<string, string>
+  >({});
+
+  // Si cambia el proveedor, limpiamos las aplicaciones (los créditos eran
+  // del proveedor anterior y no aplican al nuevo).
+  useEffect(() => {
+    setCreditApplications({});
+  }, [supplierId]);
+
+  const totalCreditApplied = useMemo(
+    () =>
+      Object.values(creditApplications).reduce(
+        (acc, v) => acc + (Number(v) || 0),
+        0,
+      ),
+    [creditApplications],
+  );
+  const cashToPay = Math.max(0, totalBruto - totalCreditApplied);
+  const creditExceedsTotal = totalCreditApplied > totalBruto + 0.005;
+
   const valid =
     !!supplierId &&
     !!warehouseId &&
     items.length > 0 &&
-    items.every((i) => i.qty > 0 && Number(i.unitCost) >= 0);
+    items.every((i) => i.qty > 0 && Number(i.unitCost) >= 0) &&
+    !creditExceedsTotal;
 
   const mut = useMutation({
     mutationFn: (input: PurchaseInput) => createPurchase(input),
@@ -139,6 +175,11 @@ export default function NuevaCompraPage() {
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!valid) return;
+    // Ronda 9 — mapeo de aplicaciones a payload. Sólo entrega los créditos
+    // con monto > 0 (un crédito tildado pero con monto 0 se omite).
+    const creditList = Object.entries(creditApplications)
+      .map(([id, amt]) => ({ supplierCreditId: id, amount: amt }))
+      .filter((c) => Number(c.amount) > 0);
     mut.mutate({
       supplierId,
       warehouseId,
@@ -147,6 +188,7 @@ export default function NuevaCompraPage() {
       invoiceUrls: invoices.length > 0 ? invoices.map((i) => i.url) : undefined,
       taxAmountOverride:
         taxOverride !== null ? Number(taxOverride).toFixed(2) : undefined,
+      creditApplications: creditList.length > 0 ? creditList : undefined,
       items: items.map((i) => ({
         productId: i.productId,
         qty: i.qty,
@@ -427,6 +469,95 @@ export default function NuevaCompraPage() {
         </Table>
       </div>
 
+      {/* Ronda 9 — créditos a favor disponibles del proveedor. */}
+      {availableCredits.length > 0 && items.length > 0 && (
+        <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <div>
+              <h3 className="font-medium">Créditos disponibles del proveedor</h3>
+              <p className="text-xs text-muted-foreground">
+                Generados por devoluciones a este proveedor con reembolso
+                "Crédito a favor". Marcá los que querés aplicar y editá el
+                monto si querés usar sólo una parte.
+              </p>
+            </div>
+            <div className="text-right text-sm">
+              <div className="text-muted-foreground">Saldo total a favor</div>
+              <div className="text-base font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">
+                {formatCurrency(
+                  availableCredits
+                    .reduce((acc, c) => acc + parseFloat(c.balance), 0)
+                    .toFixed(2),
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {availableCredits.map((c) => {
+              const checked = creditApplications[c.id] !== undefined;
+              const value = creditApplications[c.id] ?? c.balance;
+              return (
+                <div
+                  key={c.id}
+                  className="flex items-center justify-between gap-3 rounded-md border bg-card p-3"
+                >
+                  <label className="flex flex-1 cursor-pointer items-center gap-3">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={checked}
+                      onChange={(e) => {
+                        setCreditApplications((prev) => {
+                          const next = { ...prev };
+                          if (e.target.checked) {
+                            next[c.id] = c.balance;
+                          } else {
+                            delete next[c.id];
+                          }
+                          return next;
+                        });
+                      }}
+                    />
+                    <div>
+                      <div className="text-sm font-medium">
+                        Crédito #{c.id.slice(0, 8)}
+                        {c.sourceReturn && (
+                          <span className="ml-2 text-xs text-muted-foreground">
+                            · origen {c.sourceReturn.number}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        Disponible: {formatCurrency(c.balance)}
+                      </div>
+                    </div>
+                  </label>
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    disabled={!checked}
+                    value={value}
+                    onChange={(e) =>
+                      setCreditApplications((prev) => ({
+                        ...prev,
+                        [c.id]: e.target.value,
+                      }))
+                    }
+                    className="w-32 text-right tabular-nums"
+                  />
+                </div>
+              );
+            })}
+          </div>
+          {creditExceedsTotal && (
+            <div className="mt-2 rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">
+              El total de créditos aplicados ({formatCurrency(totalCreditApplied.toFixed(2))})
+              supera el total de la compra ({formatCurrency(totalBruto.toFixed(2))}).
+            </div>
+          )}
+        </div>
+      )}
+
       {items.length > 0 && (
         <div className="ml-auto max-w-md rounded-md border bg-card p-4 space-y-2 text-sm">
           <div className="flex justify-between">
@@ -457,6 +588,23 @@ export default function NuevaCompraPage() {
             <span>Total</span>
             <span className="tabular-nums">{formatCurrency(totalBruto.toFixed(2))}</span>
           </div>
+          {/* Ronda 9 — desglose del crédito aplicado y total a pagar. */}
+          {totalCreditApplied > 0 && (
+            <>
+              <div className="flex justify-between text-emerald-700 dark:text-emerald-400">
+                <span>Crédito aplicado</span>
+                <span className="tabular-nums">
+                  − {formatCurrency(totalCreditApplied.toFixed(2))}
+                </span>
+              </div>
+              <div className="flex justify-between border-t pt-2 font-semibold">
+                <span>Total a pagar en caja</span>
+                <span className="tabular-nums">
+                  {formatCurrency(cashToPay.toFixed(2))}
+                </span>
+              </div>
+            </>
+          )}
           {taxOverride !== null && (
             <p className="text-xs text-muted-foreground">
               IVA editado manualmente. El subtotal neto se ajusta para que la

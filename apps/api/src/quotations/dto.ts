@@ -21,8 +21,27 @@ import {
 import { IsValidRut } from '../common/validators/rut';
 
 export class CreateQuotationItemDto {
+  // Ronda 9 — productId opcional para soportar productos temporales (creados
+  // al vuelo dentro de la cotización). Si va null, los campos `tempProduct*`
+  // son obligatorios (validado en el service).
+  @IsOptional()
   @IsUUID()
-  productId!: string;
+  productId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  tempProductName?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  tempProductSku?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  tempProductPartNumber?: string | null;
 
   @Type(() => Number)
   @IsInt()

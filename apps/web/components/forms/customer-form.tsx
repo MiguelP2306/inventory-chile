@@ -51,10 +51,18 @@ const CUSTOMER_SOURCES: { value: CustomerSourceDto; label: string }[] = [
 
 const schema = z.object({
   name: z.string().min(1, 'Nombre obligatorio').max(180),
+  // Ronda 9 — RUT opcional. Permite clientes "lite" sólo con WhatsApp.
+  // El sistema bloquea facturar ventas a clientes sin RUT (validado en
+  // SalesService.create del backend) — el operador debe completarlo antes
+  // de emitir la nota de venta.
   taxId: z
     .string()
-    .min(1, 'RUT obligatorio')
-    .refine((v) => isValidRut(v), 'RUT inválido (formato 12345678-9)'),
+    .refine(
+      (v) => v === '' || isValidRut(v),
+      'RUT inválido (formato 12345678-9)',
+    )
+    .optional()
+    .or(z.literal('')),
   email: z
     .string()
     .email('Email inválido')
@@ -153,7 +161,8 @@ export function CustomerForm({ customer }: Props) {
     if (mut.isPending) return;
     const input: CustomerInput = {
       name: values.name.trim(),
-      taxId: normalizeRut(values.taxId),
+      // Ronda 9 — RUT opcional. Normalizamos sólo si vino con contenido.
+      taxId: values.taxId?.trim() ? normalizeRut(values.taxId) : null,
       email: values.email?.trim() || null,
       phone: values.phone?.trim() ? normalizePhone(values.phone) : null,
       addressStreet: values.addressStreet?.trim() || null,
@@ -246,7 +255,11 @@ export function CustomerForm({ customer }: Props) {
               placeholder="ej: Juan Pérez / Distribuidora ABC"
             />
           </Field>
-          <Field label="RUT" error={errors.taxId?.message}>
+          <Field
+            label="RUT (opcional)"
+            error={errors.taxId?.message}
+            hint="Requerido para emitir notas de venta. Podés crear el cliente sin RUT y completarlo después."
+          >
             <Input
               {...form.register('taxId')}
               placeholder="12.345.678-9"
@@ -413,16 +426,21 @@ export function CustomerForm({ customer }: Props) {
 function Field({
   label,
   error,
+  hint,
   children,
 }: {
   label: string;
   error?: string;
+  hint?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="space-y-2">
       <Label>{label}</Label>
       {children}
+      {hint && !error && (
+        <p className="text-xs text-muted-foreground">{hint}</p>
+      )}
       {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );

@@ -9,6 +9,9 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { unlink } from 'fs/promises';
 import { join } from 'path';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import { CategoriesService } from '../categories/categories.service';
+import { CountersService } from '../common/counters.service';
+import { dayRange } from '../common/date-range';
 import { rethrowFkAsConflict } from '../common/fk-error';
 import {
   Product,
@@ -28,6 +31,8 @@ import {
 } from './dto';
 
 const DEFAULT_PAGE_SIZE = 20;
+const SKU_COUNTER_KIND = 'PRODUCT_SKU';
+const SKU_PREFIX = 'AUTO';
 
 @Injectable()
 export class ProductsService {
@@ -38,6 +43,8 @@ export class ProductsService {
     @InjectRepository(ProductImage) private readonly images: Repository<ProductImage>,
     @InjectRepository(ProductCode) private readonly codes: Repository<ProductCode>,
     @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly counters: CountersService,
+    private readonly categories: CategoriesService,
   ) {}
 
   async list(query: ListProductsQueryDto) {
@@ -70,11 +77,22 @@ export class ProductsService {
         { q: `%${query.q}%` },
       );
     }
-    if (query.categoryId)
-      qb.andWhere('p.categoryId = :categoryId', { categoryId: query.categoryId });
+    if (query.categoryId) {
+      // Ronda 10 — al filtrar por una categoría padre, incluimos también
+      // sus subcategorías para que el operador no tenga que cliquear cada
+      // subcategoría individualmente.
+      const ids = await this.categories.descendantIds(query.categoryId);
+      qb.andWhere('p.categoryId IN (:...categoryIds)', { categoryIds: ids });
+    }
     if (query.brandId) qb.andWhere('p.brandId = :brandId', { brandId: query.brandId });
     if (query.productKind)
       qb.andWhere('p.productKind = :productKind', { productKind: query.productKind });
+
+    // Ronda 9 — filtros por fecha de creación.
+    if (query.createdFrom || query.createdTo) {
+      const { from, to } = dayRange(query.createdFrom, query.createdTo);
+      qb.andWhere('p.createdAt BETWEEN :cFrom AND :cTo', { cFrom: from, cTo: to });
+    }
 
     const [items, total] = await qb.getManyAndCount();
     const itemsWithCover = await this.attachCoverImages(items);
@@ -110,11 +128,28 @@ export class ProductsService {
   }
 
   async create(dto: CreateProductDto) {
-    if (await this.products.findOne({ where: { sku: dto.sku } })) {
-      throw new ConflictException(`Ya existe un producto con SKU "${dto.sku}"`);
+    // Ronda 9 — SKU opcional: si llega vacío, autogenerar dentro de la
+    // misma transacción para que el contador no avance si la creación falla.
+    const trimmedSku = dto.sku?.trim() || null;
+    if (trimmedSku) {
+      if (await this.products.findOne({ where: { sku: trimmedSku } })) {
+        throw new ConflictException(`Ya existe un producto con SKU "${trimmedSku}"`);
+      }
     }
     const id = await this.dataSource.transaction(async (manager) => {
-      const product = manager.create(Product, this.toEntityFields(dto));
+      let sku = trimmedSku;
+      if (!sku) {
+        const year = new Date().getFullYear();
+        const seq = await this.counters.nextNumber(
+          SKU_COUNTER_KIND,
+          year,
+          manager,
+        );
+        sku = CountersService.format(SKU_PREFIX, year, seq);
+      }
+      const fields = this.toEntityFields(dto);
+      fields.sku = sku;
+      const product = manager.create(Product, fields);
       const saved = await manager.save(product);
       if (dto.fitments?.length) {
         await this.replaceFitments(manager, saved.id, dto.fitments);
@@ -131,9 +166,13 @@ export class ProductsService {
     const existing = await this.products.findOne({ where: { id } });
     if (!existing) throw new NotFoundException('Producto no encontrado');
 
-    if (dto.sku && dto.sku !== existing.sku) {
-      const dup = await this.products.findOne({ where: { sku: dto.sku } });
-      if (dup) throw new ConflictException(`Ya existe un producto con SKU "${dto.sku}"`);
+    // Ronda 9 — SKU sigue siendo único cuando se provee. Si llega vacío en
+    // un update, lo dejamos tal como está (no permitimos blanquearlo desde
+    // PATCH para evitar perder el auto-generado).
+    const newSku = dto.sku?.trim();
+    if (newSku && newSku !== existing.sku) {
+      const dup = await this.products.findOne({ where: { sku: newSku } });
+      if (dup) throw new ConflictException(`Ya existe un producto con SKU "${newSku}"`);
     }
 
     await this.dataSource.transaction(async (manager) => {
@@ -318,7 +357,9 @@ export class ProductsService {
   // -------- helpers --------
   private toEntityFields(dto: CreateProductDto | UpdateProductDto): Partial<Product> {
     const fields: Partial<Product> = {};
-    if (dto.sku !== undefined) fields.sku = dto.sku;
+    // Ronda 9 — sku se asigna sólo si llega un string no vacío. La
+    // creación con SKU vacío se maneja arriba (auto-generación).
+    if (dto.sku) fields.sku = dto.sku.trim();
     if (dto.partNumber !== undefined) fields.partNumber = dto.partNumber ?? null;
     if (dto.barcode !== undefined) fields.barcode = dto.barcode ?? null;
     if (dto.name !== undefined) fields.name = dto.name;
@@ -400,6 +441,79 @@ export class ProductsService {
       .getMany();
     const map = new Map(covers.map((c) => [c.productId, c.url]));
     return items.map((i) => ({ ...i, coverUrl: map.get(i.id) ?? null }));
+  }
+
+  /**
+   * Ronda 10 — lista TODOS los productos que matchean los filtros (sin
+   * paginación) con joins enriquecidos para el catálogo PDF. Limita a
+   * 500 productos por seguridad — más que eso no entra de manera
+   * legible en un PDF de catálogo.
+   */
+  async listForCatalog(query: ListProductsQueryDto): Promise<Product[]> {
+    const qb = this.products
+      .createQueryBuilder('p')
+      .leftJoinAndSelect('p.category', 'category')
+      .leftJoinAndSelect('p.brand', 'brand')
+      .where('p.isActive = TRUE')
+      .orderBy('p.name', 'ASC');
+
+    if (query.q) {
+      qb.andWhere(
+        `(
+          p.sku LIKE :q
+          OR p.partNumber LIKE :q
+          OR p.barcode LIKE :q
+          OR p.name LIKE :q
+          OR p.universalCode LIKE :q
+        )`,
+        { q: `%${query.q}%` },
+      );
+    }
+    if (query.categoryId) {
+      const ids = await this.categories.descendantIds(query.categoryId);
+      qb.andWhere('p.categoryId IN (:...categoryIds)', { categoryIds: ids });
+    }
+    if (query.brandId) qb.andWhere('p.brandId = :brandId', { brandId: query.brandId });
+    if (query.productKind) {
+      qb.andWhere('p.productKind = :productKind', {
+        productKind: query.productKind,
+      });
+    }
+    if (query.createdFrom || query.createdTo) {
+      const { from, to } = dayRange(query.createdFrom, query.createdTo);
+      qb.andWhere('p.createdAt BETWEEN :cFrom AND :cTo', {
+        cFrom: from,
+        cTo: to,
+      });
+    }
+
+    qb.take(500);
+    return qb.getMany();
+  }
+
+  /**
+   * Ronda 10 — devuelve la URL de la cover por producto, tal como está
+   * guardada en DB (relativa `/uploads/...` o absoluta `http://...` para
+   * almacenamiento remoto futuro).
+   *
+   * Ronda 12 — antes concatenábamos `PUBLIC_API_URL` para que el PDF
+   * hiciera fetch HTTP. Eso fallaba cuando la env no estaba seteada o
+   * el server no podía resolver su propio host. Ahora devolvemos la URL
+   * cruda y `PdfService.loadImageAsDataUrl` decide entre HTTP o lectura
+   * directa de disco según el prefijo.
+   */
+  async coverUrlsByProduct(productIds: string[]): Promise<Map<string, string>> {
+    const map = new Map<string, string>();
+    if (productIds.length === 0) return map;
+    const covers = await this.images
+      .createQueryBuilder('img')
+      .where('img.productId IN (:...ids)', { ids: productIds })
+      .andWhere('img.isCover = TRUE')
+      .getMany();
+    for (const c of covers) {
+      map.set(c.productId, c.url);
+    }
+    return map;
   }
 
   private async unlinkUploadedFile(publicUrl: string | null | undefined) {

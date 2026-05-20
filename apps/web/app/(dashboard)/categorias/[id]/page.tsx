@@ -1,14 +1,29 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, FolderInput, Link2Off } from 'lucide-react';
+import {
+  ArrowLeft,
+  FolderInput,
+  Link2Off,
+  Pencil,
+  Plus,
+  Trash2,
+} from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -28,9 +43,13 @@ import {
 import {
   apiErrorMessage,
   bulkUpdateProductCategory,
+  createCategory,
+  deleteCategory,
   listCategories,
   listProducts,
+  updateCategory,
 } from '@/lib/catalog-api';
+import type { CategoryDto } from '@inventory/shared';
 import { formatCurrency } from '@/lib/format';
 import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
@@ -66,7 +85,7 @@ export default function CategoriaDetailPage() {
 
   const categoriesQ = useQuery({
     queryKey: ['categories'],
-    queryFn: listCategories,
+    queryFn: () => listCategories(),
   });
   const allCategories = categoriesQ.data ?? [];
   const category = allCategories.find((c) => c.id === id) ?? null;
@@ -133,6 +152,66 @@ export default function CategoriaDetailPage() {
       toast.error(apiErrorMessage(err, 'No se pudo actualizar')),
   });
 
+  // ---------- Ronda 10 — Subcategorías ----------
+  // Solo se muestran si la categoría actual es raíz (parentId === null).
+  // Soportamos 1 nivel de anidamiento, así que las subcategorías no pueden
+  // tener subcategorías propias.
+  const isRoot = category?.parentId == null;
+
+  const subcategoriesQ = useQuery({
+    queryKey: ['categories', { parentId: id }],
+    queryFn: () => listCategories({ parentId: id }),
+    enabled: !!id && isRoot,
+  });
+  const subcategories = subcategoriesQ.data ?? [];
+
+  const [subDialogOpen, setSubDialogOpen] = useState(false);
+  const [subEditing, setSubEditing] = useState<CategoryDto | null>(null);
+  const [subName, setSubName] = useState('');
+  const [subDeleteTarget, setSubDeleteTarget] = useState<CategoryDto | null>(
+    null,
+  );
+
+  function startCreateSub() {
+    setSubEditing(null);
+    setSubName('');
+    setSubDialogOpen(true);
+  }
+  function startEditSub(s: CategoryDto) {
+    setSubEditing(s);
+    setSubName(s.name);
+    setSubDialogOpen(true);
+  }
+
+  const createSubMut = useMutation({
+    mutationFn: () => createCategory({ name: subName.trim(), parentId: id }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['categories'] });
+      toast.success('Subcategoría creada');
+      setSubDialogOpen(false);
+    },
+    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo crear')),
+  });
+  const updateSubMut = useMutation({
+    mutationFn: () => updateCategory(subEditing!.id, { name: subName.trim() }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['categories'] });
+      toast.success('Subcategoría actualizada');
+      setSubDialogOpen(false);
+    },
+    onError: (err) =>
+      toast.error(apiErrorMessage(err, 'No se pudo actualizar')),
+  });
+  const deleteSubMut = useMutation({
+    mutationFn: (cid: string) => deleteCategory(cid),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['categories'] });
+      toast.success('Subcategoría eliminada');
+      setSubDeleteTarget(null);
+    },
+    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo eliminar')),
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
@@ -143,13 +222,173 @@ export default function CategoriaDetailPage() {
         </Button>
         <div>
           <h1 className="text-2xl font-semibold">
+            {category?.parentName && (
+              <span className="text-base font-normal text-muted-foreground">
+                {category.parentName} ›{' '}
+              </span>
+            )}
             {category?.name ?? 'Categoría'}
           </h1>
           <p className="text-sm text-muted-foreground">
             {total} producto{total === 1 ? '' : 's'} en esta categoría
+            {isRoot && subcategories.length > 0 && (
+              <>
+                {' '}
+                · {subcategories.length} subcategoría
+                {subcategories.length === 1 ? '' : 's'}
+              </>
+            )}
           </p>
         </div>
       </div>
+
+      {/* Ronda 10 — Subcategorías (solo si esta categoría es raíz). */}
+      {isRoot && (
+        <div className="rounded-md border bg-card">
+          <div className="flex items-center justify-between border-b p-4">
+            <div>
+              <h2 className="font-medium">Subcategorías</h2>
+              <p className="text-xs text-muted-foreground">
+                Ej: "Lubricantes sintéticos" dentro de "Lubricantes". Los
+                productos pueden asociarse directamente a la subcategoría;
+                al filtrar por esta categoría también se incluyen los
+                productos de sus subcategorías.
+              </p>
+            </div>
+            <Button size="sm" onClick={startCreateSub}>
+              <Plus className="h-4 w-4" />
+              Nueva subcategoría
+            </Button>
+          </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Nombre</TableHead>
+                <TableHead className="w-[140px] text-right">Acciones</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {subcategoriesQ.isLoading && (
+                <TableRow>
+                  <TableCell colSpan={2}>
+                    <Skeleton className="h-4 w-40" />
+                  </TableCell>
+                </TableRow>
+              )}
+              {!subcategoriesQ.isLoading && subcategories.length === 0 && (
+                <TableRow>
+                  <TableCell
+                    colSpan={2}
+                    className="text-center text-muted-foreground"
+                  >
+                    Sin subcategorías. Usá «Nueva subcategoría» para crear la
+                    primera.
+                  </TableCell>
+                </TableRow>
+              )}
+              {subcategories.map((s) => (
+                <TableRow key={s.id}>
+                  <TableCell>
+                    <Link
+                      href={`/categorias/${s.id}`}
+                      className="hover:underline"
+                    >
+                      {s.name}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => startEditSub(s)}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setSubDeleteTarget(s)}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {/* Dialog crear/editar subcategoría */}
+      <Dialog open={subDialogOpen} onOpenChange={setSubDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {subEditing
+                ? `Editar ${subEditing.name}`
+                : `Nueva subcategoría de ${category?.name ?? '—'}`}
+            </DialogTitle>
+          </DialogHeader>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!subName.trim()) return;
+              if (subEditing) updateSubMut.mutate();
+              else createSubMut.mutate();
+            }}
+            className="space-y-3"
+          >
+            <div className="space-y-1">
+              <Label htmlFor="sub-name">Nombre</Label>
+              <Input
+                id="sub-name"
+                autoFocus
+                value={subName}
+                onChange={(e) => setSubName(e.target.value)}
+                placeholder="ej: Lubricantes sintéticos"
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setSubDialogOpen(false)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={
+                  !subName.trim() ||
+                  createSubMut.isPending ||
+                  updateSubMut.isPending
+                }
+              >
+                {subEditing ? 'Guardar' : 'Crear'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={!!subDeleteTarget}
+        onOpenChange={(o) => !o && setSubDeleteTarget(null)}
+        title="¿Eliminar subcategoría?"
+        description={
+          subDeleteTarget
+            ? `Eliminará "${subDeleteTarget.name}". Si tiene productos asociados, la operación devolverá un error y deberás reasignarlos primero.`
+            : ''
+        }
+        confirmLabel="Eliminar"
+        variant="destructive"
+        onConfirm={async () => {
+          if (subDeleteTarget)
+            await deleteSubMut.mutateAsync(subDeleteTarget.id);
+        }}
+      />
 
       <div className="flex flex-wrap items-center gap-3">
         <Input

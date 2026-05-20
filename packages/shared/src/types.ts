@@ -5,6 +5,9 @@ export interface CategoryDto {
   id: string;
   name: string;
   parentId: string | null;
+  // Ronda 10 — nombre del padre cuando aplica (para mostrar la jerarquía
+  // "Padre › Hija" en selects y listados sin un join extra en frontend).
+  parentName?: string | null;
 }
 
 export interface BrandDto {
@@ -46,7 +49,10 @@ export type ProductKindDto = 'ORIGINAL' | 'ALTERNATIVE';
 
 export interface ProductDto {
   id: string;
-  sku: string;
+  // Ronda 9 — SKU opcional. Si el operador no lo cargó al crear, el backend
+  // asignó `AUTO-AAAA-NNNNN`. El campo solo es `null` durante la creación
+  // antes del flush — todas las filas persistidas tienen valor.
+  sku: string | null;
   partNumber: string | null;
   barcode: string | null;
   name: string;
@@ -86,7 +92,7 @@ export type StockStatus = 'ok' | 'low' | 'out';
 export interface StockSummary {
   product: {
     id: string;
-    sku: string;
+    sku: string | null;
     name: string;
     partNumber: string | null;
     barcode: string | null;
@@ -123,13 +129,18 @@ export interface MovementDto {
     | 'TRANSFER_IN'
     // Ronda 7 — devolución de cliente con producto dañado: queda registrada
     // como evento de auditoría pero NO modifica el stock.
-    | 'RETURN_IN_DAMAGED';
+    | 'RETURN_IN_DAMAGED'
+    // Ronda 8 — eventos audit-only del módulo de guías de despacho y de la
+    // cancelación de devoluciones con condición DAMAGED. Ninguno toca stock.
+    | 'DISPATCH_OUT'
+    | 'DISPATCH_VOIDED'
+    | 'RETURN_DAMAGED_CANCELLED';
   qty: number;
   unitCost: string | null;
   reference: string | null;
   refId: string | null;
   createdAt: string;
-  product: { id: string; sku: string; name: string } | null;
+  product: { id: string; sku: string | null; name: string } | null;
   warehouse: { id: string; name: string } | null;
   user: { id: string; name: string; email: string } | null;
 }
@@ -140,6 +151,9 @@ export interface SupplierDto {
   id: string;
   name: string;
   taxId: string | null;
+  // Ronda 9 — razón social formal + nombre de la persona de contacto.
+  legalName: string | null;
+  contactPerson: string | null;
   email: string | null;
   phone: string | null;
   address: string | null;
@@ -171,7 +185,9 @@ export type LifecycleStatusDto =
 export interface CustomerDto {
   id: string;
   name: string;
-  taxId: string;
+  // Ronda 9 — RUT opcional para soportar clientes lite (sólo WhatsApp).
+  // SalesService.create bloquea facturar a clientes sin RUT.
+  taxId: string | null;
   email: string | null;
   phone: string | null;
   addressStreet: string | null;
@@ -224,7 +240,7 @@ export type FollowUpTab =
 export interface FollowUpRowDto {
   customerId: string;
   customerName: string;
-  customerTaxId: string;
+  customerTaxId: string | null;
   whatsappPhone: string | null;
   phone: string | null;
   email: string | null;
@@ -236,6 +252,12 @@ export interface FollowUpRowDto {
     number: string;
     total: string;
     publicToken: string;
+    // Ronda 10 — estado actual de la cotización + fecha de creación.
+    // El badge de /seguimiento ahora muestra este status (en vez del
+    // `lifecycleStatus` del Customer) para mantener consistencia con
+    // los estados visibles en /cotizaciones.
+    status: QuotationStatusDto;
+    createdAt: string;
   } | null;
 }
 
@@ -270,7 +292,7 @@ export interface PurchaseEntryItemDto {
   qty: number;
   unitCost: string;
   subtotal: string;
-  product?: { id: string; sku: string; name: string };
+  product?: { id: string; sku: string | null; name: string };
 }
 
 export interface PurchaseEntryDto {
@@ -309,7 +331,14 @@ export interface PurchaseInvoiceDto {
 
 // ---------- Caja, gastos, settings (Fase 5) ----------
 
-export type PaymentMethodDto = 'CASH' | 'TRANSFER' | 'CARD';
+// Ronda 9 — `CARD` se desdobló en débito, crédito y link de pago. Las
+// comisiones se configuran por separado en CompanySettings.
+export type PaymentMethodDto =
+  | 'CASH'
+  | 'TRANSFER'
+  | 'CARD_DEBIT'
+  | 'CARD_CREDIT'
+  | 'PAYMENT_LINK';
 export type CashTransactionTypeDto = 'INCOME' | 'EXPENSE';
 export type CashTransactionSourceDto = 'SALE' | 'PURCHASE' | 'MANUAL';
 
@@ -375,7 +404,11 @@ export interface CompanySettingsDto {
   quotationFooter: string | null;
   defaultValidityDays: number;
   taxRate: string;
+  /** @deprecated desde Ronda 9 — usar `cardCreditCommissionRate`. */
   cardCommissionRate: string;
+  cardDebitCommissionRate: string;
+  cardCreditCommissionRate: string;
+  paymentLinkCommissionRate: string;
   // Fase 8 — umbral de cobertura para marcar productos críticos en /proyeccion.
   defaultLeadTimeDays: number;
   // Fase 8.5 — seguimiento + HubSpot.
@@ -398,7 +431,7 @@ export interface CompanySettingsDto {
  */
 export interface ProjectionRowDto {
   productId: string;
-  sku: string;
+  sku: string | null;
   name: string;
   cost: string;
   totalStock: number;
@@ -429,7 +462,7 @@ export interface ReportSalesRowDto {
   date: string;
   customerName: string;
   customerTaxId: string | null;
-  paymentMethod: 'CASH' | 'TRANSFER' | 'CARD';
+  paymentMethod: PaymentMethodDto;
   status: 'PENDING' | 'PAID' | 'CANCELLED';
   subtotal: string;
   taxAmount: string;
@@ -494,7 +527,7 @@ export interface ReportCashFlowRowDto {
   date: string;
   type: 'INCOME' | 'EXPENSE';
   source: CashFlowSourceDto;
-  paymentMethod: 'CASH' | 'TRANSFER' | 'CARD';
+  paymentMethod: PaymentMethodDto;
   description: string;
   amount: string;
   isVoided: boolean;
@@ -521,7 +554,15 @@ export type QuotationStatusDto =
 
 export interface QuotationItemDto {
   id: string;
-  productId: string;
+  // Ronda 9 — productId puede ser null para "productos temporales" creados
+  // al vuelo dentro de la cotización. En ese caso los campos `tempProduct*`
+  // contienen los datos snapshot. La conversión a venta bloquea hasta que
+  // todos los items tengan un productId real.
+  productId: string | null;
+  isTemporary: boolean;
+  tempProductName: string | null;
+  tempProductSku: string | null;
+  tempProductPartNumber: string | null;
   qty: number;
   unitPrice: string;
   discount: string;
@@ -530,7 +571,7 @@ export interface QuotationItemDto {
   subtotal: string;
   product?: {
     id: string;
-    sku: string;
+    sku: string | null;
     name: string;
     partNumber: string | null;
     universalCode: string | null;
@@ -646,7 +687,7 @@ export interface SaleItemDto {
   unitCost: string;
   product?: {
     id: string;
-    sku: string;
+    sku: string | null;
     name: string;
     partNumber: string | null;
     universalCode: string | null;
@@ -739,7 +780,7 @@ export interface TransferItemDto {
   unitCost: string | null;
   product?: {
     id: string;
-    sku: string;
+    sku: string | null;
     name: string;
     partNumber: string | null;
   };
@@ -786,6 +827,26 @@ export interface CancelTransferInput {
 export type ReturnTypeDto = 'CUSTOMER' | 'SUPPLIER';
 export type ReturnStatusDto = 'COMPLETED' | 'CANCELLED';
 export type ReturnItemConditionDto = 'RESELLABLE' | 'DAMAGED';
+// Ronda 9 — modo de reembolso de la devolución.
+//  - MONEY: dinero (compatibilidad con devoluciones previas).
+//  - CREDIT: sólo válido en devoluciones a proveedor; genera SupplierCredit.
+//  - EXCHANGE: sólo válido en devoluciones de cliente; usa replacementItems.
+export type RefundModeDto = 'MONEY' | 'CREDIT' | 'EXCHANGE';
+
+export interface ReturnReplacementItemDto {
+  id: string;
+  productId: string;
+  qty: number;
+  unitPrice: string;
+  unitCost: string;
+  subtotal: string;
+  product?: {
+    id: string;
+    sku: string | null;
+    name: string;
+    partNumber: string | null;
+  };
+}
 
 export interface ReturnItemDto {
   id: string;
@@ -799,7 +860,7 @@ export interface ReturnItemDto {
   purchaseEntryItemId: string | null;
   product?: {
     id: string;
-    sku: string;
+    sku: string | null;
     name: string;
     partNumber: string | null;
   };
@@ -820,6 +881,11 @@ export interface ReturnDto {
   notes: string | null;
   refundAmount: string;
   paymentMethod: PaymentMethodDto;
+  // Ronda 9 — modo de reembolso + datos derivados.
+  refundMode: RefundModeDto;
+  supplierCreditId: string | null;
+  exchangeDifference: string;
+  replacementItems?: ReturnReplacementItemDto[];
   status: ReturnStatusDto;
   cancelledAt: string | null;
   cancelReason: string | null;
@@ -841,6 +907,12 @@ export interface CreateReturnItemInput {
   itemCondition: ReturnItemConditionDto;
 }
 
+export interface CreateReturnReplacementItemInput {
+  productId: string;
+  qty: number;
+  unitPrice: string;
+}
+
 export interface CreateReturnInput {
   type: ReturnTypeDto;
   saleId?: string | null;
@@ -850,6 +922,11 @@ export interface CreateReturnInput {
   notes?: string | null;
   paymentMethod: PaymentMethodDto;
   items: CreateReturnItemInput[];
+  // Ronda 9 — modo de reembolso. Default MONEY.
+  refundMode?: RefundModeDto;
+  // Si refundMode=EXCHANGE (sólo CUSTOMER): items que el cliente se lleva
+  // a cambio. La diferencia bruta se cobra/reembolsa automáticamente.
+  replacementItems?: CreateReturnReplacementItemInput[];
 }
 
 export interface CancelReturnInput {
@@ -888,8 +965,8 @@ export interface WarrantyClaimDto {
   linkedReturnId: string | null;
   // Datos relacionados para listado/detalle (cuando se carga con joins):
   sale?: { id: string; number: string } | null;
-  product?: { id: string; sku: string; name: string };
-  customer?: { id: string; name: string; taxId: string };
+  product?: { id: string; sku: string | null; name: string };
+  customer?: { id: string; name: string; taxId: string | null };
   user?: { id: string; name: string; email: string };
   linkedReturn?: { id: string; number: string } | null;
   createdAt: string;
@@ -919,12 +996,12 @@ export interface DispatchNoteDto {
     id: string;
     number: string;
     customerId: string;
-    customer?: { id: string; name: string; taxId: string };
+    customer?: { id: string; name: string; taxId: string | null };
     items?: Array<{
       id: string;
       productId: string;
       qty: number;
-      product?: { id: string; sku: string; name: string };
+      product?: { id: string; sku: string | null; name: string };
     }>;
   };
   dispatchedAt: string;
@@ -1007,7 +1084,7 @@ export interface DashboardSummaryDto {
 
 export interface NoMovementRowDto {
   productId: string;
-  sku: string;
+  sku: string | null;
   name: string;
   // Última vez que el producto tuvo cualquier movimiento (entrada, salida,
   // ajuste, transfer). Null si nunca tuvo.
@@ -1110,4 +1187,111 @@ export interface ProductImportResultDto {
   // Categorías/marcas que se crearon como efecto colateral.
   createdCategories: string[];
   createdBrands: string[];
+}
+
+// ---------- Ronda 9: SupplierCredit + Compras KPIs ----------
+
+export type SupplierCreditStatusDto = 'ACTIVE' | 'SPENT' | 'VOIDED';
+
+export interface SupplierCreditDto {
+  id: string;
+  supplierId: string;
+  supplier?: { id: string; name: string };
+  sourceReturnId: string | null;
+  sourceReturn?: { id: string; number: string } | null;
+  amount: string;
+  balance: string;
+  status: SupplierCreditStatusDto;
+  notes: string | null;
+  user?: { id: string; name: string; email: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PurchaseCreditApplicationDto {
+  id: string;
+  purchaseEntryId: string;
+  supplierCreditId: string;
+  amount: string;
+  credit?: { id: string; sourceReturnId: string | null };
+  createdAt: string;
+}
+
+/**
+ * KPIs de compras mostrados arriba de `/compras`. Calculados sobre el mes
+ * actual (default) o sobre un rango personalizado.
+ */
+export interface PurchasesKpisDto {
+  // Total bruto de compras del período (excluye devoluciones).
+  totalAmount: string;
+  // Cantidad de compras del período.
+  count: number;
+  // Promedio = totalAmount / count. 0 si count=0.
+  averageAmount: string;
+  // Total devuelto a proveedores en el período (suma de refundAmount de
+  // devoluciones type=SUPPLIER no canceladas).
+  returnsAmount: string;
+  returnsCount: number;
+  // Última compra registrada (cualquier período). Útil cuando count=0.
+  lastPurchase: {
+    id: string;
+    date: string;
+    total: string;
+    supplierName: string;
+  } | null;
+  // Período usado para el cálculo. ISO strings.
+  periodFrom: string;
+  periodTo: string;
+}
+
+// ---------- Ronda 12: KPIs de ventas ----------
+
+export interface SalesTopProductDto {
+  productId: string;
+  sku: string | null;
+  name: string;
+  // Cantidad total de unidades vendidas en el período.
+  qty: number;
+  // Suma de subtotales (bruto) en el período.
+  totalAmount: string;
+}
+
+export interface SalesTopCustomerDto {
+  customerId: string;
+  customerName: string;
+  customerTaxId: string | null;
+  // Cantidad de ventas confirmadas en el período.
+  salesCount: number;
+  // Suma del total bruto vendido al cliente en el período.
+  totalAmount: string;
+}
+
+/**
+ * KPIs de ventas mostrados arriba de `/ventas`. Calculados sobre el mes
+ * actual (default) o sobre un rango personalizado. Excluye ventas
+ * canceladas. Las ventas del día se calculan SIEMPRE sobre el día actual
+ * (independiente del período de los demás KPIs).
+ */
+export interface SalesKpisDto {
+  // Total vendido en el período (excluye canceladas).
+  totalAmount: string;
+  count: number;
+  averageAmount: string;
+  // Total vendido HOY (siempre el día actual del servidor).
+  todayAmount: string;
+  todayCount: number;
+  // Última venta registrada (cualquier período). Útil cuando count=0.
+  lastSale: {
+    id: string;
+    number: string;
+    date: string;
+    total: string;
+    customerName: string;
+  } | null;
+  // Top 5 productos más vendidos del período (por qty).
+  topProducts: SalesTopProductDto[];
+  // Top 5 clientes con más ventas en el período.
+  topCustomers: SalesTopCustomerDto[];
+  periodFrom: string;
+  periodTo: string;
 }

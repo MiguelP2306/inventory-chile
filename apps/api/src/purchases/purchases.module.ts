@@ -6,10 +6,12 @@ import {
   PurchaseEntry,
   PurchaseEntryItem,
   PurchaseInvoice,
+  Return,
   Supplier,
   Warehouse,
 } from '../database/entities';
 import { InventoryModule } from '../inventory/inventory.module';
+import { SupplierCreditsModule } from '../supplier-credits/supplier-credits.module';
 import { PurchasesController } from './purchases.controller';
 import { PurchasesService } from './purchases.service';
 
@@ -22,9 +24,11 @@ import { PurchasesService } from './purchases.service';
       Supplier,
       Warehouse,
       CompanySettings,
+      Return,
     ]),
     InventoryModule,
     CashboxModule,
+    SupplierCreditsModule,
   ],
   controllers: [PurchasesController],
   providers: [PurchasesService],

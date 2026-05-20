@@ -1,7 +1,8 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,8 +37,11 @@ const MOVEMENT_TYPES: Array<{ value: MovementDto['type']; label: string }> = [
   { value: 'RETURN_IN', label: 'Devolución entrada' },
   { value: 'RETURN_OUT', label: 'Devolución salida' },
   { value: 'RETURN_IN_DAMAGED', label: 'Devolución dañada (sin stock)' },
+  { value: 'RETURN_DAMAGED_CANCELLED', label: 'Dev. dañada cancelada (auditoría)' },
   { value: 'TRANSFER_OUT', label: 'Transferencia salida' },
   { value: 'TRANSFER_IN', label: 'Transferencia entrada' },
+  { value: 'DISPATCH_OUT', label: 'Guía despacho generada (auditoría)' },
+  { value: 'DISPATCH_VOIDED', label: 'Guía despacho anulada (auditoría)' },
 ];
 
 export default function MovimientosPage() {
@@ -45,12 +49,27 @@ export default function MovimientosPage() {
     type: '',
     dateFrom: '',
     dateTo: '',
+    view: '',
     page: '',
   });
   const type = values.type || ALL;
   const dateFrom = values.dateFrom ?? '';
   const dateTo = values.dateTo ?? '';
   const page = Number(values.page || '1');
+  // Ronda 9 — modo de visualización: 'grouped' (default) agrupa por refId,
+  // 'flat' muestra todas las filas individuales como antes.
+  const view = (values.view as 'grouped' | 'flat') || 'grouped';
+
+  // Estado expandido por groupKey (refId). Set para perf y simplicidad.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  function toggleExpanded(key: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   const filtersActive = type !== ALL || dateFrom !== '' || dateTo !== '';
 
@@ -71,15 +90,87 @@ export default function MovimientosPage() {
     [movs.data],
   );
 
+  // Ronda 9 — agrupación por `refId + type stem`. Los movimientos sin
+  // refId (ajustes manuales) quedan como filas individuales. El tipo
+  // "stem" colapsa por familia: PURCHASE_IN, SALE_OUT, RETURN_IN, etc.
+  // sale.id + DISPATCH_OUT genera un grupo distinto del sale.id + SALE_OUT
+  // (para que el operador vea el despacho aparte de la venta).
+  type Group = {
+    key: string;
+    refId: string | null;
+    reference: string | null;
+    type: MovementDto['type'];
+    date: string;
+    itemCount: number;
+    qtyTotal: number;
+    items: MovementDto[];
+  };
+  const groups = useMemo<Group[]>(() => {
+    if (view !== 'grouped' || !movs.data) return [];
+    const map = new Map<string, Group>();
+    for (const m of movs.data.items) {
+      // Sin refId → grupo de 1 fila (key único por id).
+      const key = m.refId ? `${m.refId}::${m.type}` : `single::${m.id}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.itemCount += 1;
+        existing.qtyTotal += m.qty;
+        existing.items.push(m);
+      } else {
+        map.set(key, {
+          key,
+          refId: m.refId,
+          reference: m.reference,
+          type: m.type,
+          date: m.createdAt,
+          itemCount: 1,
+          qtyTotal: m.qty,
+          items: [m],
+        });
+      }
+    }
+    // Orden: por fecha desc (más reciente del grupo).
+    return Array.from(map.values()).sort((a, b) =>
+      a.date < b.date ? 1 : -1,
+    );
+  }, [view, movs.data]);
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-semibold">Movimientos de inventario</h1>
-        {filtersActive && (
-          <Button variant="ghost" size="sm" onClick={clear}>
-            Limpiar filtros
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Ronda 9 — toggle agrupada/plana. */}
+          <div className="inline-flex rounded-md border bg-card p-0.5">
+            <button
+              type="button"
+              onClick={() => setFilter('view', null)}
+              className={`px-3 py-1 text-xs ${
+                view === 'grouped'
+                  ? 'rounded-md bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Agrupada
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilter('view', 'flat')}
+              className={`px-3 py-1 text-xs ${
+                view === 'flat'
+                  ? 'rounded-md bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Plana
+            </button>
+          </div>
+          {filtersActive && (
+            <Button variant="ghost" size="sm" onClick={clear}>
+              Limpiar filtros
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
@@ -126,10 +217,13 @@ export default function MovimientosPage() {
         <Table stickyFirstColumn>
           <TableHeader>
             <TableRow>
+              {view === 'grouped' && <TableHead className="w-[40px]" />}
               <TableHead>Fecha</TableHead>
               <TableHead>Tipo</TableHead>
-              <TableHead>Producto</TableHead>
-              <TableHead className="text-right">Cantidad</TableHead>
+              <TableHead>{view === 'grouped' ? 'Referencia' : 'Producto'}</TableHead>
+              <TableHead className="text-right">
+                {view === 'grouped' ? 'Items / Qty total' : 'Cantidad'}
+              </TableHead>
               <TableHead className="text-right">Costo unit.</TableHead>
               <TableHead>Origen</TableHead>
               <TableHead>Usuario</TableHead>
@@ -140,7 +234,7 @@ export default function MovimientosPage() {
               <>
                 {Array.from({ length: 6 }).map((_, i) => (
                   <TableRow key={i}>
-                    <TableCell colSpan={7}>
+                    <TableCell colSpan={view === 'grouped' ? 8 : 7}>
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
                   </TableRow>
@@ -149,51 +243,193 @@ export default function MovimientosPage() {
             )}
             {movs.data && movs.data.items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell
+                  colSpan={view === 'grouped' ? 8 : 7}
+                  className="text-center text-muted-foreground"
+                >
                   Sin movimientos en el período.
                 </TableCell>
               </TableRow>
             )}
-            {movs.data?.items.map((m) => (
-              <TableRow key={m.id}>
-                <TableCell className="font-mono text-xs">
-                  {new Date(m.createdAt).toLocaleString('es-AR', {
-                    dateStyle: 'short',
-                    timeStyle: 'short',
-                  })}
-                </TableCell>
-                <TableCell>
-                  <TypeBadge type={m.type} />
-                </TableCell>
-                <TableCell>
-                  {m.product ? (
-                    <>
-                      <span className="font-medium">{m.product.name}</span>{' '}
-                      <span className="text-xs text-muted-foreground">{m.product.sku}</span>
-                    </>
-                  ) : (
-                    '—'
-                  )}
-                </TableCell>
-                <TableCell
-                  className={`text-right tabular-nums font-medium ${
-                    m.qty < 0 ? 'text-destructive' : 'text-stock-ok'
-                  }`}
-                >
-                  {m.qty > 0 ? '+' : ''}
-                  {m.qty}
-                </TableCell>
-                <TableCell className="text-right text-muted-foreground tabular-nums">
-                  {m.unitCost ? formatCurrency(m.unitCost) : '—'}
-                </TableCell>
-                <TableCell className="text-xs text-muted-foreground">
-                  {m.reference ?? '—'}
-                </TableCell>
-                <TableCell className="text-xs text-muted-foreground">
-                  {m.user?.email ?? '—'}
-                </TableCell>
-              </TableRow>
-            ))}
+
+            {/* Vista plana — fila por movimiento como antes */}
+            {view === 'flat' &&
+              movs.data?.items.map((m) => (
+                <TableRow key={m.id}>
+                  <TableCell className="font-mono text-xs">
+                    {new Date(m.createdAt).toLocaleString('es-AR', {
+                      dateStyle: 'short',
+                      timeStyle: 'short',
+                    })}
+                  </TableCell>
+                  <TableCell>
+                    <TypeBadge type={m.type} />
+                  </TableCell>
+                  <TableCell>
+                    {m.product ? (
+                      <>
+                        <span className="font-medium">{m.product.name}</span>{' '}
+                        <span className="text-xs text-muted-foreground">
+                          {m.product.sku ?? ''}
+                        </span>
+                      </>
+                    ) : (
+                      '—'
+                    )}
+                  </TableCell>
+                  <TableCell
+                    className={`text-right tabular-nums font-medium ${
+                      m.qty < 0 ? 'text-destructive' : 'text-stock-ok'
+                    }`}
+                  >
+                    {m.qty > 0 ? '+' : ''}
+                    {m.qty}
+                  </TableCell>
+                  <TableCell className="text-right text-muted-foreground tabular-nums">
+                    {m.unitCost ? formatCurrency(m.unitCost) : '—'}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {m.reference ?? '—'}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {m.user?.email ?? '—'}
+                  </TableCell>
+                </TableRow>
+              ))}
+
+            {/* Vista agrupada — fila padre + hijas expandibles */}
+            {view === 'grouped' &&
+              groups.map((g) => {
+                const isOpen = expanded.has(g.key);
+                const isSingleton = g.itemCount === 1 && !g.refId;
+                return (
+                  <>
+                    <TableRow
+                      key={g.key}
+                      onClick={() => !isSingleton && toggleExpanded(g.key)}
+                      className={
+                        isSingleton ? '' : 'cursor-pointer hover:bg-accent/50'
+                      }
+                    >
+                      <TableCell>
+                        {!isSingleton &&
+                          (isOpen ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4" />
+                          ))}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {new Date(g.date).toLocaleString('es-AR', {
+                          dateStyle: 'short',
+                          timeStyle: 'short',
+                        })}
+                      </TableCell>
+                      <TableCell>
+                        <TypeBadge type={g.type} />
+                      </TableCell>
+                      <TableCell>
+                        {isSingleton ? (
+                          g.items[0]!.product ? (
+                            <>
+                              <span className="font-medium">
+                                {g.items[0]!.product!.name}
+                              </span>{' '}
+                              <span className="text-xs text-muted-foreground">
+                                {g.items[0]!.product!.sku ?? ''}
+                              </span>
+                            </>
+                          ) : (
+                            '—'
+                          )
+                        ) : (
+                          <span className="font-mono text-sm">
+                            {g.reference ?? '—'}
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell
+                        className={`text-right tabular-nums font-medium ${
+                          g.qtyTotal < 0 ? 'text-destructive' : 'text-stock-ok'
+                        }`}
+                      >
+                        {isSingleton ? (
+                          <>
+                            {g.qtyTotal > 0 ? '+' : ''}
+                            {g.qtyTotal}
+                          </>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            {g.itemCount} item{g.itemCount === 1 ? '' : 's'} ·{' '}
+                            <span
+                              className={
+                                g.qtyTotal < 0
+                                  ? 'text-destructive'
+                                  : 'text-stock-ok'
+                              }
+                            >
+                              {g.qtyTotal > 0 ? '+' : ''}
+                              {g.qtyTotal}
+                            </span>
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground tabular-nums">
+                        {isSingleton && g.items[0]!.unitCost
+                          ? formatCurrency(g.items[0]!.unitCost!)
+                          : '—'}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {g.reference ?? '—'}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {g.items[0]!.user?.email ?? '—'}
+                      </TableCell>
+                    </TableRow>
+                    {isOpen &&
+                      !isSingleton &&
+                      g.items.map((m) => (
+                        <TableRow key={`${g.key}::${m.id}`} className="bg-muted/30">
+                          <TableCell />
+                          <TableCell className="font-mono text-xs text-muted-foreground">
+                            {new Date(m.createdAt).toLocaleTimeString('es-AR', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </TableCell>
+                          <TableCell />
+                          <TableCell>
+                            {m.product ? (
+                              <>
+                                <span className="text-sm">
+                                  {m.product.name}
+                                </span>{' '}
+                                <span className="text-xs text-muted-foreground">
+                                  {m.product.sku ?? ''}
+                                </span>
+                              </>
+                            ) : (
+                              '—'
+                            )}
+                          </TableCell>
+                          <TableCell
+                            className={`text-right tabular-nums font-medium ${
+                              m.qty < 0 ? 'text-destructive' : 'text-stock-ok'
+                            }`}
+                          >
+                            {m.qty > 0 ? '+' : ''}
+                            {m.qty}
+                          </TableCell>
+                          <TableCell className="text-right text-muted-foreground tabular-nums">
+                            {m.unitCost ? formatCurrency(m.unitCost) : '—'}
+                          </TableCell>
+                          <TableCell />
+                          <TableCell />
+                        </TableRow>
+                      ))}
+                  </>
+                );
+              })}
           </TableBody>
         </Table>
       </div>
@@ -248,6 +484,21 @@ function TypeBadge({ type }: { type: MovementDto['type'] }) {
     TRANSFER_IN: {
       label: 'Transf. entrada',
       cls: 'bg-violet-500/15 text-violet-700 dark:text-violet-300',
+    },
+    // Ronda 8 — eventos audit-only de guía de despacho y cancelación de
+    // devoluciones dañadas. No tocan stock; los pintamos con un color
+    // neutro para distinguirlos de los movimientos "reales".
+    DISPATCH_OUT: {
+      label: 'Guía generada',
+      cls: 'bg-muted text-muted-foreground',
+    },
+    DISPATCH_VOIDED: {
+      label: 'Guía anulada',
+      cls: 'bg-muted text-muted-foreground',
+    },
+    RETURN_DAMAGED_CANCELLED: {
+      label: 'Dev. dañada cancelada',
+      cls: 'bg-muted text-muted-foreground',
     },
   };
   const { label, cls } = map[type];

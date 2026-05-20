@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil, Plus, PowerOff, Trash2, Zap } from 'lucide-react';
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/confirm-dialog';
@@ -186,7 +187,15 @@ export default function AlmacenesPage() {
             )}
             {items.map((w) => (
               <TableRow key={w.id} className={!w.isActive ? 'opacity-60' : ''}>
-                <TableCell className="font-medium">{w.name}</TableCell>
+                <TableCell className="font-medium">
+                  {/* Ronda 9 — click abre detalle con 4 tabs. */}
+                  <Link
+                    href={`/almacenes/${w.id}`}
+                    className="hover:underline"
+                  >
+                    {w.name}
+                  </Link>
+                </TableCell>
                 <TableCell className="text-muted-foreground">
                   {w.address ?? '—'}
                 </TableCell>

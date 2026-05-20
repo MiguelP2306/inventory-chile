@@ -28,6 +28,7 @@ import { ReportsModule } from './reports/reports.module';
 import { ReturnsModule } from './returns/returns.module';
 import { SalesModule } from './sales/sales.module';
 import { SettingsModule } from './settings/settings.module';
+import { SupplierCreditsModule } from './supplier-credits/supplier-credits.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { TransfersModule } from './transfers/transfers.module';
 import { UPLOADS_ROOT } from './uploads/upload-config';
@@ -58,6 +59,7 @@ import { WarrantiesModule } from './warranties/warranties.module';
     VehiclesModule,
     ProductsModule,
     SuppliersModule,
+    SupplierCreditsModule,
     CustomersModule,
     CommunesModule,
     InventoryModule,

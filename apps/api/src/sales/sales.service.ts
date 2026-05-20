@@ -7,6 +7,9 @@ import {
   SaleDto,
   SaleItemDto,
   SaleStatus,
+  SalesKpisDto,
+  SalesTopCustomerDto,
+  SalesTopProductDto,
 } from '@inventory/shared';
 import {
   BadRequestException,
@@ -16,7 +19,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { Brackets, DataSource, EntityManager, In, Repository } from 'typeorm';
+import {
+  Between,
+  Brackets,
+  DataSource,
+  EntityManager,
+  In,
+  Repository,
+} from 'typeorm';
 import { CashboxService } from '../cashbox/cashbox.service';
 import { CountersService } from '../common/counters.service';
 import { dayRange } from '../common/date-range';
@@ -143,6 +153,15 @@ export class SalesService {
     });
     if (!customer) throw new NotFoundException('Cliente no encontrado');
 
+    // Ronda 9 — los clientes "lite" (sólo WhatsApp, sin RUT) pueden recibir
+    // cotizaciones pero NO ventas formales. Si llegamos a facturar, el RUT
+    // es obligatorio porque queda en el documento de venta.
+    if (!customer.taxId || customer.taxId.trim() === '') {
+      throw new ConflictException(
+        'Este cliente no tiene RUT cargado. Completalo en el perfil del cliente antes de facturar la venta.',
+      );
+    }
+
     const warehouseId = dto.warehouseId ?? (await this.defaultWarehouseId());
 
     const productIds = dto.items.map((i) => i.productId);
@@ -164,18 +183,20 @@ export class SalesService {
 
     const settings = await this.getSettings();
     const taxRate = parseFloat(settings.taxRate);
-    const cardCommissionRate = parseFloat(settings.cardCommissionRate);
+    // Ronda 9 — la comisión se calcula según el método: débito, crédito o
+    // link de pago. Cada uno tiene su propia tasa en CompanySettings.
+    const commissionRate = commissionRateFor(dto.paymentMethod, settings);
 
     const date = dto.date ? new Date(dto.date) : new Date();
     const year = date.getFullYear();
 
-    const cardCategory =
-      dto.paymentMethod === PaymentMethod.CARD
-        ? await this.categoryRepo.findOne({
-            where: { name: CARD_COMMISSION_CATEGORY_NAME },
-          })
-        : null;
-    if (dto.paymentMethod === PaymentMethod.CARD && !cardCategory) {
+    const chargesCommission = commissionRate > 0;
+    const cardCategory = chargesCommission
+      ? await this.categoryRepo.findOne({
+          where: { name: CARD_COMMISSION_CATEGORY_NAME },
+        })
+      : null;
+    if (chargesCommission && !cardCategory) {
       throw new ConflictException(
         'Falta la categoría "Comisión Tarjeta" en el seed. Ejecutá db:seed.',
       );
@@ -185,10 +206,9 @@ export class SalesService {
       // Calculo de totales y comisión.
       const totals = computeSaleTotals(dto.items, taxRate);
 
-      const commissionAmount =
-        dto.paymentMethod === PaymentMethod.CARD
-          ? roundHalfUp(parseFloat(totals.total) * cardCommissionRate)
-          : 0;
+      const commissionAmount = chargesCommission
+        ? roundHalfUp(parseFloat(totals.total) * commissionRate)
+        : 0;
 
       const seq = await this.counters.nextNumber(COUNTER_KIND, year, manager);
       const number = CountersService.format(NUMBER_PREFIX, year, seq);
@@ -259,17 +279,20 @@ export class SalesService {
         manager,
       );
 
-      // Si fue con tarjeta, egreso automático por la comisión bancaria.
-      if (dto.paymentMethod === PaymentMethod.CARD && commissionAmount > 0) {
+      // Ronda 9 — egreso automático por comisión (débito, crédito o link).
+      // Se aplica cuando el método cobra comisión (chargesCommission). La
+      // comisión se imputa con el mismo paymentMethod que la venta para que
+      // los reportes de caja por método sigan cuadrando.
+      if (chargesCommission && commissionAmount > 0) {
         await this.cashbox.recordTransaction(
           {
             date,
             type: CashTransactionType.EXPENSE,
             source: CashTransactionSource.SALE,
             sourceId: savedSale.id,
-            description: `Comisión tarjeta · Venta ${number}`,
+            description: `Comisión ${labelForPaymentMethod(dto.paymentMethod)} · Venta ${number}`,
             amount: commissionAmount.toFixed(2),
-            paymentMethod: PaymentMethod.CARD,
+            paymentMethod: dto.paymentMethod,
             expenseCategoryId: cardCategory!.id,
             userId,
           },
@@ -449,6 +472,180 @@ export class SalesService {
    * frontend para mostrar "stock disponible" al armar la venta y bloquear
    * el botón "Confirmar" si excede.
    */
+  /**
+   * Ronda 12 — KPIs de ventas para el dashboard de `/ventas`. Análogo a
+   * `PurchasesService.kpis` pero con dos tablas top:
+   *  - Top 5 productos vendidos (por unidades).
+   *  - Top 5 clientes (por monto vendido).
+   *
+   * Excluye SIEMPRE ventas canceladas. Las card "Ventas del día" se
+   * calculan sobre el día actual (no sobre el período custom, así el
+   * operador puede ver el día corriente aunque el período sea otro).
+   */
+  async kpis(query: {
+    dateFrom?: string;
+    dateTo?: string;
+  }): Promise<SalesKpisDto> {
+    // Período pedido (default = mes actual).
+    let from: Date;
+    let to: Date;
+    if (query.dateFrom || query.dateTo) {
+      const range = dayRange(query.dateFrom, query.dateTo);
+      from = range.from;
+      to = range.to;
+    } else {
+      const now = new Date();
+      from = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      to = new Date(
+        now.getFullYear(),
+        now.getMonth() + 1,
+        0,
+        23,
+        59,
+        59,
+        999,
+      );
+    }
+
+    // Día actual (independiente del período).
+    const now = new Date();
+    const todayStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      0,
+      0,
+      0,
+      0,
+    );
+    const todayEnd = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      23,
+      59,
+      59,
+      999,
+    );
+
+    // Ventas del período (excluye canceladas).
+    const sales = await this.repo.find({
+      where: {
+        date: Between(from, to),
+        status: SaleStatus.PAID,
+      },
+      select: ['id', 'total', 'customerId', 'date'],
+    });
+    const count = sales.length;
+    const totalAmount = sales.reduce((acc, s) => acc + parseFloat(s.total), 0);
+    const averageAmount = count > 0 ? totalAmount / count : 0;
+
+    // Ventas del día actual.
+    const todaySales = await this.repo.find({
+      where: {
+        date: Between(todayStart, todayEnd),
+        status: SaleStatus.PAID,
+      },
+      select: ['id', 'total'],
+    });
+    const todayAmount = todaySales.reduce(
+      (acc, s) => acc + parseFloat(s.total),
+      0,
+    );
+
+    // Última venta confirmada (cualquier período).
+    const last = await this.repo.findOne({
+      where: { status: SaleStatus.PAID },
+      relations: { customer: true },
+      order: { date: 'DESC' },
+    });
+
+    // Top 5 productos por unidades vendidas en el período. Usa SaleItem
+    // joineado a Sale para filtrar por fecha + status.
+    const productRows: Array<{
+      productId: string;
+      qty: string;
+      totalAmount: string;
+      sku: string | null;
+      name: string;
+    }> = await this.itemRepo
+      .createQueryBuilder('si')
+      .innerJoin('si.sale', 's')
+      .innerJoin('si.product', 'p')
+      .select('si.productId', 'productId')
+      .addSelect('SUM(si.qty)', 'qty')
+      .addSelect('SUM(si.subtotal)', 'totalAmount')
+      .addSelect('p.sku', 'sku')
+      .addSelect('p.name', 'name')
+      .where('s.status = :paid', { paid: SaleStatus.PAID })
+      .andWhere('s.date BETWEEN :from AND :to', { from, to })
+      .groupBy('si.productId')
+      .addGroupBy('p.sku')
+      .addGroupBy('p.name')
+      .orderBy('SUM(si.qty)', 'DESC')
+      .limit(5)
+      .getRawMany();
+    const topProducts: SalesTopProductDto[] = productRows.map((r) => ({
+      productId: r.productId,
+      sku: r.sku,
+      name: r.name,
+      qty: Number(r.qty),
+      totalAmount: Number(r.totalAmount).toFixed(2),
+    }));
+
+    // Top 5 clientes por monto vendido en el período.
+    const customerRows: Array<{
+      customerId: string;
+      salesCount: string;
+      totalAmount: string;
+      customerName: string;
+      customerTaxId: string | null;
+    }> = await this.repo
+      .createQueryBuilder('s')
+      .innerJoin('s.customer', 'c')
+      .select('s.customerId', 'customerId')
+      .addSelect('COUNT(s.id)', 'salesCount')
+      .addSelect('SUM(s.total)', 'totalAmount')
+      .addSelect('c.name', 'customerName')
+      .addSelect('c.taxId', 'customerTaxId')
+      .where('s.status = :paid', { paid: SaleStatus.PAID })
+      .andWhere('s.date BETWEEN :from AND :to', { from, to })
+      .groupBy('s.customerId')
+      .addGroupBy('c.name')
+      .addGroupBy('c.taxId')
+      .orderBy('SUM(s.total)', 'DESC')
+      .limit(5)
+      .getRawMany();
+    const topCustomers: SalesTopCustomerDto[] = customerRows.map((r) => ({
+      customerId: r.customerId,
+      customerName: r.customerName,
+      customerTaxId: r.customerTaxId,
+      salesCount: Number(r.salesCount),
+      totalAmount: Number(r.totalAmount).toFixed(2),
+    }));
+
+    return {
+      totalAmount: totalAmount.toFixed(2),
+      count,
+      averageAmount: averageAmount.toFixed(2),
+      todayAmount: todayAmount.toFixed(2),
+      todayCount: todaySales.length,
+      lastSale: last
+        ? {
+            id: last.id,
+            number: last.number,
+            date: last.date.toISOString(),
+            total: last.total,
+            customerName: last.customer?.name ?? '',
+          }
+        : null,
+      topProducts,
+      topCustomers,
+      periodFrom: from.toISOString(),
+      periodTo: to.toISOString(),
+    };
+  }
+
   async availableStock(
     productIds: string[],
     warehouseId?: string,
@@ -575,6 +772,49 @@ export class SalesService {
 }
 
 // ---------------- pure helpers ----------------
+
+/** Etiqueta legible para descripciones de transacciones de caja. */
+export function labelForPaymentMethod(method: PaymentMethod): string {
+  switch (method) {
+    case PaymentMethod.CASH:
+      return 'efectivo';
+    case PaymentMethod.TRANSFER:
+      return 'transferencia';
+    case PaymentMethod.CARD_DEBIT:
+      return 'débito';
+    case PaymentMethod.CARD_CREDIT:
+      return 'crédito';
+    case PaymentMethod.PAYMENT_LINK:
+      return 'link de pago';
+    default:
+      return method;
+  }
+}
+
+/**
+ * Ronda 9 — devuelve la tasa de comisión configurada en CompanySettings
+ * según el método de pago. CASH/TRANSFER no pagan comisión (devuelve 0).
+ */
+export function commissionRateFor(
+  method: PaymentMethod,
+  settings: {
+    cardCommissionRate: string;
+    cardDebitCommissionRate: string;
+    cardCreditCommissionRate: string;
+    paymentLinkCommissionRate: string;
+  },
+): number {
+  switch (method) {
+    case PaymentMethod.CARD_DEBIT:
+      return parseFloat(settings.cardDebitCommissionRate);
+    case PaymentMethod.CARD_CREDIT:
+      return parseFloat(settings.cardCreditCommissionRate);
+    case PaymentMethod.PAYMENT_LINK:
+      return parseFloat(settings.paymentLinkCommissionRate);
+    default:
+      return 0;
+  }
+}
 
 function roundHalfUp(n: number, decimals = 2): number {
   const factor = Math.pow(10, decimals);

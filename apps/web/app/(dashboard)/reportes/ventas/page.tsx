@@ -19,10 +19,16 @@ import { formatCurrency } from '@/lib/format';
 import { getSalesReport, salesReportCsvUrl } from '@/lib/reports-api';
 import { useUrlFilters } from '@/lib/use-url-filters';
 
-const METHOD_LABEL: Record<'CASH' | 'TRANSFER' | 'CARD', string> = {
+// Ronda 9 — CARD se desdobló en débito/crédito/link de pago.
+const METHOD_LABEL: Record<
+  'CASH' | 'TRANSFER' | 'CARD_DEBIT' | 'CARD_CREDIT' | 'PAYMENT_LINK',
+  string
+> = {
   CASH: 'Efectivo',
   TRANSFER: 'Transferencia',
-  CARD: 'Tarjeta',
+  CARD_DEBIT: 'Débito',
+  CARD_CREDIT: 'Crédito',
+  PAYMENT_LINK: 'Link de pago',
 };
 
 const STATUS_LABEL: Record<'PENDING' | 'PAID' | 'CANCELLED', string> = {

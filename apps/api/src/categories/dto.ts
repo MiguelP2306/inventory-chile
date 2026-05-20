@@ -38,6 +38,16 @@ export class ListCategoriesQueryDto {
   @IsString()
   q?: string;
 
+  /**
+   * Ronda 10 — filtro por padre.
+   *  - Sin valor: lista todas las categorías (planas).
+   *  - `parentId=<uuid>`: solo subcategorías de ese padre.
+   *  - `parentId=null` (literal string): solo categorías raíz.
+   */
+  @IsOptional()
+  @IsString()
+  parentId?: string;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()

@@ -29,6 +29,18 @@ export class CreateSupplierDto {
   @IsValidRut()
   taxId?: string | null;
 
+  // Ronda 9 — razón social formal (cuando difiere del nombre comercial).
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  legalName?: string | null;
+
+  // Ronda 9 — nombre del vendedor/contacto humano.
+  @IsOptional()
+  @IsString()
+  @MaxLength(180)
+  contactPerson?: string | null;
+
   @IsOptional()
   @IsEmail()
   email?: string | null;

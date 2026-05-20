@@ -100,7 +100,7 @@ export default function ClientesPage() {
                   </Link>
                 </TableCell>
                 <TableCell className="font-mono text-xs">
-                  {formatRutPretty(c.taxId)}
+                  {c.taxId ? formatRutPretty(c.taxId) : '—'}
                 </TableCell>
                 <TableCell className="text-muted-foreground">
                   {c.email ?? '—'}

@@ -40,7 +40,9 @@ const PAGE_SIZE = 50;
 const METHOD_LABEL: Record<PaymentMethodDto, string> = {
   CASH: 'Efectivo',
   TRANSFER: 'Transferencia',
-  CARD: 'Tarjeta',
+  CARD_DEBIT: 'Débito',
+  CARD_CREDIT: 'Crédito',
+  PAYMENT_LINK: 'Link de pago',
 };
 
 const SOURCE_LABEL: Record<CashTransactionSourceDto, string> = {

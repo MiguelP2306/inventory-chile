@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Settings2 } from 'lucide-react';
+import { FileDown, Settings2 } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
@@ -25,6 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { apiAbsoluteUrl } from '@/lib/api';
 import { apiErrorMessage } from '@/lib/catalog-api';
 import { listStockPaginated, setStockLocation } from '@/lib/inventory-api';
 import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
@@ -125,10 +126,29 @@ export default function InventarioPage() {
             </p>
           )}
         </div>
-        <div className="flex gap-2 text-sm">
+        <div className="flex items-center gap-2 text-sm">
           <Badge variant="ok">{counts.ok} OK</Badge>
           <Badge variant="low">{counts.low} bajo stock</Badge>
           <Badge variant="out">{counts.out} sin stock</Badge>
+          {/* Ronda 10 — exportar a Excel con los filtros activos
+              (la paginación se ignora; exporta todos los resultados).
+              Ronda 12 — apuntar al API backend con `apiAbsoluteUrl`. */}
+          <Button asChild variant="outline" size="sm">
+            <a
+              href={apiAbsoluteUrl(
+                `inventory/stock.xlsx${buildStockExportQuery({
+                  q: debouncedQ,
+                  status: status === ALL ? undefined : (status as StockStatus),
+                  warehouseId: warehouseId || undefined,
+                })}`,
+              )}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <FileDown className="h-4 w-4" />
+              Exportar Excel
+            </a>
+          </Button>
         </div>
       </div>
 
@@ -377,4 +397,18 @@ function LocationCell({
       {initialValue ?? <span className="text-muted-foreground">—</span>}
     </button>
   );
+}
+
+/**
+ * Ronda 10 — arma la query string para el endpoint `/api/inventory/stock.xlsx`
+ * a partir de los filtros activos. Omite undefined/vacíos.
+ */
+function buildStockExportQuery(
+  params: Record<string, string | undefined>,
+): string {
+  const entries = Object.entries(params).filter(
+    ([, v]) => v != null && v !== '',
+  ) as [string, string][];
+  if (entries.length === 0) return '';
+  return '?' + entries.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
 }

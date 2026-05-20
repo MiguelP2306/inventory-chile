@@ -65,7 +65,9 @@ type DiscountKind = '$' | '%';
 
 interface ItemRow {
   productId: string;
-  sku: string;
+  // Ronda 9 — sku puede ser null (productos con SKU auto-generado quedan
+  // como string normal, pero el ProductPicker pasa el dato directo del DTO).
+  sku: string | null;
   name: string;
   qty: number;
   unitPrice: string;
@@ -103,9 +105,13 @@ interface Props {
 
 export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
   const qc = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'cliente' | 'items' | 'notas'>(
-    'cliente',
+  // Ronda 10 — tabs simplificadas: cliente + items en una sola vista
+  // ('principal'); notas aparte. Las referencias a 'cliente' o 'items' en
+  // validaciones se mapean a 'principal' + abrir/cerrar la card del cliente.
+  const [activeTab, setActiveTab] = useState<'principal' | 'notas'>(
+    'principal',
   );
+  const [clientOpen, setClientOpen] = useState(true);
 
   const [customer, setCustomer] = useState<CustomerDto | null>(
     prefillFromQuotation?.customer ?? null,
@@ -160,7 +166,22 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
     queryFn: getCompanySettings,
   });
   const taxRate = Number(settings.data?.taxRate ?? '0.19');
-  const cardCommissionRate = Number(settings.data?.cardCommissionRate ?? '0.025');
+  // Ronda 9 — comisión efectiva según el método elegido.
+  const commissionRate = useMemo(() => {
+    const s = settings.data;
+    if (!s) return 0;
+    switch (paymentMethod) {
+      case 'CARD_DEBIT':
+        return Number(s.cardDebitCommissionRate ?? '0');
+      case 'CARD_CREDIT':
+        return Number(s.cardCreditCommissionRate ?? '0');
+      case 'PAYMENT_LINK':
+        return Number(s.paymentLinkCommissionRate ?? '0');
+      default:
+        return 0;
+    }
+  }, [settings.data, paymentMethod]);
+  const chargesCommission = commissionRate > 0;
 
   // Stock disponible por producto: se reconsulta cuando cambian los items.
   // Mostramos un badge al lado de la cantidad y bloqueamos el botón final si
@@ -203,8 +224,7 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
   const totalBruto = itemsForCalc.reduce((acc, it) => acc + it.subtotal, 0);
   const subtotalNeto = totalBruto / (1 + taxRate);
   const taxAmount = totalBruto - subtotalNeto;
-  const commissionAmount =
-    paymentMethod === 'CARD' ? totalBruto * cardCommissionRate : 0;
+  const commissionAmount = chargesCommission ? totalBruto * commissionRate : 0;
   const netAfterCommission = totalBruto - commissionAmount;
 
   const stockShortages = items
@@ -240,22 +260,23 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
   function buildPayload(): CreateSaleInput | null {
     if (!customer) {
       toast.error('Elegí un cliente del catálogo');
-      setActiveTab('cliente');
+      setActiveTab('principal');
+      setClientOpen(true);
       return null;
     }
     if (items.length === 0) {
       toast.error('Agregá al menos un item');
-      setActiveTab('items');
+      setActiveTab('principal');
       return null;
     }
     if (items.some((it) => it.qty < 1 || Number(it.unitPrice) <= 0)) {
       toast.error('Revisá cantidad y precio unitario de cada item');
-      setActiveTab('items');
+      setActiveTab('principal');
       return null;
     }
     if (stockShortages.length > 0) {
       toast.error('Hay items que exceden el stock disponible');
-      setActiveTab('items');
+      setActiveTab('principal');
       return null;
     }
 
@@ -361,7 +382,7 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => setActiveTab('items')}
+            onClick={() => setActiveTab('principal')}
           >
             Ver items
           </Button>
@@ -373,13 +394,34 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
         onValueChange={(v) => setActiveTab(v as typeof activeTab)}
       >
         <TabsList>
-          <TabsTrigger value="cliente">Cliente y pago</TabsTrigger>
-          <TabsTrigger value="items">Items ({items.length})</TabsTrigger>
+          {/* Ronda 10 — cliente+pago e items conviven en la primera tab. */}
+          <TabsTrigger value="principal">
+            Cliente y productos ({items.length})
+          </TabsTrigger>
           <TabsTrigger value="notas">Notas</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="cliente" className="space-y-4">
-          <div className="rounded-md border bg-card p-6 space-y-4">
+        <TabsContent value="principal" className="space-y-4">
+          <div className="rounded-md border bg-card">
+            <button
+              type="button"
+              onClick={() => setClientOpen((o) => !o)}
+              className="flex w-full items-center justify-between border-b p-4 text-left hover:bg-accent/30"
+            >
+              <div>
+                <h2 className="font-medium">Cliente y forma de pago</h2>
+                <p className="text-xs text-muted-foreground">
+                  {customer
+                    ? `${customer.name}${customer.taxId ? ` · ${customer.taxId}` : ''} · ${paymentMethod.replace('CARD_', '').replace('_', ' ').toLowerCase()}`
+                    : 'Sin cliente seleccionado'}
+                </p>
+              </div>
+              <span className="text-xs text-muted-foreground">
+                {clientOpen ? 'Ocultar ▴' : 'Editar ▾'}
+              </span>
+            </button>
+            {clientOpen && (
+              <div className="space-y-4 p-6">
             <div className="space-y-2">
               <Label>Cliente</Label>
 
@@ -418,7 +460,10 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
 
             <div className="space-y-2">
               <Label>Método de pago</Label>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              {/* Ronda 9 — 5 opciones: efectivo, transferencia, débito,
+                  crédito, link de pago. Cada tarjeta de pago tiene su propia
+                  comisión configurable en Configuración. */}
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
                 <PaymentOption
                   selected={paymentMethod === 'CASH'}
                   onClick={() => setPaymentMethod('CASH')}
@@ -434,18 +479,33 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
                   hint="Sin comisión"
                 />
                 <PaymentOption
-                  selected={paymentMethod === 'CARD'}
-                  onClick={() => setPaymentMethod('CARD')}
+                  selected={paymentMethod === 'CARD_DEBIT'}
+                  onClick={() => setPaymentMethod('CARD_DEBIT')}
                   icon={<CreditCard className="h-5 w-5" />}
-                  label="Tarjeta"
-                  hint={`Comisión ${(cardCommissionRate * 100).toFixed(2)}%`}
+                  label="Débito"
+                  hint={`Comisión ${(Number(settings.data?.cardDebitCommissionRate ?? '0') * 100).toFixed(2)}%`}
+                />
+                <PaymentOption
+                  selected={paymentMethod === 'CARD_CREDIT'}
+                  onClick={() => setPaymentMethod('CARD_CREDIT')}
+                  icon={<CreditCard className="h-5 w-5" />}
+                  label="Crédito"
+                  hint={`Comisión ${(Number(settings.data?.cardCreditCommissionRate ?? '0') * 100).toFixed(2)}%`}
+                />
+                <PaymentOption
+                  selected={paymentMethod === 'PAYMENT_LINK'}
+                  onClick={() => setPaymentMethod('PAYMENT_LINK')}
+                  icon={<Send className="h-5 w-5" />}
+                  label="Link de pago"
+                  hint={`Comisión ${(Number(settings.data?.paymentLinkCommissionRate ?? '0') * 100).toFixed(2)}%`}
                 />
               </div>
             </div>
+              </div>
+            )}
           </div>
-        </TabsContent>
 
-        <TabsContent value="items" className="space-y-4">
+          {/* Items debajo del cliente, en el mismo tab (Ronda 10). */}
           <div className="rounded-md border bg-card">
             <div className="flex items-center justify-between border-b p-4">
               <h2 className="font-medium">Items de la venta</h2>
@@ -649,10 +709,10 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
           <span>Total a cobrar</span>
           <span className="tabular-nums">{formatCurrency(totalBruto.toFixed(2))}</span>
         </div>
-        {paymentMethod === 'CARD' && commissionAmount > 0 && (
+        {chargesCommission && commissionAmount > 0 && (
           <>
             <div className="flex justify-between text-xs text-muted-foreground">
-              <span>Comisión tarjeta ({(cardCommissionRate * 100).toFixed(2)}%)</span>
+              <span>Comisión ({(commissionRate * 100).toFixed(2)}%)</span>
               <span className="tabular-nums">
                 −{formatCurrency(commissionAmount.toFixed(2))}
               </span>

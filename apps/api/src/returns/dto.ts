@@ -1,5 +1,6 @@
 import {
   PaymentMethod,
+  RefundMode,
   ReturnItemCondition,
   ReturnStatus,
   ReturnType,
@@ -45,6 +46,19 @@ export class CreateReturnItemDto {
   itemCondition!: ReturnItemCondition;
 }
 
+export class CreateReplacementItemDto {
+  @IsUUID()
+  productId!: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  qty!: number;
+
+  @IsNumberString({ no_symbols: false })
+  unitPrice!: string;
+}
+
 export class CreateReturnDto {
   @IsEnum(ReturnType)
   type!: ReturnType;
@@ -79,6 +93,19 @@ export class CreateReturnDto {
   @ValidateNested({ each: true })
   @Type(() => CreateReturnItemDto)
   items!: CreateReturnItemDto[];
+
+  // Ronda 9 — modo de reembolso. Default MONEY (compat).
+  @IsOptional()
+  @IsEnum(RefundMode)
+  refundMode?: RefundMode;
+
+  // Si refundMode=EXCHANGE (sólo CUSTOMER), items que el cliente se lleva
+  // a cambio. La diferencia bruta se cobra/reembolsa automáticamente.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateReplacementItemDto)
+  replacementItems?: CreateReplacementItemDto[];
 }
 
 export class CancelReturnDto {

@@ -1,8 +1,10 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Eye } from 'lucide-react';
+import { Eye, Plus } from 'lucide-react';
 import Link from 'next/link';
+import { useState } from 'react';
+import { QuickOpFromSaleDialog } from '@/components/quick-op-from-sale-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -75,9 +77,11 @@ export default function GarantiasPage() {
   const total = list.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  const [quickOpen, setQuickOpen] = useState(false);
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Reclamos de garantía</h1>
           <p className="text-sm text-muted-foreground">
@@ -85,12 +89,24 @@ export default function GarantiasPage() {
             la resolución implica cambio o reembolso, se hace una devolución aparte.
           </p>
         </div>
-        {filtersActive && (
-          <Button variant="ghost" size="sm" onClick={clear}>
-            Limpiar filtros
+        <div className="flex items-center gap-2">
+          {filtersActive && (
+            <Button variant="ghost" size="sm" onClick={clear}>
+              Limpiar filtros
+            </Button>
+          )}
+          <Button onClick={() => setQuickOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Nueva garantía
           </Button>
-        )}
+        </div>
       </div>
+
+      <QuickOpFromSaleDialog
+        action="warranty"
+        open={quickOpen}
+        onOpenChange={setQuickOpen}
+      />
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
         <Input

@@ -2,14 +2,29 @@ Dudas:
 No entiendo nada referente a Marcar como perdido al cliente 
 Probar de nuevo la devolucion de una venta confirmar que regresa el stock
 Probar de no borrar almacen si tiene relacion
+Cuando exporte un excel en productos de los 6 productos que tengo solo me mostro 1
+
+poder buscar un producto y enviarlo a una cotizacion o a una venta
+Hay un buscador global (el que estan el header) poder buscar un producto y armar una cotizacion o venta de una vez por ese lado
+el excel dice que la direccion esta deprecado 
+el subtotal del producto es el mismo que el total 
 
 ==========================
 
 Bugs Actuales:
-Genere una gia de despacho a una venta y no se vio reflejada en "movimientos"
-Anule una gia de despacho de una venta y no se vio reflejada en "movimientos"
-Cancele la devolucion de una venta con el tipo de devolucion "dañada" y no se vio reflejada en "movimientos"
-En compras agregar filtro por rango de precio hay un deley muy grande en lo que tecleo el numero, si tipeo muy rapido se pierde informacion
+Cuando quiero descargar el catalogo de productos el boton me redirecciona a 
+
+http://localhost:3000/api/products/catalog.pdf con el siguiente mensaje
+
+404
+This page could not be found.
+
+Cuando pongo manualmente 
+http://localhost:4000/api/products/catalog.pdf
+
+Veo el catalogo con la informacion de productos pero hay productos con imagenes que no se muestran
+
+Agregar KPI's para la pagina de ventas igual como esta en compras
 
 =========================
 

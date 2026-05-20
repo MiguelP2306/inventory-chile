@@ -24,8 +24,19 @@ export interface ListPaginationParams {
 }
 
 // ---------- Categories ----------
-export const listCategories = () =>
-  api.get<CategoryDto[]>('/categories').then((r) => r.data);
+export interface ListCategoriesParams {
+  q?: string;
+  /**
+   * Ronda 10 — filtro por padre:
+   *  - sin valor: todas las categorías (planas).
+   *  - 'null' (literal): solo raíces.
+   *  - <uuid>: solo subcategorías de ese padre.
+   */
+  parentId?: string;
+}
+
+export const listCategories = (params: ListCategoriesParams = {}) =>
+  api.get<CategoryDto[]>('/categories', { params }).then((r) => r.data);
 
 export const listCategoriesPaginated = (params: ListPaginationParams) =>
   api
@@ -105,6 +116,9 @@ export interface ListProductsParams {
   categoryId?: string;
   brandId?: string;
   productKind?: ProductKindDto;
+  // Ronda 9 — filtros por fecha de creación (ISO date YYYY-MM-DD).
+  createdFrom?: string;
+  createdTo?: string;
   page?: number;
   pageSize?: number;
 }
@@ -124,9 +138,10 @@ export interface FitmentInput {
 }
 
 export interface ProductInput {
-  sku: string;
+  // Ronda 9 — SKU opcional. Backend autogenera si llega null/undefined.
+  sku?: string | null;
   name: string;
-  partNumber?: string | null;
+  partNumber: string;
   barcode?: string | null;
   description?: string | null;
   categoryId?: string | null;

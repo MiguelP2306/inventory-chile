@@ -7,6 +7,22 @@ export const api = axios.create({
   withCredentials: true,
 });
 
+/**
+ * Ronda 12 — construye una URL absoluta hacia el backend, usable en
+ * `<a href>` o `window.open` (cuando el browser hace la request directa
+ * en lugar de pasar por axios).
+ *
+ * Casos típicos: descargar PDFs, abrir Excel en una pestaña nueva,
+ * compartir un link al endpoint público.
+ *
+ * Acepta un path con o sin slash inicial y normaliza para que no quede
+ * doble slash al unirlo con el baseURL.
+ */
+export function apiAbsoluteUrl(path: string): string {
+  const trimmed = path.startsWith('/') ? path.slice(1) : path;
+  return `${API_BASE.replace(/\/$/, '')}/${trimmed}`;
+}
+
 // --- refresh interceptor: en 401, intenta /auth/refresh y reintenta el request original.
 let refreshing: Promise<void> | null = null;
 

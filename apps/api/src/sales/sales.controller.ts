@@ -17,6 +17,7 @@ import {
   CreateSaleDto,
   GeneratePdfQueryDto,
   ListSalesQueryDto,
+  SalesKpisQueryDto,
 } from './dto';
 import { SalesService } from './sales.service';
 
@@ -30,6 +31,15 @@ export class SalesController {
   @Get()
   list(@Query() query: ListSalesQueryDto) {
     return this.svc.list(query);
+  }
+
+  /**
+   * Ronda 12 — KPIs de ventas (default = mes actual). Lo consume el
+   * dashboard de `/ventas` arriba de la tabla.
+   */
+  @Get('kpis')
+  kpis(@Query() query: SalesKpisQueryDto) {
+    return this.svc.kpis(query);
   }
 
   @Get('available-stock')

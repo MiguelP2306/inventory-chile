@@ -56,8 +56,10 @@ export class CustomersService {
   }
 
   async create(dto: CreateCustomerDto) {
-    const taxId = normalizeRut(dto.taxId);
-    if (await this.repo.findOne({ where: { taxId } })) {
+    // Ronda 9 — taxId opcional. Si llega, se normaliza y se valida unicidad.
+    // Si no llega, el cliente queda "lite" (sólo facturable cuando se complete).
+    const taxId = dto.taxId ? normalizeRut(dto.taxId) : null;
+    if (taxId && (await this.repo.findOne({ where: { taxId } }))) {
       throw new ConflictException(`Ya existe un cliente con RUT "${taxId}"`);
     }
     if (dto.communeId) await this.assertCommuneExists(dto.communeId);
@@ -88,15 +90,18 @@ export class CustomersService {
     if (!entity) throw new NotFoundException('Cliente no encontrado');
 
     if (dto.taxId !== undefined) {
-      const newTaxId = normalizeRut(dto.taxId);
+      // Ronda 9 — taxId puede ser null (limpia el RUT) o un string válido.
+      const newTaxId = dto.taxId ? normalizeRut(dto.taxId) : null;
       if (newTaxId !== entity.taxId) {
-        const dup = await this.repo.findOne({
-          where: { taxId: newTaxId, id: Not(id) },
-        });
-        if (dup) {
-          throw new ConflictException(
-            `Ya existe un cliente con RUT "${newTaxId}"`,
-          );
+        if (newTaxId) {
+          const dup = await this.repo.findOne({
+            where: { taxId: newTaxId, id: Not(id) },
+          });
+          if (dup) {
+            throw new ConflictException(
+              `Ya existe un cliente con RUT "${newTaxId}"`,
+            );
+          }
         }
         entity.taxId = newTaxId;
       }

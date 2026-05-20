@@ -1,12 +1,19 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Paperclip, Trash2, Upload } from 'lucide-react';
+import {
+  ArrowLeft,
+  Paperclip,
+  RotateCcw,
+  Trash2,
+  Upload,
+} from 'lucide-react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import { useRef, useState } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import { SupplierReturnDialog } from '@/components/forms/supplier-return-dialog';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -43,6 +50,14 @@ export default function CompraDetailPage() {
   const qc = useQueryClient();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
+  // Ronda 11 — dialog para devolución a proveedor. Soporta apertura via
+  // query param `?return=1` para ops rápidas desde /devoluciones.
+  const [returnOpen, setReturnOpen] = useState(false);
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get('return') === '1') setReturnOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [deleteTarget, setDeleteTarget] = useState<{
     id: string;
     name: string;
@@ -122,7 +137,7 @@ export default function CompraDetailPage() {
             <ArrowLeft className="h-4 w-4" />
           </Link>
         </Button>
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-semibold">
             Compra del{' '}
             {new Date(p.date).toLocaleDateString('es-CL', { dateStyle: 'long' })}
@@ -132,7 +147,18 @@ export default function CompraDetailPage() {
             {p.warehouse?.name ? ` · Bodega ${p.warehouse.name}` : ''}
           </p>
         </div>
+        {/* Ronda 11 — devolución a proveedor desde el detalle de la compra. */}
+        <Button variant="outline" onClick={() => setReturnOpen(true)}>
+          <RotateCcw className="h-4 w-4" />
+          Devolver a proveedor
+        </Button>
       </div>
+
+      <SupplierReturnDialog
+        purchase={p}
+        open={returnOpen}
+        onOpenChange={setReturnOpen}
+      />
 
       {/* Items */}
       <div className="rounded-md border bg-card">

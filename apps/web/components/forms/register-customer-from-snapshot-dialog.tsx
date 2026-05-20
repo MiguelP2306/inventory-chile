@@ -123,7 +123,10 @@ export function RegisterCustomerFromSnapshotDialog({
       if (!normalizedRut) return null;
       const res = await listCustomers({ q: normalizedRut, page: 1, pageSize: 5 });
       const items = Array.isArray(res) ? res : res.items;
-      return items.find((c) => normalizeRut(c.taxId) === normalizedRut) ?? null;
+      return (
+        items.find((c) => c.taxId && normalizeRut(c.taxId) === normalizedRut) ??
+        null
+      );
     },
     enabled: open && !!normalizedRut,
     staleTime: 30_000,

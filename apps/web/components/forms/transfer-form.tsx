@@ -37,7 +37,8 @@ import type {
 
 interface ItemRow {
   productId: string;
-  sku: string;
+  // Ronda 9 — sku puede ser null (productos con SKU auto-generado).
+  sku: string | null;
   name: string;
   qty: number;
 }

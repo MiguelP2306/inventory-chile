@@ -6,7 +6,9 @@ import {
   Customer,
   DispatchNote,
   Sale,
+  SaleItem,
 } from '../database/entities';
+import { InventoryModule } from '../inventory/inventory.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { SettingsModule } from '../settings/settings.module';
 import { DispatchController } from './dispatch.controller';
@@ -14,8 +16,9 @@ import { DispatchService } from './dispatch.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([DispatchNote, Sale, Customer, Commune]),
+    TypeOrmModule.forFeature([DispatchNote, Sale, SaleItem, Customer, Commune]),
     CountersModule,
+    InventoryModule,
     NotificationsModule,
     SettingsModule,
   ],

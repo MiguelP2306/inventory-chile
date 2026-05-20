@@ -49,7 +49,7 @@ const schema = z.object({
     .string()
     .regex(/^\d+(\.\d{1,2})?$/, 'Formato 0.00')
     .refine((v) => Number(v) > 0, 'Mayor que 0'),
-  paymentMethod: z.enum(['CASH', 'TRANSFER', 'CARD']),
+  paymentMethod: z.enum(['CASH', 'TRANSFER', 'CARD_DEBIT', 'CARD_CREDIT', 'PAYMENT_LINK']),
   description: z.string().min(1, 'Descripción requerida').max(255),
   receiptUrl: z.string().nullable().optional(),
 });
@@ -217,7 +217,9 @@ export function ExpenseFormDialog({ open, expense, onClose }: Props) {
                     <SelectContent>
                       <SelectItem value="CASH">Efectivo</SelectItem>
                       <SelectItem value="TRANSFER">Transferencia</SelectItem>
-                      <SelectItem value="CARD">Tarjeta</SelectItem>
+                      <SelectItem value="CARD_DEBIT">Tarjeta de débito</SelectItem>
+                      <SelectItem value="CARD_CREDIT">Tarjeta de crédito</SelectItem>
+                      <SelectItem value="PAYMENT_LINK">Link de pago</SelectItem>
                     </SelectContent>
                   </Select>
                 )}

@@ -26,7 +26,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatCurrency } from '@/lib/format';
-import { listSales } from '@/lib/sales-api';
+import { getSalesKpis, listSales } from '@/lib/sales-api';
 import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
 import type { PaymentMethodDto, SaleStatusDto } from '@inventory/shared';
@@ -43,7 +43,10 @@ const STATUS_OPTIONS: { value: SaleStatusDto; label: string }[] = [
 const METHOD_OPTIONS: { value: PaymentMethodDto; label: string }[] = [
   { value: 'CASH', label: 'Efectivo' },
   { value: 'TRANSFER', label: 'Transferencia' },
-  { value: 'CARD', label: 'Tarjeta' },
+  // Ronda 9 — CARD se desdobló por subtipo (mismas comisiones distintas).
+  { value: 'CARD_DEBIT', label: 'Débito' },
+  { value: 'CARD_CREDIT', label: 'Crédito' },
+  { value: 'PAYMENT_LINK', label: 'Link de pago' },
 ];
 
 export default function VentasPage() {
@@ -75,6 +78,13 @@ export default function VentasPage() {
     dateFrom !== '' ||
     dateTo !== '' ||
     search.value !== '';
+
+  // Ronda 12 — KPIs del mes actual + top productos/clientes. Se cargan
+  // arriba de la tabla, independientes de los filtros del listado.
+  const kpis = useQuery({
+    queryKey: ['sales', 'kpis'],
+    queryFn: () => getSalesKpis(),
+  });
 
   const list = useQuery({
     queryKey: [
@@ -128,6 +138,147 @@ export default function VentasPage() {
           </Button>
         </div>
       </div>
+
+      {/* Ronda 12 — KPIs del mes actual. 4 cards arriba. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <KpiCard
+          label="Vendido este mes"
+          value={
+            kpis.data ? formatCurrency(kpis.data.totalAmount) : 'Cargando…'
+          }
+          hint={kpis.data ? `${kpis.data.count} venta(s)` : ''}
+        />
+        <KpiCard
+          label="Promedio por venta"
+          value={
+            kpis.data ? formatCurrency(kpis.data.averageAmount) : 'Cargando…'
+          }
+          hint="Mes actual"
+        />
+        <KpiCard
+          label="Vendido hoy"
+          value={
+            kpis.data ? formatCurrency(kpis.data.todayAmount) : 'Cargando…'
+          }
+          hint={kpis.data ? `${kpis.data.todayCount} venta(s) hoy` : ''}
+        />
+        <KpiCard
+          label="Última venta"
+          value={
+            kpis.data?.lastSale
+              ? formatCurrency(kpis.data.lastSale.total)
+              : 'Sin ventas'
+          }
+          hint={
+            kpis.data?.lastSale
+              ? `${kpis.data.lastSale.customerName} · ${new Date(
+                  kpis.data.lastSale.date,
+                ).toLocaleDateString('es-CL')}`
+              : ''
+          }
+        />
+      </div>
+
+      {/* Ronda 12 — Top productos y clientes del mes. */}
+      {kpis.data &&
+        (kpis.data.topProducts.length > 0 ||
+          kpis.data.topCustomers.length > 0) && (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="rounded-md border bg-card">
+              <div className="border-b p-3">
+                <h2 className="text-sm font-medium">
+                  Top productos vendidos del mes
+                </h2>
+              </div>
+              {kpis.data.topProducts.length === 0 ? (
+                <div className="p-4 text-center text-sm text-muted-foreground">
+                  Sin ventas en el período.
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Producto</TableHead>
+                      <TableHead className="text-right">Unidades</TableHead>
+                      <TableHead className="text-right">Monto</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {kpis.data.topProducts.map((p) => (
+                      <TableRow key={p.productId}>
+                        <TableCell>
+                          <Link
+                            href={`/productos/${p.productId}`}
+                            className="hover:underline"
+                          >
+                            <div className="text-sm font-medium">{p.name}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {p.sku ?? '—'}
+                            </div>
+                          </Link>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {p.qty}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums font-medium">
+                          {formatCurrency(p.totalAmount)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+
+            <div className="rounded-md border bg-card">
+              <div className="border-b p-3">
+                <h2 className="text-sm font-medium">
+                  Top clientes frecuentes del mes
+                </h2>
+              </div>
+              {kpis.data.topCustomers.length === 0 ? (
+                <div className="p-4 text-center text-sm text-muted-foreground">
+                  Sin ventas en el período.
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Cliente</TableHead>
+                      <TableHead className="text-right">Ventas</TableHead>
+                      <TableHead className="text-right">Monto total</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {kpis.data.topCustomers.map((c) => (
+                      <TableRow key={c.customerId}>
+                        <TableCell>
+                          <Link
+                            href={`/clientes/${c.customerId}`}
+                            className="hover:underline"
+                          >
+                            <div className="text-sm font-medium">
+                              {c.customerName}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {c.customerTaxId ?? 'sin RUT'}
+                            </div>
+                          </Link>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {c.salesCount}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums font-medium">
+                          {formatCurrency(c.totalAmount)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          </div>
+        )}
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
         <Input
@@ -300,6 +451,28 @@ export default function VentasPage() {
           qc.invalidateQueries({ queryKey: ['sales'] });
         }}
       />
+    </div>
+  );
+}
+
+function KpiCard({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}) {
+  return (
+    <div className="rounded-md border bg-card p-4">
+      <div className="text-xs uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-1 text-xl font-semibold tabular-nums">{value}</div>
+      {hint && (
+        <div className="mt-1 text-xs text-muted-foreground">{hint}</div>
+      )}
     </div>
   );
 }

@@ -1,5 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { BrandsModule } from '../brands/brands.module';
+import { CategoriesModule } from '../categories/categories.module';
+import { CountersModule } from '../common/counters.module';
 import {
   Product,
   ProductCode,
@@ -7,6 +10,8 @@ import {
   VehicleFitment,
   VehicleModel,
 } from '../database/entities';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { SettingsModule } from '../settings/settings.module';
 import { ProductsController } from './products.controller';
 import { ProductsService } from './products.service';
 
@@ -19,6 +24,11 @@ import { ProductsService } from './products.service';
       VehicleFitment,
       VehicleModel,
     ]),
+    CountersModule,
+    CategoriesModule,
+    BrandsModule,
+    NotificationsModule,
+    SettingsModule,
   ],
   controllers: [ProductsController],
   providers: [ProductsService],

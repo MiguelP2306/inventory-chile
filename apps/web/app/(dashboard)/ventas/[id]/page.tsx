@@ -13,11 +13,12 @@ import {
   Truck,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import { useState } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { CancelSaleDialog } from '@/components/forms/cancel-sale-dialog';
 import { CustomerReturnDialog } from '@/components/forms/customer-return-dialog';
 import { GenerateDispatchDialog } from '@/components/forms/generate-dispatch-dialog';
+import { MultiWarrantyDialog } from '@/components/forms/multi-warranty-dialog';
 import { OpenWarrantyDialog } from '@/components/forms/open-warranty-dialog';
 import { SaleStatusBadge } from '@/components/sale-status-badge';
 import { Button } from '@/components/ui/button';
@@ -43,7 +44,9 @@ import { getSale, getSalePdfUrl } from '@/lib/sales-api';
 const METHOD_LABELS: Record<string, string> = {
   CASH: 'Efectivo',
   TRANSFER: 'Transferencia',
-  CARD: 'Tarjeta',
+  CARD_DEBIT: 'Débito',
+  CARD_CREDIT: 'Crédito',
+  PAYMENT_LINK: 'Link de pago',
 };
 
 export default function VentaDetailPage() {
@@ -52,6 +55,20 @@ export default function VentaDetailPage() {
   const [cancelOpen, setCancelOpen] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
   const [dispatchOpen, setDispatchOpen] = useState(false);
+  // Ronda 9 — dialog multi-item para garantías.
+  const [multiWarrantyOpen, setMultiWarrantyOpen] = useState(false);
+
+  // Ronda 9 — query params para ops rápidas. Cuando la pantalla se abre
+  // con `?return=1` / `?warranty=1` / `?dispatch=1`, dispara el dialog
+  // correspondiente automáticamente (lo usan los botones "Nueva ..." de
+  // los listados de /devoluciones, /garantias, /guias).
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get('return') === '1') setReturnOpen(true);
+    if (searchParams.get('warranty') === '1') setMultiWarrantyOpen(true);
+    if (searchParams.get('dispatch') === '1') setDispatchOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [warrantyTargetItemId, setWarrantyTargetItemId] = useState<string | null>(
     null,
   );
@@ -128,13 +145,22 @@ export default function VentaDetailPage() {
                 <RotateCcw className="h-4 w-4" />
                 Crear devolución
               </Button>
+              {/* Ronda 9 — botón visible para garantías (antes era ícono
+                  pequeño en cada fila). Abre dialog multi-item. */}
+              <Button
+                variant="outline"
+                onClick={() => setMultiWarrantyOpen(true)}
+              >
+                <ShieldAlert className="h-4 w-4" />
+                Crear garantía
+              </Button>
               <Button
                 variant="outline"
                 onClick={() => setCancelOpen(true)}
                 className="text-destructive hover:text-destructive"
               >
                 <Ban className="h-4 w-4" />
-                Cancelar venta
+                Venta a nota crédito
               </Button>
             </>
           )}
@@ -263,7 +289,6 @@ export default function VentaDetailPage() {
               <TableHead className="text-right">P. Unit (bruto)</TableHead>
               <TableHead className="text-right">Desc.</TableHead>
               <TableHead className="text-right">Subtotal</TableHead>
-              <TableHead className="w-[60px]" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -288,18 +313,6 @@ export default function VentaDetailPage() {
                 </TableCell>
                 <TableCell className="text-right tabular-nums font-medium">
                   {formatCurrency(it.subtotal)}
-                </TableCell>
-                <TableCell className="text-right">
-                  {canCancel && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      title="Abrir reclamo de garantía"
-                      onClick={() => setWarrantyTargetItemId(it.id)}
-                    >
-                      <ShieldAlert className="h-4 w-4" />
-                    </Button>
-                  )}
                 </TableCell>
               </TableRow>
             ))}
@@ -346,6 +359,13 @@ export default function VentaDetailPage() {
         sale={s}
         open={dispatchOpen}
         onOpenChange={setDispatchOpen}
+      />
+
+      {/* Ronda 9 — dialog primario para abrir garantías. */}
+      <MultiWarrantyDialog
+        sale={s}
+        open={multiWarrantyOpen}
+        onOpenChange={setMultiWarrantyOpen}
       />
 
       {warrantyTargetItemId &&

@@ -8,9 +8,12 @@ import type {
   SaleDto,
   SaleStatusDto,
 } from '@inventory/shared';
+import { readFile } from 'fs/promises';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { join } from 'path';
 import { CompanySettings } from '../database/entities';
+import { UPLOADS_ROOT } from '../uploads/upload-config';
 
 export type PdfFormat = 'letter' | 'thermal80';
 
@@ -846,6 +849,214 @@ export class PdfService {
     const arrayBuffer = doc.output('arraybuffer');
     return Buffer.from(arrayBuffer);
   }
+
+  /**
+   * Ronda 10 — genera el catálogo de productos en PDF. Una página de
+   * portada con datos de la empresa y filtros aplicados; luego cards
+   * de productos (4 por página en A4, layout 2 columnas × 2 filas) con
+   * imagen + nombre + datos. Los productos sin foto muestran un
+   * placeholder con un ícono.
+   */
+  async generateCatalog(input: CatalogPdfInput): Promise<Buffer> {
+    const doc = new jsPDF({ unit: 'pt', format: 'letter' });
+    const widthPt = doc.internal.pageSize.getWidth();
+    const heightPt = doc.internal.pageSize.getHeight();
+    const margin = 40;
+
+    // ----- Cabecera de portada -----
+    if (input.company.logoUrl) {
+      try {
+        const dataUrl = await fetchAsDataUrl(input.company.logoUrl);
+        if (dataUrl) {
+          doc.addImage(dataUrl, 'PNG', margin, margin, 60, 60);
+        }
+      } catch {
+        // logo opcional — si falla seguimos sin él.
+      }
+    }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(22);
+    doc.text(input.company.name, margin + 75, margin + 25);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
+    doc.text('Catálogo de productos', margin + 75, margin + 45);
+    doc.setFontSize(9);
+    doc.setTextColor(120);
+    doc.text(
+      `Generado el ${formatDate(input.generatedAt)}`,
+      margin + 75,
+      margin + 60,
+    );
+
+    // Filtros aplicados (si los hay).
+    if (input.filterSummary) {
+      doc.setTextColor(80);
+      doc.setFontSize(9);
+      const wrapped = doc.splitTextToSize(
+        `Filtros: ${input.filterSummary}`,
+        widthPt - margin * 2,
+      );
+      doc.text(wrapped, margin, margin + 95);
+    }
+
+    // Contador de productos.
+    doc.setTextColor(80);
+    doc.setFontSize(9);
+    doc.text(
+      `${input.products.length} producto${input.products.length === 1 ? '' : 's'}`,
+      margin,
+      margin + 115,
+    );
+    doc.setTextColor(0);
+
+    // Si no hay productos, terminamos en la portada con un mensaje.
+    if (input.products.length === 0) {
+      doc.setFontSize(12);
+      doc.text(
+        'No hay productos para los filtros aplicados.',
+        margin,
+        margin + 150,
+      );
+      const arrayBuffer = doc.output('arraybuffer');
+      return Buffer.from(arrayBuffer);
+    }
+
+    // ----- Cards de productos: 2 columnas × 2 filas por página -----
+    // El layout es uniforme: cada card mide (ancho-2margen)/2 - gap × altura fija.
+    const cols = 2;
+    const rows = 2;
+    const gap = 16;
+    const cardWidth = (widthPt - margin * 2 - gap * (cols - 1)) / cols;
+    const cardHeight = (heightPt - (margin + 150) - margin - gap) / rows;
+    const startY = margin + 150;
+    let pageIndex = 0;
+
+    for (let i = 0; i < input.products.length; i++) {
+      const p = input.products[i]!;
+      const idxOnPage = i % (cols * rows);
+      if (idxOnPage === 0 && i > 0) {
+        doc.addPage();
+        pageIndex += 1;
+      }
+      const col = idxOnPage % cols;
+      const row = Math.floor(idxOnPage / cols);
+      const x = margin + col * (cardWidth + gap);
+      // En páginas siguientes a la portada usamos todo el alto disponible.
+      const cardStartY =
+        pageIndex === 0 ? startY : margin;
+      const cardHeightActual =
+        pageIndex === 0
+          ? cardHeight
+          : (heightPt - margin * 2 - gap) / rows;
+      const y = cardStartY + row * (cardHeightActual + gap);
+
+      // Marco de la card.
+      doc.setDrawColor(220);
+      doc.setLineWidth(0.5);
+      doc.rect(x, y, cardWidth, cardHeightActual);
+
+      // Imagen del producto (cover) ocupando ~1/3 vertical izquierdo.
+      const imgSize = Math.min(cardHeightActual - 20, 100);
+      const imgX = x + 10;
+      const imgY = y + 10;
+      if (p.coverUrl) {
+        try {
+          const dataUrl = await fetchAsDataUrl(p.coverUrl);
+          if (dataUrl) {
+            // Ronda 12 — detectar el format real del data URL en vez de
+            // asumir JPEG. PNG con header JPEG silenciaba la imagen.
+            const format = formatFromDataUrl(dataUrl);
+            doc.addImage(dataUrl, format, imgX, imgY, imgSize, imgSize);
+          } else {
+            this.drawImagePlaceholder(doc, imgX, imgY, imgSize);
+          }
+        } catch {
+          this.drawImagePlaceholder(doc, imgX, imgY, imgSize);
+        }
+      } else {
+        this.drawImagePlaceholder(doc, imgX, imgY, imgSize);
+      }
+
+      // Datos del producto a la derecha de la imagen.
+      const textX = imgX + imgSize + 12;
+      const textWidth = cardWidth - (textX - x) - 10;
+      let textY = imgY + 12;
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(0);
+      const nameLines = doc.splitTextToSize(p.name, textWidth);
+      // Tope de 2 líneas para el nombre.
+      doc.text(nameLines.slice(0, 2), textX, textY);
+      textY += 11 * Math.min(nameLines.length, 2) + 4;
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(110);
+      const meta: string[] = [];
+      if (p.sku) meta.push(`SKU: ${p.sku}`);
+      if (p.partNumber) meta.push(`Parte: ${p.partNumber}`);
+      if (meta.length) {
+        doc.text(meta.join(' · '), textX, textY);
+        textY += 11;
+      }
+      if (p.categoryPath ?? p.categoryName) {
+        doc.text(
+          `Categoría: ${p.categoryPath ?? p.categoryName!}`,
+          textX,
+          textY,
+        );
+        textY += 11;
+      }
+      if (p.brandName) {
+        doc.text(`Marca: ${p.brandName}`, textX, textY);
+        textY += 11;
+      }
+      doc.text(
+        `Tipo: ${p.productKind === 'ORIGINAL' ? 'Original' : 'Alternativo'}`,
+        textX,
+        textY,
+      );
+      textY += 11;
+
+      if (p.description) {
+        doc.setTextColor(80);
+        const wrap = doc.splitTextToSize(p.description, textWidth);
+        // Tope de 3 líneas para descripción.
+        doc.text(wrap.slice(0, 3), textX, textY);
+        textY += 9 * Math.min(wrap.length, 3) + 4;
+      }
+
+      // Precio prominente abajo del card.
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor(0);
+      const priceText = `$${formatMoney(p.price)}`;
+      doc.text(priceText, textX, y + cardHeightActual - 12);
+    }
+
+    const arrayBuffer = doc.output('arraybuffer');
+    return Buffer.from(arrayBuffer);
+  }
+
+  private drawImagePlaceholder(
+    doc: jsPDF,
+    x: number,
+    y: number,
+    size: number,
+  ): void {
+    doc.setFillColor(245, 245, 245);
+    doc.rect(x, y, size, size, 'F');
+    doc.setTextColor(180);
+    doc.setFontSize(8);
+    doc.text(
+      'sin foto',
+      x + size / 2,
+      y + size / 2,
+      { align: 'center', baseline: 'middle' },
+    );
+    doc.setTextColor(0);
+  }
 }
 
 // ============================================================
@@ -922,21 +1133,114 @@ function translatePaymentMethod(m: PaymentMethodDto): string {
       return 'Efectivo';
     case 'TRANSFER':
       return 'Transferencia';
-    case 'CARD':
-      return 'Tarjeta';
+    case 'CARD_DEBIT':
+      return 'Tarjeta de débito';
+    case 'CARD_CREDIT':
+      return 'Tarjeta de crédito';
+    case 'PAYMENT_LINK':
+      return 'Link de pago';
     default:
       return m;
   }
 }
 
+/**
+ * Carga una imagen como data URL para embeber en el PDF.
+ *
+ * Ronda 12 — soporta dos modos:
+ *  - URL absoluta (`http://`, `https://`): HTTP fetch como antes.
+ *  - URL relativa empezando con `/uploads/`: lee directo del filesystem
+ *    (`UPLOADS_ROOT + path`). Más rápido, sin red, sin depender de que
+ *    `PUBLIC_API_URL` esté configurada o de que el server pueda resolver
+ *    su propio host.
+ *
+ * Cuando `apps/api/uploads/` migre a S3/Cloudinary, las URLs en DB
+ * pasarán a ser absolutas y este helper hará HTTP fetch automáticamente.
+ */
 async function fetchAsDataUrl(url: string): Promise<string | null> {
   try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
-    const mime = res.headers.get('content-type') ?? 'image/png';
-    return `data:${mime};base64,${buf.toString('base64')}`;
+    // Caso 1 — URL absoluta. HTTP fetch.
+    if (/^https?:\/\//.test(url)) {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const buf = Buffer.from(await res.arrayBuffer());
+      const mime = res.headers.get('content-type') ?? 'image/png';
+      return `data:${mime};base64,${buf.toString('base64')}`;
+    }
+    // Caso 2 — URL relativa `/uploads/...`. Lectura directa de disco.
+    if (url.startsWith('/uploads/')) {
+      // Las URLs en DB son tipo `/uploads/products/<uuid>.<ext>`. El path
+      // físico es `UPLOADS_ROOT/products/<uuid>.<ext>` (UPLOADS_ROOT ya
+      // apunta al dir `uploads`, no incluye el segmento `/uploads`).
+      const relativePath = url.replace(/^\/uploads\//, '');
+      const filePath = join(UPLOADS_ROOT, relativePath);
+      const buf = await readFile(filePath);
+      const mime = mimeFromExt(filePath);
+      return `data:${mime};base64,${buf.toString('base64')}`;
+    }
+    return null;
   } catch {
     return null;
   }
+}
+
+/** MIME guess por extensión — usado al leer del disco (sin Content-Type). */
+function mimeFromExt(path: string): string {
+  const ext = path.toLowerCase().split('.').pop();
+  switch (ext) {
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'png':
+      return 'image/png';
+    case 'webp':
+      return 'image/webp';
+    case 'gif':
+      return 'image/gif';
+    default:
+      return 'image/png';
+  }
+}
+
+/**
+ * Ronda 12 — extrae el formato (`PNG | JPEG | WEBP`) del prefijo MIME de
+ * un data URL para pasárselo correctamente a `doc.addImage()`. Si no se
+ * reconoce, cae a `PNG` (jsPDF es más permisivo con PNG que con JPEG).
+ */
+function formatFromDataUrl(dataUrl: string): 'PNG' | 'JPEG' | 'WEBP' {
+  if (dataUrl.startsWith('data:image/jpeg') || dataUrl.startsWith('data:image/jpg'))
+    return 'JPEG';
+  if (dataUrl.startsWith('data:image/webp')) return 'WEBP';
+  return 'PNG';
+}
+
+// ============== Ronda 10 — Catálogo PDF ==============
+
+/**
+ * Línea por producto que renderiza el catálogo. El service llena estos
+ * datos a partir de los productos filtrados + sus relaciones (categoría,
+ * marca, cover image).
+ */
+export interface CatalogProductLine {
+  sku: string | null;
+  name: string;
+  partNumber: string | null;
+  description: string | null;
+  categoryName: string | null;
+  // Si la categoría tiene padre, lo concatenamos como "Padre › Hija".
+  categoryPath: string | null;
+  brandName: string | null;
+  cost: string;
+  price: string;
+  productKind: 'ORIGINAL' | 'ALTERNATIVE';
+  coverUrl: string | null;
+}
+
+export interface CatalogPdfInput {
+  company: CompanyInfo;
+  generatedAt: string;
+  // Filtros aplicados, mostrados en la cabecera para que el operador sepa
+  // qué muestra el documento.
+  filterSummary: string;
+  products: CatalogProductLine[];
 }

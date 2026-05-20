@@ -27,7 +27,9 @@ import { getReturn } from '@/lib/returns-api';
 const METHOD_LABELS: Record<string, string> = {
   CASH: 'Efectivo',
   TRANSFER: 'Transferencia',
-  CARD: 'Tarjeta',
+  CARD_DEBIT: 'Débito',
+  CARD_CREDIT: 'Crédito',
+  PAYMENT_LINK: 'Link de pago',
 };
 
 export default function DevolucionDetailPage() {

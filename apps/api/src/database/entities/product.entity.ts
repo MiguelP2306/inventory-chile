@@ -18,9 +18,13 @@ export class Product {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
+  // Ronda 9 — SKU opcional. Si el operador no carga uno, el backend genera
+  // `AUTO-AAAA-NNNNN` vía `CountersService` para garantizar unicidad. El
+  // índice único de MySQL ignora NULL — múltiples NULLs no chocan, pero ese
+  // caso no debería ocurrir porque siempre auto-asignamos al crear.
   @Index('idx_products_sku', { unique: true })
-  @Column({ type: 'varchar', length: 60 })
-  sku!: string;
+  @Column({ type: 'varchar', length: 60, nullable: true })
+  sku!: string | null;
 
   @Index('idx_products_part_number')
   @Column({ type: 'varchar', length: 80, nullable: true })

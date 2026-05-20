@@ -10,7 +10,12 @@ import {
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/types';
-import { AddInvoicesDto, CreatePurchaseEntryDto, ListPurchasesQueryDto } from './dto';
+import {
+  AddInvoicesDto,
+  CreatePurchaseEntryDto,
+  ListPurchasesQueryDto,
+  PurchasesKpisQueryDto,
+} from './dto';
 import { PurchasesService } from './purchases.service';
 
 @Controller('purchases')
@@ -20,6 +25,15 @@ export class PurchasesController {
   @Get()
   list(@Query() query: ListPurchasesQueryDto) {
     return this.svc.list(query);
+  }
+
+  /**
+   * Ronda 9 — KPIs de compras (mes actual por default). Lo consume el
+   * dashboard de `/compras` arriba de la tabla.
+   */
+  @Get('kpis')
+  kpis(@Query() query: PurchasesKpisQueryDto) {
+    return this.svc.kpis(query);
   }
 
   @Get(':id')

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
   Check,
+  ChevronDown,
   Copy,
   FileDown,
   FileText,
@@ -13,6 +14,7 @@ import {
   Printer,
   ShoppingCart,
   Trash2,
+  Truck,
   X,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -30,6 +32,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -143,6 +151,19 @@ export default function QuotationDetailPage() {
       qc.invalidateQueries({ queryKey: ['quotation', id] });
       qc.invalidateQueries({ queryKey: ['quotations'] });
       router.push(`/ventas/nueva?fromQuotation=${id}`);
+    },
+    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo convertir')),
+  });
+
+  // Ronda 9 — convert + generar guía. Llama el mismo endpoint de prefill
+  // pero pasa `generateDispatch=1` en la URL para que /ventas/nueva
+  // sepa que tras confirmar la venta hay que crear la guía.
+  const convertAndDispatchMut = useMutation({
+    mutationFn: () => convertQuotation(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['quotation', id] });
+      qc.invalidateQueries({ queryKey: ['quotations'] });
+      router.push(`/ventas/nueva?fromQuotation=${id}&generateDispatch=1`);
     },
     onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo convertir')),
   });
@@ -337,15 +358,54 @@ export default function QuotationDetailPage() {
           )}
           {q.status === 'APPROVED' && (
             <>
-              <Button
-                onClick={() => convertMut.mutate()}
-                disabled={convertMut.isPending}
-              >
-                <ShoppingCart className="h-4 w-4" />
-                {convertMut.isPending
-                  ? 'Convirtiendo...'
-                  : 'Convertir a venta'}
-              </Button>
+              {/* Ronda 9 — split button: Convertir a venta + opción
+                  "Convertir y generar guía". Si la cotización tiene items
+                  temporales (productos no del catálogo), ambas opciones
+                  se deshabilitan con tooltip explicativo. */}
+              {(() => {
+                const hasTempItems = (q.items ?? []).some(
+                  (it) => it.isTemporary,
+                );
+                const busy =
+                  convertMut.isPending || convertAndDispatchMut.isPending;
+                return (
+                  <div className="inline-flex">
+                    <Button
+                      onClick={() => convertMut.mutate()}
+                      disabled={busy || hasTempItems}
+                      title={
+                        hasTempItems
+                          ? 'Hay productos temporales. Registralos en el catálogo o quitalos antes de convertir.'
+                          : undefined
+                      }
+                      className="rounded-r-none"
+                    >
+                      <ShoppingCart className="h-4 w-4" />
+                      {busy ? 'Procesando...' : 'Convertir a venta'}
+                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          disabled={busy || hasTempItems}
+                          className="rounded-l-none border-l border-primary-foreground/20 px-2"
+                          title="Más opciones"
+                        >
+                          <ChevronDown className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onClick={() => convertAndDispatchMut.mutate()}
+                          disabled={busy || hasTempItems}
+                        >
+                          <Truck className="mr-2 h-4 w-4" />
+                          Convertir y generar guía
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                );
+              })()}
               <Button
                 variant="outline"
                 onClick={() => setRejectOpen(true)}

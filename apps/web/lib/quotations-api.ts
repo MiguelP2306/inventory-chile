@@ -10,7 +10,12 @@ import type {
 import { api } from './api';
 
 export interface CreateQuotationItemInput {
-  productId: string;
+  // Ronda 9 — productId opcional para soportar productos temporales creados
+  // al vuelo desde el ProductPicker.
+  productId?: string | null;
+  tempProductName?: string | null;
+  tempProductSku?: string | null;
+  tempProductPartNumber?: string | null;
   qty: number;
   unitPrice: string;
   discount?: string;

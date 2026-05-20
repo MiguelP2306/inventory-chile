@@ -71,9 +71,14 @@ const compatibleCodeSchema = z.object({
 
 const schema = z
   .object({
-    sku: z.string().min(1, 'SKU obligatorio').max(60),
+    // Ronda 9 — SKU es opcional. Si llega vacío, el backend auto-genera
+    // `AUTO-AAAA-NNNNN`. Los obligatorios pasaron a `name` y `partNumber`.
+    sku: z.string().max(60).optional().or(z.literal('')),
     name: z.string().min(1, 'Nombre obligatorio').max(200),
-    partNumber: z.string().max(80).optional().or(z.literal('')),
+    partNumber: z
+      .string()
+      .min(1, 'Número de parte obligatorio')
+      .max(80),
     barcode: z.string().max(80).optional().or(z.literal('')),
     universalCode: z.string().max(80).optional().or(z.literal('')),
     productKind: z.enum(['ORIGINAL', 'ALTERNATIVE']),
@@ -163,7 +168,10 @@ export function ProductForm({ product }: Props) {
   // Solo se usa en modo "nuevo": archivos cargados antes de que exista el productId.
   const [pendingImages, setPendingImages] = useState<File[]>([]);
 
-  const categories = useQuery({ queryKey: ['categories'], queryFn: listCategories });
+  const categories = useQuery({
+    queryKey: ['categories'],
+    queryFn: () => listCategories(),
+  });
   const brands = useQuery({ queryKey: ['brands'], queryFn: listBrands });
   const makes = useQuery({ queryKey: ['vehicle-makes'], queryFn: listVehicleMakes });
   const models = useQuery({ queryKey: ['vehicle-models'], queryFn: () => listVehicleModels() });
@@ -253,9 +261,10 @@ export function ProductForm({ product }: Props) {
   function onSubmit(values: FormValues) {
     if (mut.isPending) return;
     const input: ProductInput = {
-      sku: values.sku,
+      // Ronda 9 — null si el operador no cargó SKU → backend autogenera.
+      sku: values.sku?.trim() ? values.sku.trim() : null,
       name: values.name,
-      partNumber: values.partNumber || null,
+      partNumber: values.partNumber,
       barcode: values.barcode || null,
       universalCode: values.universalCode || null,
       productKind: values.productKind,
@@ -362,13 +371,17 @@ export function ProductForm({ product }: Props) {
         {/* DATOS */}
         <TabsContent value="datos" className="space-y-4 rounded-md border bg-card p-6">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Field label="SKU" error={errors.sku?.message}>
-              <Input {...form.register('sku')} placeholder="ej: BUJ-001" />
+            <Field
+              label="SKU"
+              error={errors.sku?.message}
+              hint="Opcional — se autogenera (AUTO-AAAA-NNNNN) si lo dejás vacío."
+            >
+              <Input {...form.register('sku')} placeholder="ej: BUJ-001 (opcional)" />
             </Field>
-            <Field label="Nombre" error={errors.name?.message}>
+            <Field label="Nombre *" error={errors.name?.message}>
               <Input {...form.register('name')} placeholder="ej: Bujía iridio NGK" />
             </Field>
-            <Field label="Número de parte" error={errors.partNumber?.message}>
+            <Field label="Número de parte *" error={errors.partNumber?.message}>
               <Input {...form.register('partNumber')} placeholder="ej: IFR6T11" />
             </Field>
             <Field label="Código de barras" error={errors.barcode?.message}>
@@ -406,9 +419,34 @@ export function ProductForm({ product }: Props) {
                     <SelectTrigger><SelectValue placeholder="Sin categoría" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value={NULL_OPTION}>Sin categoría</SelectItem>
-                      {categories.data?.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                      ))}
+                      {/* Ronda 10 — render jerárquico: cada padre con sus
+                          hijas indentadas debajo. Si el listado no trae
+                          parent/hijas, cae a la lista plana original. */}
+                      {(() => {
+                        const all = categories.data ?? [];
+                        const roots = all.filter((c) => c.parentId == null);
+                        const childrenByParent = new Map<string, typeof all>();
+                        for (const c of all) {
+                          if (!c.parentId) continue;
+                          const arr = childrenByParent.get(c.parentId) ?? [];
+                          arr.push(c);
+                          childrenByParent.set(c.parentId, arr);
+                        }
+                        return roots.map((r) => [
+                          <SelectItem key={r.id} value={r.id}>
+                            {r.name}
+                          </SelectItem>,
+                          ...(childrenByParent.get(r.id) ?? []).map((child) => (
+                            <SelectItem
+                              key={child.id}
+                              value={child.id}
+                              className="pl-8"
+                            >
+                              {r.name} › {child.name}
+                            </SelectItem>
+                          )),
+                        ]);
+                      })()}
                     </SelectContent>
                   </Select>
                 )}
@@ -831,16 +869,21 @@ function PendingImagesUploader({
 function Field({
   label,
   error,
+  hint,
   children,
 }: {
   label: string;
   error?: string;
+  hint?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="space-y-2">
       <Label>{label}</Label>
       {children}
+      {hint && !error && (
+        <p className="text-xs text-muted-foreground">{hint}</p>
+      )}
       {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );

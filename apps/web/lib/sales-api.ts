@@ -6,6 +6,7 @@ import type {
   PaginatedResult,
   PaymentMethodDto,
   SaleDto,
+  SalesKpisDto,
   SaleStatusDto,
 } from '@inventory/shared';
 import { api } from './api';
@@ -77,3 +78,11 @@ function apiBase(): string {
 export function getSalePdfUrl(id: string, format: PdfFormat = 'letter'): string {
   return `${apiBase()}/sales/${id}/pdf?format=${format}`;
 }
+
+// Ronda 12 — KPIs de ventas para los cards arriba de la lista.
+export interface SalesKpisParams {
+  dateFrom?: string;
+  dateTo?: string;
+}
+export const getSalesKpis = (params: SalesKpisParams = {}) =>
+  api.get<SalesKpisDto>('/sales/kpis', { params }).then((r) => r.data);

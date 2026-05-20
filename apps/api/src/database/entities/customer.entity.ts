@@ -20,10 +20,13 @@ export class Customer {
   @Column({ type: 'varchar', length: 180 })
   name!: string;
 
-  // RUT obligatorio y único. Se persiste normalizado: `12345678-9` sin puntos.
+  // Ronda 9 — RUT opcional para soportar clientes "lite" registrados sólo
+  // con WhatsApp. La unicidad sigue vigente (MySQL ignora NULLs en índices
+  // únicos). `SalesService.create` valida que el cliente tenga RUT antes
+  // de facturar — sin RUT se puede cotizar pero no vender.
   @Index('idx_customers_taxid', { unique: true })
-  @Column({ type: 'varchar', length: 60 })
-  taxId!: string;
+  @Column({ type: 'varchar', length: 60, nullable: true })
+  taxId!: string | null;
 
   @Column({ type: 'varchar', length: 180, nullable: true })
   email!: string | null;
