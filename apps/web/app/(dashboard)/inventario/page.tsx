@@ -28,7 +28,11 @@ import {
 } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
 import { apiAbsoluteUrl } from '@/lib/api';
-import { apiErrorMessage, publicImageUrl } from '@/lib/catalog-api';
+import {
+  apiErrorMessage,
+  listProducts,
+  publicImageUrl,
+} from '@/lib/catalog-api';
 import { listStockPaginated, setStockLocation } from '@/lib/inventory-api';
 import { cn } from '@/lib/utils';
 import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
@@ -111,6 +115,23 @@ export default function InventarioPage() {
   const items = stock.data?.items ?? [];
   const total = stock.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  // El endpoint `/inventory/stock` no devuelve `coverUrl` en el producto.
+  // Lo resolvemos fetcheando `/products` (que sí lo expone vía product_images)
+  // y armando un map en memoria. Cacheado por react-query — una sola request
+  // por sesión, compartida entre páginas del paginador y cambios de bodega.
+  const productsForCovers = useQuery({
+    queryKey: ['products', 'covers'],
+    queryFn: () => listProducts({ pageSize: 1000 }),
+    staleTime: 5 * 60 * 1000,
+  });
+  const coverByProductId = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const p of productsForCovers.data?.items ?? []) {
+      map.set(p.id, p.coverUrl ?? null);
+    }
+    return map;
+  }, [productsForCovers.data]);
 
   // Contadores por estado dentro de la página actual.
   const counts = items.reduce(
@@ -311,12 +332,9 @@ export default function InventarioPage() {
 
         {!stock.isLoading &&
           items.map((row) => {
-            const product = row.product as StockSummary['product'] & {
-              coverUrl?: string | null;
-              barcode?: string | null;
-            };
-            const cover = publicImageUrl(product.coverUrl ?? null);
-            const barcode = product.barcode ?? null;
+            const product = row.product;
+            const cover = publicImageUrl(coverByProductId.get(product.id) ?? null);
+            const barcode = product.barcode;
             return (
               <div
                 key={product.id}

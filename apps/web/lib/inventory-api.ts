@@ -1,6 +1,7 @@
 // Helpers tipados sobre axios para Inventory + Suppliers + Purchases.
 
 import type {
+  MovementCardDto,
   MovementDto,
   PaginatedResult,
   PurchaseEntryDto,
@@ -84,6 +85,30 @@ export interface ListMovementsParams {
 export const listMovements = (params: ListMovementsParams = {}) =>
   api
     .get<PaginatedResult<MovementDto>>('/inventory/movements', { params })
+    .then((r) => r.data);
+
+// Ronda 13 — listado de movimientos agrupados por transacción (refId) y
+// joineados con la entidad padre. Cada item es una "card" (venta, compra,
+// devolución, transferencia, despacho o ajuste) lista para renderizar.
+export interface ListMovementCardsParams {
+  productId?: string;
+  warehouseId?: string;
+  type?: MovementDto['type'];
+  dateFrom?: string;
+  dateTo?: string;
+  q?: string;
+  userId?: string;
+  customerId?: string;
+  supplierId?: string;
+  // 'active' = solo no canceladas; 'cancelled' = solo canceladas; undefined = todas.
+  status?: 'active' | 'cancelled';
+  page?: number;
+  pageSize?: number;
+}
+
+export const listMovementCards = (params: ListMovementCardsParams = {}) =>
+  api
+    .get<PaginatedResult<MovementCardDto>>('/inventory/movements/cards', { params })
     .then((r) => r.data);
 
 export interface AdjustInput {

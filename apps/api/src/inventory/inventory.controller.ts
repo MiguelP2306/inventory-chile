@@ -6,6 +6,7 @@ import { CategoriesService } from '../categories/categories.service';
 import { WarehousesService } from '../warehouses/warehouses.service';
 import {
   AdjustStockDto,
+  ListMovementCardsQueryDto,
   ListMovementsQueryDto,
   ListStockQueryDto,
   SetLocationCodeDto,
@@ -129,6 +130,14 @@ export class InventoryController {
   @Get('movements')
   listMovements(@Query() query: ListMovementsQueryDto) {
     return this.svc.listMovements(query);
+  }
+
+  // Ronda 13 — listado de movimientos agrupados por transacción para la vista
+  // de cards en /inventario/movimientos. Cada item del response es una "card"
+  // ya joineada con su entidad padre (venta, compra, devolución, etc.).
+  @Get('movements/cards')
+  listMovementCards(@Query() query: ListMovementCardsQueryDto) {
+    return this.svc.listMovementCards(query);
   }
 
   @Post('adjust')

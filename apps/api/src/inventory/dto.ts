@@ -100,6 +100,72 @@ export class ListStockQueryDto {
   pageSize?: number;
 }
 
+// Ronda 13 — filtros del endpoint /inventory/movements/cards. Acepta los
+// mismos que /movements + búsqueda libre, userId y filtros por cliente o
+// proveedor. La paginación es a nivel de GRUPO (no de movimiento atómico):
+// `pageSize=20` devuelve hasta 20 cards.
+export class ListMovementCardsQueryDto {
+  @IsOptional()
+  @IsUUID()
+  productId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  warehouseId?: string;
+
+  @IsOptional()
+  @IsEnum(InventoryMovementType)
+  type?: InventoryMovementType;
+
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
+
+  @IsOptional()
+  @IsString()
+  q?: string;
+
+  @IsOptional()
+  @IsUUID()
+  userId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  customerId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  supplierId?: string;
+
+  // Filtro por estado de la transacción padre:
+  //  - 'active'    → solo transacciones no canceladas (Sale.status != CANCELLED,
+  //                  Return.status = COMPLETED, Transfer.status = COMPLETED,
+  //                  DispatchNote.status = ACTIVE). Los ajustes y compras
+  //                  siempre cuentan como activos (no tienen estado cancelable).
+  //  - 'cancelled' → solo las canceladas/anuladas.
+  //  - undefined   → todos (default).
+  @IsOptional()
+  @IsEnum(['active', 'cancelled'] as const)
+  status?: 'active' | 'cancelled';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  pageSize?: number;
+}
+
 export class SetLocationCodeDto {
   @IsUUID()
   productId!: string;

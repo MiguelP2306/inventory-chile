@@ -1,446 +1,551 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight } from 'lucide-react';
-import { useMemo, useState } from 'react';
-import { Badge } from '@/components/ui/badge';
+import {
+  Calendar as CalendarIcon,
+  ChevronDown,
+  Filter as FilterIcon,
+  Package as PackageIcon,
+  Search,
+  Tag as TagIcon,
+  User as UserIcon,
+  Warehouse as WarehouseIcon,
+  X,
+} from 'lucide-react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ContactFilter, type ContactValue } from '@/components/movement-cards/contact-filter';
+import { ProductFilter, type ProductValue } from '@/components/movement-cards/product-filter';
+import { MovementCard } from '@/components/movement-cards';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { formatCurrency } from '@/lib/format';
-import { listMovements } from '@/lib/inventory-api';
+import { getProduct } from '@/lib/catalog-api';
+import { getCustomer } from '@/lib/customers-api';
+import { getSupplier, listMovementCards } from '@/lib/inventory-api';
+import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
-import type { MovementDto } from '@inventory/shared';
+import { cn } from '@/lib/utils';
+import { listWarehouses } from '@/lib/warehouses-api';
+import type { MovementDto, WarehouseDto } from '@inventory/shared';
 
 const ALL = '__all__';
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 20;
 
 const MOVEMENT_TYPES: Array<{ value: MovementDto['type']; label: string }> = [
   { value: 'PURCHASE_IN', label: 'Compra' },
   { value: 'SALE_OUT', label: 'Venta' },
-  { value: 'ADJUSTMENT', label: 'Ajuste' },
-  { value: 'RETURN_IN', label: 'Devolución entrada' },
-  { value: 'RETURN_OUT', label: 'Devolución salida' },
-  { value: 'RETURN_IN_DAMAGED', label: 'Devolución dañada (sin stock)' },
+  { value: 'ADJUSTMENT', label: 'Ajuste manual' },
+  { value: 'RETURN_IN', label: 'Devolución (entrada)' },
+  { value: 'RETURN_OUT', label: 'Devolución (salida)' },
+  { value: 'RETURN_IN_DAMAGED', label: 'Dev. dañada (auditoría)' },
   { value: 'RETURN_DAMAGED_CANCELLED', label: 'Dev. dañada cancelada (auditoría)' },
   { value: 'TRANSFER_OUT', label: 'Transferencia salida' },
   { value: 'TRANSFER_IN', label: 'Transferencia entrada' },
-  { value: 'DISPATCH_OUT', label: 'Guía despacho generada (auditoría)' },
-  { value: 'DISPATCH_VOIDED', label: 'Guía despacho anulada (auditoría)' },
+  { value: 'DISPATCH_OUT', label: 'Guía despacho (auditoría)' },
+  { value: 'DISPATCH_VOIDED', label: 'Guía anulada (auditoría)' },
 ];
 
+type StatusFilter = '' | 'active' | 'cancelled';
+
+/**
+ * Movimientos de inventario — diseño N2 Smart Filters.
+ *
+ * UI nueva:
+ *  · Search prominente + filtros como chips compactos en una sola toolbar.
+ *  · Barra de "Filtros activos" con tags removibles individualmente.
+ *  · Status toggle (Todos / Activos / Cancelados) a la derecha.
+ *  · Cards intactas (MovementCard) — preservan toda la lógica de Ronda 13.
+ *
+ * Lógica original preservada 1:1:
+ *  · useUrlFilters con los mismos 10 keys (type, warehouseId, dateFrom, dateTo,
+ *    q, customerId, supplierId, productId, status, page).
+ *  · useDebouncedUrlFilter para el search.
+ *  · Hidratación de contacto/producto desde URL con useQuery + enabled.
+ *  · Limpieza automática de IDs fantasma si el GET devuelve 404.
+ *  · listMovementCards con todos los filtros.
+ *  · Reglas customerId/supplierId mutuamente excluyentes.
+ */
 export default function MovimientosPage() {
-  const { values, setFilter, clear } = useUrlFilters({
+  const filters = useUrlFilters({
     type: '',
+    warehouseId: '',
     dateFrom: '',
     dateTo: '',
-    view: '',
+    q: '',
+    customerId: '',
+    supplierId: '',
+    productId: '',
+    status: '',
     page: '',
   });
+  const { values, setFilter, setFilters, clear } = filters;
+  const { value: qLocal, setValue: setQ } = useDebouncedUrlFilter(filters, 'q', {
+    resetKeys: ['page'],
+  });
   const type = values.type || ALL;
+  const warehouseId = values.warehouseId || ALL;
   const dateFrom = values.dateFrom ?? '';
   const dateTo = values.dateTo ?? '';
+  const customerId = values.customerId || '';
+  const supplierId = values.supplierId || '';
+  const productId = values.productId || '';
+  const status = (values.status || '') as StatusFilter;
   const page = Number(values.page || '1');
-  // Ronda 9 — modo de visualización: 'grouped' (default) agrupa por refId,
-  // 'flat' muestra todas las filas individuales como antes.
-  const view = (values.view as 'grouped' | 'flat') || 'grouped';
 
-  // Estado expandido por groupKey (refId). Set para perf y simplicidad.
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  function toggleExpanded(key: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
+  const filtersActive =
+    type !== ALL ||
+    warehouseId !== ALL ||
+    dateFrom !== '' ||
+    dateTo !== '' ||
+    qLocal.trim() !== '' ||
+    customerId !== '' ||
+    supplierId !== '' ||
+    productId !== '' ||
+    status !== '';
 
-  const filtersActive = type !== ALL || dateFrom !== '' || dateTo !== '';
+  // ============================================================
+  // Hidratación de contacto / producto desde URL (preservada 1:1)
+  // ============================================================
+  const customerQuery = useQuery({
+    queryKey: ['customer', customerId],
+    queryFn: () => getCustomer(customerId),
+    enabled: !!customerId,
+    staleTime: 5 * 60_000,
+  });
+  const supplierQuery = useQuery({
+    queryKey: ['supplier', supplierId],
+    queryFn: () => getSupplier(supplierId),
+    enabled: !!supplierId,
+    staleTime: 5 * 60_000,
+  });
+  const productQuery = useQuery({
+    queryKey: ['product', productId],
+    queryFn: () => getProduct(productId),
+    enabled: !!productId,
+    staleTime: 5 * 60_000,
+  });
 
-  const movs = useQuery({
-    queryKey: ['movements', { type, dateFrom, dateTo, page }],
+  const contactValue: ContactValue | null = useMemo(() => {
+    if (customerId && customerQuery.data) {
+      return {
+        kind: 'customer',
+        id: customerQuery.data.id,
+        name: customerQuery.data.name,
+        taxId: customerQuery.data.taxId,
+      };
+    }
+    if (supplierId && supplierQuery.data) {
+      return {
+        kind: 'supplier',
+        id: supplierQuery.data.id,
+        name: supplierQuery.data.name,
+        taxId: supplierQuery.data.taxId,
+      };
+    }
+    return null;
+  }, [customerId, customerQuery.data, supplierId, supplierQuery.data]);
+
+  const productValue: ProductValue | null = useMemo(() => {
+    if (!productId || !productQuery.data) return null;
+    return {
+      id: productQuery.data.id,
+      sku: productQuery.data.sku,
+      name: productQuery.data.name,
+    };
+  }, [productId, productQuery.data]);
+
+  useEffect(() => {
+    if (customerId && customerQuery.isError) setFilter('customerId', null);
+  }, [customerId, customerQuery.isError, setFilter]);
+  useEffect(() => {
+    if (supplierId && supplierQuery.isError) setFilter('supplierId', null);
+  }, [supplierId, supplierQuery.isError, setFilter]);
+  useEffect(() => {
+    if (productId && productQuery.isError) setFilter('productId', null);
+  }, [productId, productQuery.isError, setFilter]);
+
+  const warehouses = useQuery({
+    queryKey: ['warehouses', { all: true }],
+    queryFn: () => listWarehouses({}),
+  });
+  const warehousesList: WarehouseDto[] = useMemo(() => {
+    const data = warehouses.data;
+    if (!data) return [];
+    return Array.isArray(data) ? data : data.items;
+  }, [warehouses.data]);
+
+  const cards = useQuery({
+    queryKey: [
+      'movements-cards',
+      {
+        type,
+        warehouseId,
+        dateFrom,
+        dateTo,
+        q: values.q,
+        customerId,
+        supplierId,
+        productId,
+        status,
+        page,
+      },
+    ],
     queryFn: () =>
-      listMovements({
+      listMovementCards({
         type: type === ALL ? undefined : (type as MovementDto['type']),
+        warehouseId: warehouseId === ALL ? undefined : warehouseId,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
+        q: values.q || undefined,
+        customerId: customerId || undefined,
+        supplierId: supplierId || undefined,
+        productId: productId || undefined,
+        status: status === '' ? undefined : status,
         page,
         pageSize: PAGE_SIZE,
       }),
   });
 
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil((movs.data?.total ?? 0) / PAGE_SIZE)),
-    [movs.data],
+    () => Math.max(1, Math.ceil((cards.data?.total ?? 0) / PAGE_SIZE)),
+    [cards.data],
   );
 
-  // Ronda 9 — agrupación por `refId + type stem`. Los movimientos sin
-  // refId (ajustes manuales) quedan como filas individuales. El tipo
-  // "stem" colapsa por familia: PURCHASE_IN, SALE_OUT, RETURN_IN, etc.
-  // sale.id + DISPATCH_OUT genera un grupo distinto del sale.id + SALE_OUT
-  // (para que el operador vea el despacho aparte de la venta).
-  type Group = {
-    key: string;
-    refId: string | null;
-    reference: string | null;
-    type: MovementDto['type'];
-    date: string;
-    itemCount: number;
-    qtyTotal: number;
-    items: MovementDto[];
-  };
-  const groups = useMemo<Group[]>(() => {
-    if (view !== 'grouped' || !movs.data) return [];
-    const map = new Map<string, Group>();
-    for (const m of movs.data.items) {
-      // Sin refId → grupo de 1 fila (key único por id).
-      const key = m.refId ? `${m.refId}::${m.type}` : `single::${m.id}`;
-      const existing = map.get(key);
-      if (existing) {
-        existing.itemCount += 1;
-        existing.qtyTotal += m.qty;
-        existing.items.push(m);
-      } else {
-        map.set(key, {
-          key,
-          refId: m.refId,
-          reference: m.reference,
-          type: m.type,
-          date: m.createdAt,
-          itemCount: 1,
-          qtyTotal: m.qty,
-          items: [m],
-        });
-      }
-    }
-    // Orden: por fecha desc (más reciente del grupo).
-    return Array.from(map.values()).sort((a, b) =>
-      a.date < b.date ? 1 : -1,
-    );
-  }, [view, movs.data]);
+  const selectedType = MOVEMENT_TYPES.find((t) => t.value === type);
+  const selectedWarehouse = warehousesList.find((w) => w.id === warehouseId);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold">Movimientos de inventario</h1>
-        <div className="flex items-center gap-2">
-          {/* Ronda 9 — toggle agrupada/plana. */}
-          <div className="inline-flex rounded-md border bg-card p-0.5">
-            <button
-              type="button"
-              onClick={() => setFilter('view', null)}
-              className={`px-3 py-1 text-xs ${
-                view === 'grouped'
-                  ? 'rounded-md bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              Agrupada
-            </button>
-            <button
-              type="button"
-              onClick={() => setFilter('view', 'flat')}
-              className={`px-3 py-1 text-xs ${
-                view === 'flat'
-                  ? 'rounded-md bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              Plana
-            </button>
-          </div>
-          {filtersActive && (
-            <Button variant="ghost" size="sm" onClick={clear}>
-              Limpiar filtros
-            </Button>
-          )}
+    <div className="flex flex-col gap-4">
+      {/* ============================================================
+          PAGE HEAD
+          ============================================================ */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Movimientos de inventario
+          </h1>
+          <p className="mt-1 max-w-prose text-xs text-muted-foreground">
+            Cada card muestra una transacción completa (venta, compra, devolución,
+            transferencia, ajuste o evento de auditoría).
+            {cards.data && (
+              <>
+                {' · '}
+                <strong className="font-medium tabular-nums text-foreground">
+                  {cards.data.total}
+                </strong>{' '}
+                transacciones
+              </>
+            )}
+          </p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-        <Select
-          value={type}
-          onValueChange={(v) => {
-            setFilter('type', v === ALL ? null : v);
-            setFilter('page', null);
-          }}
+      {/* ============================================================
+          SMART TOOLBAR — search + chips + status toggle
+          ============================================================ */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex h-9 min-w-[260px] max-w-[420px] flex-1 items-center gap-2 rounded-lg border bg-card px-3 transition-shadow focus-within:border-foreground/40 focus-within:ring-4 focus-within:ring-foreground/5">
+          <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <input
+            type="text"
+            value={qLocal}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Buscar por nro, cliente, proveedor o producto…"
+            className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          />
+          {qLocal && (
+            <button
+              type="button"
+              onClick={() => setQ('')}
+              className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+              aria-label="Limpiar"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
+        <div className='flex flex-col gap-2 w-full sm:flex-row'>
+          {/* Cliente o proveedor — wrap del ContactFilter para que parezca chip */}
+          <ContactFilter
+            value={contactValue}
+            onChange={(next) => {
+              if (!next) {
+                setFilters({ customerId: null, supplierId: null, page: null });
+              } else if (next.kind === 'customer') {
+                setFilters({ customerId: next.id, supplierId: null, page: null });
+              } else {
+                setFilters({ supplierId: next.id, customerId: null, page: null });
+              }
+            }}
+          />
+
+          {/* Producto — idem */}
+          <ProductFilter
+            value={productValue}
+            onChange={(next) =>
+              setFilters({ productId: next?.id ?? null, page: null })
+            }
+          />
+        </div>
+
+        {/* Tipo */}
+        <ChipPopover
+          icon={<TagIcon className="h-3.5 w-3.5" />}
+          label="Tipo"
+          value={type !== ALL ? selectedType?.label : null}
+          active={type !== ALL}
         >
-          <SelectTrigger>
-            <SelectValue placeholder="Tipo" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Todos los tipos</SelectItem>
-            {MOVEMENT_TYPES.map((t) => (
-              <SelectItem key={t.value} value={t.value}>
-                {t.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Input
-          type="date"
-          value={dateFrom}
-          onChange={(e) => {
-            setFilter('dateFrom', e.target.value || null);
-            setFilter('page', null);
-          }}
-          placeholder="Desde"
-        />
-        <Input
-          type="date"
-          value={dateTo}
-          onChange={(e) => {
-            setFilter('dateTo', e.target.value || null);
-            setFilter('page', null);
-          }}
-          placeholder="Hasta"
-        />
-      </div>
+          {(close) => (
+            <SimpleList
+              title="Tipo de movimiento"
+              current={type}
+              onClear={() => {
+                setFilter('type', null);
+                setFilter('page', null);
+                close();
+              }}
+              options={[
+                { value: ALL, label: 'Todos los tipos' },
+                ...MOVEMENT_TYPES,
+              ]}
+              onPick={(v) => {
+                setFilter('type', v === ALL ? null : v);
+                setFilter('page', null);
+                close();
+              }}
+            />
+          )}
+        </ChipPopover>
 
-      <div className="rounded-md border bg-card">
-        <Table stickyFirstColumn>
-          <TableHeader>
-            <TableRow>
-              {view === 'grouped' && <TableHead className="w-[40px]" />}
-              <TableHead>Fecha</TableHead>
-              <TableHead>Tipo</TableHead>
-              <TableHead>{view === 'grouped' ? 'Referencia' : 'Producto'}</TableHead>
-              <TableHead className="text-right">
-                {view === 'grouped' ? 'Items / Qty total' : 'Cantidad'}
-              </TableHead>
-              <TableHead className="text-right">Costo unit.</TableHead>
-              <TableHead>Origen</TableHead>
-              <TableHead>Usuario</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {movs.isLoading && (
-              <>
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <TableRow key={i}>
-                    <TableCell colSpan={view === 'grouped' ? 8 : 7}>
-                      <Skeleton className="h-4 w-full" />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </>
-            )}
-            {movs.data && movs.data.items.length === 0 && (
-              <TableRow>
-                <TableCell
-                  colSpan={view === 'grouped' ? 8 : 7}
-                  className="text-center text-muted-foreground"
-                >
-                  Sin movimientos en el período.
-                </TableCell>
-              </TableRow>
-            )}
+        {/* Bodega */}
+        <ChipPopover
+          icon={<WarehouseIcon className="h-3.5 w-3.5" />}
+          label="Bodega"
+          value={warehouseId !== ALL ? selectedWarehouse?.name ?? null : null}
+          active={warehouseId !== ALL}
+          disabled={warehousesList.length === 0}
+        >
+          {(close) => (
+            <SimpleList
+              title="Bodega"
+              current={warehouseId}
+              onClear={() => {
+                setFilter('warehouseId', null);
+                setFilter('page', null);
+                close();
+              }}
+              options={[
+                { value: ALL, label: 'Todas las bodegas' },
+                ...warehousesList.map((w) => ({ value: w.id, label: w.name })),
+              ]}
+              onPick={(v) => {
+                setFilter('warehouseId', v === ALL ? null : v);
+                setFilter('page', null);
+                close();
+              }}
+            />
+          )}
+        </ChipPopover>
 
-            {/* Vista plana — fila por movimiento como antes */}
-            {view === 'flat' &&
-              movs.data?.items.map((m) => (
-                <TableRow key={m.id}>
-                  <TableCell className="font-mono text-xs">
-                    {new Date(m.createdAt).toLocaleString('es-AR', {
-                      dateStyle: 'short',
-                      timeStyle: 'short',
-                    })}
-                  </TableCell>
-                  <TableCell>
-                    <TypeBadge type={m.type} />
-                  </TableCell>
-                  <TableCell>
-                    {m.product ? (
-                      <>
-                        <span className="font-medium">{m.product.name}</span>{' '}
-                        <span className="text-xs text-muted-foreground">
-                          {m.product.sku ?? ''}
-                        </span>
-                      </>
-                    ) : (
-                      '—'
-                    )}
-                  </TableCell>
-                  <TableCell
-                    className={`text-right tabular-nums font-medium ${
-                      m.qty < 0 ? 'text-destructive' : 'text-stock-ok'
-                    }`}
+
+        {/* Fechas — popover con 2 inputs date */}
+        <ChipPopover
+          icon={<CalendarIcon className="h-3.5 w-3.5" />}
+          label="Fechas"
+          value={
+            dateFrom || dateTo ? `${dateFrom || '…'} → ${dateTo || '…'}` : null
+          }
+          active={dateFrom !== '' || dateTo !== ''}
+        >
+          {() => (
+            <div className="space-y-3 p-1">
+              <div className="flex items-center justify-between border-b px-1 pb-2">
+                <span className="font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Rango de fechas
+                </span>
+                {(dateFrom || dateTo) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFilter('dateFrom', null);
+                      setFilter('dateTo', null);
+                      setFilter('page', null);
+                    }}
+                    className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
                   >
-                    {m.qty > 0 ? '+' : ''}
-                    {m.qty}
-                  </TableCell>
-                  <TableCell className="text-right text-muted-foreground tabular-nums">
-                    {m.unitCost ? formatCurrency(m.unitCost) : '—'}
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {m.reference ?? '—'}
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {m.user?.email ?? '—'}
-                  </TableCell>
-                </TableRow>
-              ))}
+                    Limpiar
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2 px-1">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Desde
+                  </label>
+                  <input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(e) => {
+                      setFilter('dateFrom', e.target.value || null);
+                      setFilter('page', null);
+                    }}
+                    className="h-8 w-full rounded-md border bg-card px-2 text-xs outline-none focus:border-foreground"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Hasta
+                  </label>
+                  <input
+                    type="date"
+                    value={dateTo}
+                    onChange={(e) => {
+                      setFilter('dateTo', e.target.value || null);
+                      setFilter('page', null);
+                    }}
+                    className="h-8 w-full rounded-md border bg-card px-2 text-xs outline-none focus:border-foreground"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </ChipPopover>
 
-            {/* Vista agrupada — fila padre + hijas expandibles */}
-            {view === 'grouped' &&
-              groups.map((g) => {
-                const isOpen = expanded.has(g.key);
-                const isSingleton = g.itemCount === 1 && !g.refId;
-                return (
-                  <>
-                    <TableRow
-                      key={g.key}
-                      onClick={() => !isSingleton && toggleExpanded(g.key)}
-                      className={
-                        isSingleton ? '' : 'cursor-pointer hover:bg-accent/50'
-                      }
-                    >
-                      <TableCell>
-                        {!isSingleton &&
-                          (isOpen ? (
-                            <ChevronDown className="h-4 w-4" />
-                          ) : (
-                            <ChevronRight className="h-4 w-4" />
-                          ))}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {new Date(g.date).toLocaleString('es-AR', {
-                          dateStyle: 'short',
-                          timeStyle: 'short',
-                        })}
-                      </TableCell>
-                      <TableCell>
-                        <TypeBadge type={g.type} />
-                      </TableCell>
-                      <TableCell>
-                        {isSingleton ? (
-                          g.items[0]!.product ? (
-                            <>
-                              <span className="font-medium">
-                                {g.items[0]!.product!.name}
-                              </span>{' '}
-                              <span className="text-xs text-muted-foreground">
-                                {g.items[0]!.product!.sku ?? ''}
-                              </span>
-                            </>
-                          ) : (
-                            '—'
-                          )
-                        ) : (
-                          <span className="font-mono text-sm">
-                            {g.reference ?? '—'}
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell
-                        className={`text-right tabular-nums font-medium ${
-                          g.qtyTotal < 0 ? 'text-destructive' : 'text-stock-ok'
-                        }`}
-                      >
-                        {isSingleton ? (
-                          <>
-                            {g.qtyTotal > 0 ? '+' : ''}
-                            {g.qtyTotal}
-                          </>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            {g.itemCount} item{g.itemCount === 1 ? '' : 's'} ·{' '}
-                            <span
-                              className={
-                                g.qtyTotal < 0
-                                  ? 'text-destructive'
-                                  : 'text-stock-ok'
-                              }
-                            >
-                              {g.qtyTotal > 0 ? '+' : ''}
-                              {g.qtyTotal}
-                            </span>
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right text-muted-foreground tabular-nums">
-                        {isSingleton && g.items[0]!.unitCost
-                          ? formatCurrency(g.items[0]!.unitCost!)
-                          : '—'}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {g.reference ?? '—'}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {g.items[0]!.user?.email ?? '—'}
-                      </TableCell>
-                    </TableRow>
-                    {isOpen &&
-                      !isSingleton &&
-                      g.items.map((m) => (
-                        <TableRow key={`${g.key}::${m.id}`} className="bg-muted/30">
-                          <TableCell />
-                          <TableCell className="font-mono text-xs text-muted-foreground">
-                            {new Date(m.createdAt).toLocaleTimeString('es-AR', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </TableCell>
-                          <TableCell />
-                          <TableCell>
-                            {m.product ? (
-                              <>
-                                <span className="text-sm">
-                                  {m.product.name}
-                                </span>{' '}
-                                <span className="text-xs text-muted-foreground">
-                                  {m.product.sku ?? ''}
-                                </span>
-                              </>
-                            ) : (
-                              '—'
-                            )}
-                          </TableCell>
-                          <TableCell
-                            className={`text-right tabular-nums font-medium ${
-                              m.qty < 0 ? 'text-destructive' : 'text-stock-ok'
-                            }`}
-                          >
-                            {m.qty > 0 ? '+' : ''}
-                            {m.qty}
-                          </TableCell>
-                          <TableCell className="text-right text-muted-foreground tabular-nums">
-                            {m.unitCost ? formatCurrency(m.unitCost) : '—'}
-                          </TableCell>
-                          <TableCell />
-                          <TableCell />
-                        </TableRow>
-                      ))}
-                  </>
-                );
-              })}
-          </TableBody>
-        </Table>
+        <span className="flex-1" />
+
+        {/* Status toggle (Ronda 13) — preservado */}
+        <StatusToggle
+          value={status}
+          onChange={(next) => {
+            setFilters({ status: next === '' ? null : next, page: null });
+          }}
+        />
       </div>
 
-      {movs.data && movs.data.total > 0 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>
-            {movs.data.total} movimiento{movs.data.total === 1 ? '' : 's'} · página {page} de{' '}
-            {totalPages}
+      {/* ============================================================
+          APPLIED FILTERS BAR — tags removibles individualmente
+          ============================================================ */}
+      {filtersActive && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Filtros activos
           </span>
-          <div className="flex gap-2">
+          {qLocal.trim() !== '' && (
+            <FilterTag k="Texto" v={`"${qLocal.trim()}"`} onRemove={() => setQ('')} />
+          )}
+          {type !== ALL && selectedType && (
+            <FilterTag
+              k="Tipo"
+              v={selectedType.label}
+              onRemove={() => setFilter('type', null)}
+            />
+          )}
+          {warehouseId !== ALL && selectedWarehouse && (
+            <FilterTag
+              k="Bodega"
+              v={selectedWarehouse.name}
+              onRemove={() => setFilter('warehouseId', null)}
+            />
+          )}
+          {contactValue && (
+            <FilterTag
+              k={contactValue.kind === 'customer' ? 'Cliente' : 'Proveedor'}
+              v={contactValue.name}
+              onRemove={() =>
+                setFilters({ customerId: null, supplierId: null, page: null })
+              }
+            />
+          )}
+          {productValue && (
+            <FilterTag
+              k="Producto"
+              v={productValue.sku}
+              onRemove={() => setFilter('productId', null)}
+            />
+          )}
+          {(dateFrom || dateTo) && (
+            <FilterTag
+              k="Fechas"
+              v={`${dateFrom || '…'} → ${dateTo || '…'}`}
+              onRemove={() => {
+                setFilter('dateFrom', null);
+                setFilter('dateTo', null);
+              }}
+            />
+          )}
+          {status !== '' && (
+            <FilterTag
+              k="Estado"
+              v={status === 'active' ? 'Activos' : 'Cancelados'}
+              onRemove={() => setFilter('status', null)}
+            />
+          )}
+          <button
+            type="button"
+            onClick={clear}
+            className="ml-1 text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          >
+            Limpiar todo
+          </button>
+        </div>
+      )}
+
+      {/* ============================================================
+          CARDS LIST
+          ============================================================ */}
+      <div className="flex flex-col gap-2.5">
+        {cards.isLoading && (
+          <>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} className="h-44 w-full rounded-xl" />
+            ))}
+          </>
+        )}
+        {cards.data && cards.data.items.length === 0 && (
+          <div className="rounded-xl border border-dashed bg-card p-10 text-center text-muted-foreground">
+            <p className="text-sm font-medium">Sin movimientos en el período</p>
+            <p className="mt-1 text-xs">
+              Probá ajustar los filtros o ampliar el rango de fechas.
+            </p>
+            {filtersActive && (
+              <button
+                type="button"
+                onClick={clear}
+                className="mt-3 text-xs underline-offset-2 hover:text-foreground hover:underline"
+              >
+                Limpiar todos los filtros
+              </button>
+            )}
+          </div>
+        )}
+        {cards.data &&
+          cards.data.items.map((card) => (
+            <MovementCard key={card.groupKey} card={card} />
+          ))}
+      </div>
+
+      {/* ============================================================
+          PAGER
+          ============================================================ */}
+      {cards.data && cards.data.total > 0 && (
+        <div className="flex items-center justify-between rounded-xl border bg-card px-4 py-3 text-xs text-muted-foreground shadow-sm">
+          <span>
+            Mostrando{' '}
+            <strong className="font-semibold tabular-nums text-foreground">
+              {cards.data.items.length}
+            </strong>{' '}
+            de{' '}
+            <strong className="font-semibold tabular-nums text-foreground">
+              {cards.data.total}
+            </strong>{' '}
+            · página {page} de {totalPages}
+          </span>
+          <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -452,7 +557,9 @@ export default function MovimientosPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setFilter('page', String(Math.min(totalPages, page + 1)))}
+              onClick={() =>
+                setFilter('page', String(Math.min(totalPages, page + 1)))
+              }
               disabled={page >= totalPages}
             >
               Siguiente
@@ -464,47 +571,191 @@ export default function MovimientosPage() {
   );
 }
 
-function TypeBadge({ type }: { type: MovementDto['type'] }) {
-  const map: Record<MovementDto['type'], { label: string; cls: string }> = {
-    PURCHASE_IN: { label: 'Compra', cls: 'bg-stock-ok/15 text-stock-ok' },
-    SALE_OUT: { label: 'Venta', cls: 'bg-blue-500/15 text-blue-600 dark:text-blue-300' },
-    ADJUSTMENT: { label: 'Ajuste', cls: 'bg-stock-low/15 text-stock-low' },
-    RETURN_IN: { label: 'Dev. entrada', cls: 'bg-stock-ok/15 text-stock-ok' },
-    RETURN_OUT: { label: 'Dev. salida', cls: 'bg-stock-out/15 text-stock-out' },
-    // Ronda 7 — la devolución dañada no toca stock; usamos color destructivo
-    // suave para diferenciarla visualmente de las que sí afectan inventario.
-    RETURN_IN_DAMAGED: {
-      label: 'Dev. dañada (sin stock)',
-      cls: 'bg-destructive/15 text-destructive',
-    },
-    TRANSFER_OUT: {
-      label: 'Transf. salida',
-      cls: 'bg-violet-500/15 text-violet-700 dark:text-violet-300',
-    },
-    TRANSFER_IN: {
-      label: 'Transf. entrada',
-      cls: 'bg-violet-500/15 text-violet-700 dark:text-violet-300',
-    },
-    // Ronda 8 — eventos audit-only de guía de despacho y cancelación de
-    // devoluciones dañadas. No tocan stock; los pintamos con un color
-    // neutro para distinguirlos de los movimientos "reales".
-    DISPATCH_OUT: {
-      label: 'Guía generada',
-      cls: 'bg-muted text-muted-foreground',
-    },
-    DISPATCH_VOIDED: {
-      label: 'Guía anulada',
-      cls: 'bg-muted text-muted-foreground',
-    },
-    RETURN_DAMAGED_CANCELLED: {
-      label: 'Dev. dañada cancelada',
-      cls: 'bg-muted text-muted-foreground',
-    },
-  };
-  const { label, cls } = map[type];
+/* ============================================================
+   CHIP POPOVER — pill style trigger + popover content
+   ============================================================ */
+function ChipPopover({
+  icon,
+  label,
+  value,
+  active,
+  disabled,
+  children,
+}: {
+  icon: ReactNode;
+  label: string;
+  value?: string | null;
+  active?: boolean;
+  disabled?: boolean;
+  children: (close: () => void) => ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
   return (
-    <Badge className={`border-transparent ${cls}`} variant="default">
-      {label}
-    </Badge>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          className={cn(
+            'inline-flex h-9 max-w-[260px] items-center gap-1.5 rounded-full border bg-card px-3 text-xs font-medium shadow-sm transition-colors',
+            'hover:bg-accent hover:text-foreground',
+            active &&
+            'border-foreground bg-foreground text-background hover:bg-foreground/90 hover:text-background',
+            disabled && 'cursor-not-allowed opacity-50 hover:bg-card',
+          )}
+        >
+          <span className="opacity-75">{icon}</span>
+          <span>{label}</span>
+          {value && (
+            <span
+              className={cn(
+                'ml-0.5 max-w-[140px] truncate border-l pl-2 font-medium',
+                active ? 'border-white/20' : 'border-border',
+              )}
+            >
+              {value}
+            </span>
+          )}
+          <ChevronDown className="h-3 w-3 opacity-60" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[280px] p-2">
+        {children(() => setOpen(false))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/* ============================================================
+   SIMPLE LIST — list of options with checkmark
+   ============================================================ */
+function SimpleList({
+  title,
+  options,
+  current,
+  onPick,
+  onClear,
+}: {
+  title: string;
+  options: Array<{ value: string; label: string }>;
+  current: string;
+  onPick: (v: string) => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="mb-1 flex items-center justify-between border-b px-1 pb-2">
+        <span className="font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          {title}
+        </span>
+        {current !== ALL && (
+          <button
+            type="button"
+            onClick={onClear}
+            className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            Limpiar
+          </button>
+        )}
+      </div>
+      <div className="max-h-[280px] overflow-auto">
+        {options.map((o) => {
+          const isOn = current === o.value;
+          return (
+            <button
+              key={o.value}
+              type="button"
+              onClick={() => onPick(o.value)}
+              className={cn(
+                'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent',
+                isOn && 'bg-accent text-foreground',
+              )}
+            >
+              <span
+                className={cn(
+                  'inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border',
+                  isOn
+                    ? 'border-foreground bg-foreground text-background'
+                    : 'border-border bg-card',
+                )}
+              >
+                {isOn && (
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 12l5 5 11-12" />
+                  </svg>
+                )}
+              </span>
+              <span className="flex-1 truncate">{o.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   STATUS TOGGLE (Ronda 13) — preservado de la versión original
+   ============================================================ */
+function StatusToggle({
+  value,
+  onChange,
+}: {
+  value: StatusFilter;
+  onChange: (next: StatusFilter) => void;
+}) {
+  const options: Array<{ value: StatusFilter; label: string }> = [
+    { value: '', label: 'Todos' },
+    { value: 'active', label: 'Activos' },
+    { value: 'cancelled', label: 'Cancelados' },
+  ];
+  return (
+    <div className="inline-flex h-9 items-stretch rounded-lg border bg-card p-0.5 shadow-sm">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => onChange(opt.value)}
+          className={cn(
+            'rounded-md px-3 text-xs font-medium transition-colors',
+            value === opt.value
+              ? 'bg-foreground text-background'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ============================================================
+   FILTER TAG — pill removible en la barra de filtros activos
+   ============================================================ */
+function FilterTag({
+  k,
+  v,
+  onRemove,
+}: {
+  k: string;
+  v: string;
+  onRemove: () => void;
+}) {
+  return (
+    <span className="inline-flex h-6 items-center gap-1.5 rounded-full border border-border/50 bg-muted/60 pl-2.5 pr-1 text-[11px] text-muted-foreground">
+      <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/80">
+        {k}
+      </span>
+      <span className="max-w-[140px] truncate font-medium text-foreground">{v}</span>
+      <button
+        type="button"
+        onClick={onRemove}
+        className="flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
+        aria-label={`Quitar filtro ${k}`}
+      >
+        <X className="h-2.5 w-2.5" />
+      </button>
+    </span>
   );
 }

@@ -180,6 +180,234 @@ export interface MovementDto {
   user: { id: string; name: string; email: string } | null;
 }
 
+// ---------- Movimientos en formato Card (Ronda 13) ----------
+// Endpoint `/inventory/movements/cards` agrupa filas de `inventory_movements`
+// por `refId` (o por `id` si no tiene) y devuelve cada grupo joineado con su
+// entidad padre (Sale, PurchaseEntry, Return, Transfer, DispatchNote) para
+// que el frontend muestre cards con toda la info de la transacción sin N+1.
+
+export type MovementTypeDto = MovementDto['type'];
+
+interface MovementProductSummary {
+  id: string;
+  sku: string | null;
+  name: string;
+}
+
+interface MovementWarehouseSummary {
+  id: string;
+  name: string;
+}
+
+interface MovementUserSummary {
+  id: string;
+  name: string;
+  email: string;
+}
+
+// Movimientos atómicos individuales que componen el grupo. Útil para mostrar
+// el detalle expandido (ej. cada SALE_OUT que vino de una venta).
+export interface MovementCardEntryDto {
+  movementId: string;
+  type: MovementTypeDto;
+  qty: number;
+  unitCost: string | null;
+  product: MovementProductSummary;
+  warehouse: MovementWarehouseSummary;
+  createdAt: string;
+}
+
+interface MovementCardBase {
+  // Clave del grupo: refId si existe, sino el id del movimiento singleton.
+  groupKey: string;
+  // Última fecha de los movimientos del grupo — sirve para ordenar.
+  latestAt: string;
+  user: MovementUserSummary | null;
+  movements: MovementCardEntryDto[];
+  // Suma de |qty| de todos los movimientos del grupo.
+  totalQty: number;
+  // Cantidad de líneas de producto en el grupo.
+  itemCount: number;
+  // True si la card representa un evento que no afecta stock (auditoría):
+  // DISPATCH_OUT, DISPATCH_VOIDED, RETURN_IN_DAMAGED, RETURN_DAMAGED_CANCELLED.
+  isAuditOnly: boolean;
+}
+
+export interface PurchaseMovementCardDto extends MovementCardBase {
+  kind: 'PURCHASE';
+  purchase: {
+    id: string;
+    supplier: { id: string; name: string; taxId: string | null } | null;
+    warehouse: MovementWarehouseSummary | null;
+    date: string;
+    total: string;
+    subtotal: string;
+    taxAmount: string;
+    notes: string | null;
+    invoices: Array<{
+      id: string;
+      url: string;
+      originalName: string;
+      mimeType: string;
+    }>;
+    items: Array<{
+      product: MovementProductSummary;
+      qty: number;
+      unitCost: string;
+      subtotal: string;
+    }>;
+  };
+}
+
+export interface SaleMovementCardDto extends MovementCardBase {
+  kind: 'SALE';
+  sale: {
+    id: string;
+    number: string;
+    customer: {
+      id: string;
+      name: string;
+      taxId: string | null;
+      phone: string | null;
+    } | null;
+    warehouse: MovementWarehouseSummary;
+    date: string;
+    paymentMethod:
+      | 'CASH'
+      | 'TRANSFER'
+      | 'CARD_DEBIT'
+      | 'CARD_CREDIT'
+      | 'PAYMENT_LINK';
+    status: 'PENDING' | 'PAID' | 'CANCELLED';
+    subtotal: string;
+    taxAmount: string;
+    commissionAmount: string;
+    total: string;
+    quotationId: string | null;
+    quotationNumber: string | null;
+    notes: string | null;
+    cancelledAt: string | null;
+    cancelReason: string | null;
+    items: Array<{
+      product: MovementProductSummary;
+      qty: number;
+      unitPrice: string;
+      discount: string;
+      subtotal: string;
+    }>;
+  };
+}
+
+export interface ReturnMovementCardDto extends MovementCardBase {
+  kind: 'RETURN';
+  return: {
+    id: string;
+    number: string;
+    type: 'CUSTOMER' | 'SUPPLIER';
+    customer: {
+      id: string;
+      name: string;
+      taxId: string | null;
+      phone: string | null;
+    } | null;
+    supplier: { id: string; name: string; taxId: string | null } | null;
+    saleOrigin: { id: string; number: string } | null;
+    purchaseOrigin: { id: string; date: string } | null;
+    warehouse: MovementWarehouseSummary;
+    date: string;
+    reason: string;
+    notes: string | null;
+    refundAmount: string;
+    paymentMethod:
+      | 'CASH'
+      | 'TRANSFER'
+      | 'CARD_DEBIT'
+      | 'CARD_CREDIT'
+      | 'PAYMENT_LINK';
+    refundMode: 'MONEY' | 'CREDIT' | 'EXCHANGE';
+    exchangeDifference: string;
+    status: 'COMPLETED' | 'CANCELLED';
+    cancelledAt: string | null;
+    cancelReason: string | null;
+    items: Array<{
+      product: MovementProductSummary;
+      qty: number;
+      unitPrice: string;
+      subtotal: string;
+      itemCondition: 'RESELLABLE' | 'DAMAGED';
+    }>;
+  };
+}
+
+export interface TransferMovementCardDto extends MovementCardBase {
+  kind: 'TRANSFER';
+  transfer: {
+    id: string;
+    number: string;
+    fromWarehouse: MovementWarehouseSummary;
+    toWarehouse: MovementWarehouseSummary;
+    date: string;
+    notes: string | null;
+    status: 'COMPLETED' | 'CANCELLED';
+    cancelledAt: string | null;
+    cancelReason: string | null;
+    items: Array<{
+      product: MovementProductSummary;
+      qty: number;
+      unitCost: string | null;
+    }>;
+  };
+}
+
+export interface DispatchMovementCardDto extends MovementCardBase {
+  kind: 'DISPATCH';
+  dispatch: {
+    id: string;
+    number: string;
+    sale: { id: string; number: string };
+    customer: { id: string; name: string; taxId: string | null } | null;
+    dispatchedAt: string;
+    carrier: string | null;
+    trackingNumber: string | null;
+    addressStreet: string | null;
+    addressNumber: string | null;
+    commune: { id: string; name: string; region: string } | null;
+    addressNotes: string | null;
+    notes: string | null;
+    status: 'ACTIVE' | 'VOIDED';
+    // Tipo del movimiento original (DISPATCH_OUT al generar, DISPATCH_VOIDED
+    // al anular). Permite distinguir "guía generada" de "guía anulada" como
+    // dos cards distintas aunque compartan refId.
+    eventType: 'DISPATCH_OUT' | 'DISPATCH_VOIDED';
+    voidedAt: string | null;
+    voidReason: string | null;
+  };
+}
+
+export interface AdjustmentMovementCardDto extends MovementCardBase {
+  kind: 'ADJUSTMENT';
+  // `movements` siempre tiene exactamente 1 entry para ajustes (no se agrupan).
+}
+
+// Card de fallback cuando no encontramos la entidad padre — pasa si la
+// transacción origen fue eliminada o si el `reference` no matchea ninguna
+// tabla conocida. Se muestra con un layout neutral.
+export interface OrphanMovementCardDto extends MovementCardBase {
+  kind: 'ORPHAN';
+  rawType: MovementTypeDto;
+  reference: string | null;
+  refId: string | null;
+}
+
+export type MovementCardDto =
+  | PurchaseMovementCardDto
+  | SaleMovementCardDto
+  | ReturnMovementCardDto
+  | TransferMovementCardDto
+  | DispatchMovementCardDto
+  | AdjustmentMovementCardDto
+  | OrphanMovementCardDto;
+
 // ---------- Suppliers ----------
 
 export interface SupplierDto {
