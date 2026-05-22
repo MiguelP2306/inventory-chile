@@ -131,7 +131,7 @@ QuotationItem (id, quotationId, productId, qty, unitPrice, discount, subtotal)
 Sale (id, number, customerId, warehouseId, date,             -- (ampliado, Fase 7)
       subtotal, taxAmount, commissionAmount, total,           -- (ampliado, Fase 5)
       paymentMethod, status, quotationId?, userId)
-   -- paymentMethod: CASH | TRANSFER | CARD
+   -- paymentMethod: CASH | TRANSFER | CARD_DEBIT | CARD_CREDIT | PAYMENT_LINK  -- (Ronda 9: desdoblamiento del antiguo CARD)
    -- status: PENDING | PAID | CANCELLED
    -- warehouseId = bodega de la cual sale el stock (necesario para ML Full)
 SaleItem (id, saleId, productId, qty, unitPrice, discount, subtotal, unitCost)

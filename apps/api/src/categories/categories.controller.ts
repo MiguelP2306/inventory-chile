@@ -12,6 +12,7 @@ import {
 import { CategoriesService } from './categories.service';
 import {
   CreateCategoryDto,
+  GetCategoryQueryDto,
   ListCategoriesQueryDto,
   UpdateCategoryDto,
 } from './dto';
@@ -23,6 +24,14 @@ export class CategoriesController {
   @Get()
   list(@Query() query: ListCategoriesQueryDto) {
     return this.svc.list(query);
+  }
+
+  @Get(':id')
+  getOne(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Query() query: GetCategoryQueryDto,
+  ) {
+    return this.svc.getOne(id, query.withStats === true);
   }
 
   @Post()

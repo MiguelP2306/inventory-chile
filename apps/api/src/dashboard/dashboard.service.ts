@@ -1,9 +1,17 @@
 import {
   LifecycleStatus,
-  PaymentMethod,
+  QuotationStatus,
   SaleStatus,
 } from '@inventory/shared';
-import type { DashboardSummaryDto } from '@inventory/shared';
+import type {
+  DashboardCashFlowPointDto,
+  DashboardCategoryBreakdownDto,
+  DashboardFollowUpDto,
+  DashboardLifecycleFunnelDto,
+  DashboardSalesTrendPointDto,
+  DashboardSummaryDto,
+  DashboardTopProductDto,
+} from '@inventory/shared';
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { Between, DataSource, Repository } from 'typeorm';
@@ -13,8 +21,10 @@ import {
   Expense,
   InventoryMovement,
   Product,
+  ProductImage,
   Quotation,
   Sale,
+  SaleItem,
   Stock,
 } from '../database/entities';
 
@@ -27,25 +37,37 @@ import {
  *
  * Estructura de la respuesta:
  *
- *   today      → operación del día actual (ventas/cotizaciones/caja).
- *   lifecycle  → conteos del embudo comercial (Fase 8.5).
- *   month      → métricas del mes actual (utilidad, inventario, gastos).
- *   alerts     → stock crítico, bajo, sin movimiento, rotación.
+ *   today          → operación del día actual (ventas/cotizaciones/caja).
+ *   lifecycle      → conteos del embudo comercial (Fase 8.5).
+ *   month          → métricas del mes actual (utilidad, inventario, gastos).
+ *   alerts         → stock crítico, bajo, sin movimiento, rotación.
+ *   trend          → series temporales últimos 30 días (ventas + flujo de caja).
+ *   top            → top productos y desglose por categoría del mes.
+ *   followUps      → top 10 seguimientos urgentes con snapshot de cotización.
+ *   comparison     → deltas hoy vs ayer / mes vs mes anterior.
+ *   monthBreakdown → alias de month.salesSubtotal/cogs/expenses agrupados.
+ *   lifecycleFunnel→ embudo de 5 etapas (NEW/QUOTED/FOLLOW_UP/WON/LOST).
  *
  * Convenciones:
  *   - "Día" / "Mes" en zona horaria del servidor (America/Santiago en prod).
  *   - Ventas canceladas se EXCLUYEN de todos los counts y sumas.
- *   - Cantidades monetarias se devuelven como string para preservar precisión.
+ *   - Cantidades monetarias se devuelven como string en los bloques
+ *     legacy (today/month/alerts) y como number en los bloques nuevos
+ *     (trend/top/followUps/comparison/monthBreakdown). La frontera está
+ *     marcada por el tipo del DTO.
  */
 @Injectable()
 export class DashboardService {
   constructor(
     @InjectRepository(Sale) private readonly sales: Repository<Sale>,
+    @InjectRepository(SaleItem) private readonly saleItems: Repository<SaleItem>,
     @InjectRepository(Quotation) private readonly quotations: Repository<Quotation>,
     @InjectRepository(Customer) private readonly customers: Repository<Customer>,
     @InjectRepository(Expense) private readonly expenses: Repository<Expense>,
     @InjectRepository(Stock) private readonly stocks: Repository<Stock>,
     @InjectRepository(Product) private readonly products: Repository<Product>,
+    @InjectRepository(ProductImage)
+    private readonly productImages: Repository<ProductImage>,
     @InjectRepository(InventoryMovement)
     private readonly movements: Repository<InventoryMovement>,
     @InjectDataSource() private readonly ds: DataSource,
@@ -53,46 +75,81 @@ export class DashboardService {
   ) {}
 
   async summary(): Promise<DashboardSummaryDto> {
-    const { todayStart, todayEnd, monthStart, monthEnd } = computeRanges();
+    const {
+      todayStart,
+      todayEnd,
+      yesterdayStart,
+      yesterdayEnd,
+      monthStart,
+      monthEnd,
+      lastMonthStart,
+      lastMonthEnd,
+      trendStart,
+      trendEnd,
+    } = computeRanges();
 
     // Disparamos todas las queries en paralelo. Cada bloque es independiente.
     const [
       todaySalesAgg,
+      yesterdaySalesAgg,
       todayQuotationsAgg,
+      todayCashFlow,
+      yesterdayCashFlow,
       cashBalance,
       lifecycleCounts,
+      lifecycleFunnel,
       wonThisMonth,
       monthSalesAgg,
       monthCogs,
       monthExpensesAgg,
+      lastMonthSalesAgg,
+      lastMonthCogs,
+      lastMonthExpensesAgg,
       inventoryValue,
       stockStatusCounts,
       noMovementCount,
-      monthInventoryAvg,
+      salesTrend,
+      cashFlowTrend,
+      topProducts,
+      topCategories,
+      followUps,
     ] = await Promise.all([
       this.aggregateSalesInRange(todayStart, todayEnd),
+      this.aggregateSalesInRange(yesterdayStart, yesterdayEnd),
       this.aggregateQuotationsInRange(todayStart, todayEnd),
+      this.aggregateCashFlowNetInRange(todayStart, todayEnd),
+      this.aggregateCashFlowNetInRange(yesterdayStart, yesterdayEnd),
       this.cashbox.balance(),
       this.lifecycleCounts(),
+      this.lifecycleFunnelCounts(monthStart, monthEnd),
       this.wonCustomersInRange(monthStart, monthEnd),
       this.aggregateSalesInRange(monthStart, monthEnd),
       this.aggregateCogsInRange(monthStart, monthEnd),
       this.aggregateExpensesInRange(monthStart, monthEnd),
+      this.aggregateSalesInRange(lastMonthStart, lastMonthEnd),
+      this.aggregateCogsInRange(lastMonthStart, lastMonthEnd),
+      this.aggregateExpensesInRange(lastMonthStart, lastMonthEnd),
       this.totalInventoryValue(),
       this.stockStatusCounts(),
       this.noMovementCount(30),
-      this.aggregateCogsInRange(monthStart, monthEnd), // reusamos para promedio
+      this.aggregateSalesByDayInRange(trendStart, trendEnd),
+      this.aggregateCashFlowByDayInRange(trendStart, trendEnd),
+      this.topProductsForMonth(monthStart, monthEnd, lastMonthStart, lastMonthEnd, 10),
+      this.categoriesBreakdownForMonth(monthStart, monthEnd),
+      this.urgentFollowUps(10),
     ]);
 
     // Utilidad del mes (sin IVA): ventas_subtotal − COGS − gastos.
     // (Decisión documentada en CHANGELOG-FASE-9: la fórmula deja afuera el IVA
     // débito porque no es ganancia del negocio; el IVA se balancea contra el
     // IVA crédito de compras en el reporte de IVA separado.)
-    const profit = (
-      Number(monthSalesAgg.subtotal) -
-      Number(monthCogs) -
-      Number(monthExpensesAgg)
-    ).toFixed(2);
+    const monthProfitNum =
+      Number(monthSalesAgg.subtotal) - Number(monthCogs) - Number(monthExpensesAgg);
+    const lastMonthProfitNum =
+      Number(lastMonthSalesAgg.subtotal) -
+      Number(lastMonthCogs) -
+      Number(lastMonthExpensesAgg);
+    const profit = monthProfitNum.toFixed(2);
 
     // Rotación de inventario: COGS_del_mes / inventario_promedio_del_mes.
     // Si todavía no tenemos un snapshot histórico para inventario promedio,
@@ -104,7 +161,15 @@ export class DashboardService {
       Number(inventoryValue) > 0
         ? Number(monthCogs) / Number(inventoryValue)
         : 0;
-    void monthInventoryAvg; // placeholder explícito: no usado aún
+
+    // Deltas hoy vs ayer / mes vs mes anterior. null cuando la base es 0 para
+    // evitar Infinity en la UI.
+    const salesDeltaPct = pctDelta(
+      Number(todaySalesAgg.total),
+      Number(yesterdaySalesAgg.total),
+    );
+    const cashDeltaPct = pctDelta(todayCashFlow, yesterdayCashFlow);
+    const profitDeltaPct = pctDelta(monthProfitNum, lastMonthProfitNum);
 
     return {
       today: {
@@ -139,6 +204,32 @@ export class DashboardService {
         noMovement30d: noMovementCount,
         inventoryTurnover: turnover.toFixed(2),
         inventoryTurnoverIsApprox: true,
+      },
+      trend: {
+        salesByDay: salesTrend,
+        cashFlowByDay: cashFlowTrend,
+      },
+      top: {
+        products: topProducts,
+        categories: topCategories,
+      },
+      followUps,
+      comparison: {
+        salesDeltaPct,
+        cashDeltaPct,
+        profitDeltaPct,
+      },
+      monthBreakdown: {
+        netSales: Number(monthSalesAgg.subtotal),
+        cogs: Number(monthCogs),
+        expenses: Number(monthExpensesAgg),
+      },
+      lifecycleFunnel: {
+        NEW: lifecycleFunnel.NEW,
+        QUOTED: lifecycleFunnel.QUOTED,
+        FOLLOW_UP: lifecycleFunnel.FOLLOW_UP,
+        WON: wonThisMonth, // alineado con lifecycle.wonThisMonth por consistencia
+        LOST: lifecycleFunnel.LOST,
       },
     };
   }
@@ -215,6 +306,311 @@ export class DashboardService {
   }
 
   /**
+   * Flujo neto de caja (INCOME − EXPENSE) en el rango, ignorando transacciones
+   * anuladas. Usado para los deltas hoy vs ayer.
+   */
+  private async aggregateCashFlowNetInRange(
+    from: Date,
+    to: Date,
+  ): Promise<number> {
+    const row: Array<{ inflow: string | null; outflow: string | null }> =
+      await this.ds.query(
+        `SELECT
+           COALESCE(SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END), 0) AS inflow,
+           COALESCE(SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END), 0) AS outflow
+         FROM cash_transactions
+         WHERE date BETWEEN ? AND ? AND isVoided = FALSE`,
+        [from, to],
+      );
+    const inflow = Number(row[0]?.inflow ?? 0);
+    const outflow = Number(row[0]?.outflow ?? 0);
+    return inflow - outflow;
+  }
+
+  /**
+   * Serie diaria de ventas en el rango (huecos rellenados con 0). Devuelve
+   * un punto por día calendario, ordenado ascendente.
+   */
+  private async aggregateSalesByDayInRange(
+    from: Date,
+    to: Date,
+  ): Promise<DashboardSalesTrendPointDto[]> {
+    const rows: Array<{ date: string; amount: string; count: string }> =
+      await this.ds.query(
+        `SELECT DATE(s.date) AS date,
+                COALESCE(SUM(s.total), 0) AS amount,
+                COUNT(s.id) AS count
+         FROM sales s
+         WHERE s.date BETWEEN ? AND ? AND s.status != ?
+         GROUP BY DATE(s.date)
+         ORDER BY DATE(s.date) ASC`,
+        [from, to, SaleStatus.CANCELLED],
+      );
+    const byDate = new Map(
+      rows.map((r) => [
+        toIsoDate(r.date),
+        { amount: Number(r.amount), count: Number(r.count) },
+      ]),
+    );
+    return fillDailySeries(from, to, (dateIso) => {
+      const hit = byDate.get(dateIso);
+      return {
+        date: dateIso,
+        amount: hit?.amount ?? 0,
+        count: hit?.count ?? 0,
+      };
+    });
+  }
+
+  /**
+   * Serie diaria de flujo de caja: inflow (INCOME) vs outflow (EXPENSE) por
+   * día calendario. Excluye transacciones anuladas. Huecos rellenados con 0.
+   */
+  private async aggregateCashFlowByDayInRange(
+    from: Date,
+    to: Date,
+  ): Promise<DashboardCashFlowPointDto[]> {
+    const rows: Array<{ date: string; inflow: string; outflow: string }> =
+      await this.ds.query(
+        `SELECT DATE(t.date) AS date,
+                COALESCE(SUM(CASE WHEN t.type = 'INCOME' THEN t.amount ELSE 0 END), 0) AS inflow,
+                COALESCE(SUM(CASE WHEN t.type = 'EXPENSE' THEN t.amount ELSE 0 END), 0) AS outflow
+         FROM cash_transactions t
+         WHERE t.date BETWEEN ? AND ? AND t.isVoided = FALSE
+         GROUP BY DATE(t.date)
+         ORDER BY DATE(t.date) ASC`,
+        [from, to],
+      );
+    const byDate = new Map(
+      rows.map((r) => [
+        toIsoDate(r.date),
+        { inflow: Number(r.inflow), outflow: Number(r.outflow) },
+      ]),
+    );
+    return fillDailySeries(from, to, (dateIso) => {
+      const hit = byDate.get(dateIso);
+      return {
+        date: dateIso,
+        inflow: hit?.inflow ?? 0,
+        outflow: hit?.outflow ?? 0,
+      };
+    });
+  }
+
+  /**
+   * Top productos del mes por monto facturado (SUM(qty × unitPrice)), con:
+   *   - `units` = SUM(qty) del mes
+   *   - `deltaPct` = variación vs mismo producto el mes anterior
+   *   - `coverUrl` = portada (relativa); el front la prefixa con NEXT_PUBLIC_API_URL
+   *
+   * Hace 3 queries: top del mes, mismos productos en mes anterior, covers en
+   * batch. Ordenado por amount desc.
+   */
+  private async topProductsForMonth(
+    from: Date,
+    to: Date,
+    prevFrom: Date,
+    prevTo: Date,
+    limit: number,
+  ): Promise<DashboardTopProductDto[]> {
+    const rows: Array<{
+      productId: string;
+      sku: string | null;
+      name: string;
+      units: string;
+      amount: string;
+    }> = await this.ds.query(
+      `SELECT si.productId AS productId,
+              p.sku AS sku,
+              p.name AS name,
+              COALESCE(SUM(si.qty), 0) AS units,
+              COALESCE(SUM(si.qty * si.unitPrice), 0) AS amount
+       FROM sale_items si
+       INNER JOIN sales s ON s.id = si.saleId
+       INNER JOIN products p ON p.id = si.productId
+       WHERE s.date BETWEEN ? AND ? AND s.status != ?
+       GROUP BY si.productId, p.sku, p.name
+       ORDER BY amount DESC
+       LIMIT ?`,
+      [from, to, SaleStatus.CANCELLED, limit],
+    );
+    if (rows.length === 0) return [];
+
+    const ids = rows.map((r) => r.productId);
+
+    // Mes anterior para los mismos productos. QueryBuilder porque el patrón
+    // `IN (?)` con array en raw `ds.query` depende de que el driver expanda
+    // arrays — más robusto pasar por la abstracción de TypeORM.
+    const prevRows = await this.saleItems
+      .createQueryBuilder('si')
+      .innerJoin(Sale, 's', 's.id = si.saleId')
+      .select('si.productId', 'productId')
+      .addSelect('COALESCE(SUM(si.qty * si.unitPrice), 0)', 'amount')
+      .where('si.productId IN (:...ids)', { ids })
+      .andWhere('s.date BETWEEN :from AND :to', { from: prevFrom, to: prevTo })
+      .andWhere('s.status != :cancelled', { cancelled: SaleStatus.CANCELLED })
+      .groupBy('si.productId')
+      .getRawMany<{ productId: string; amount: string }>();
+    const prevByProduct = new Map(
+      prevRows.map((r) => [r.productId, Number(r.amount)]),
+    );
+
+    // Covers en batch (reusa el patrón de products.service)
+    const covers = await this.productImages
+      .createQueryBuilder('img')
+      .where('img.productId IN (:...ids)', { ids })
+      .andWhere('img.isCover = TRUE')
+      .getMany();
+    const coverByProduct = new Map(covers.map((c) => [c.productId, c.url]));
+
+    return rows.map((r) => {
+      const amount = Number(r.amount);
+      const prevAmount = prevByProduct.get(r.productId) ?? 0;
+      return {
+        id: r.productId,
+        sku: r.sku,
+        name: r.name,
+        units: Number(r.units),
+        amount,
+        deltaPct: pctDelta(amount, prevAmount),
+        coverUrl: coverByProduct.get(r.productId) ?? null,
+      };
+    });
+  }
+
+  /**
+   * Breakdown por categoría del mes en curso. Incluye solo categorías con
+   * ventas. Para cada una calcula:
+   *   - `amount`    = SUM(qty × unitPrice) del mes
+   *   - `marginPct` = (amount − cogs) / amount × 100
+   *   - `turnover`  = cogs_categoría / inventario_actual_categoría
+   *
+   * Una sola query con LEFT JOIN a subqueries de inventario.
+   */
+  private async categoriesBreakdownForMonth(
+    from: Date,
+    to: Date,
+  ): Promise<DashboardCategoryBreakdownDto[]> {
+    const rows: Array<{
+      id: string;
+      name: string;
+      amount: string;
+      cogs: string;
+      inventoryValue: string;
+    }> = await this.ds.query(
+      `SELECT c.id AS id,
+              c.name AS name,
+              COALESCE(salesAgg.amount, 0) AS amount,
+              COALESCE(salesAgg.cogs, 0) AS cogs,
+              COALESCE(invAgg.inventoryValue, 0) AS inventoryValue
+       FROM categories c
+       INNER JOIN (
+         SELECT p.categoryId AS catId,
+                SUM(si.qty * si.unitPrice) AS amount,
+                SUM(si.qty * si.unitCost) AS cogs
+         FROM sale_items si
+         INNER JOIN sales s ON s.id = si.saleId
+         INNER JOIN products p ON p.id = si.productId
+         WHERE s.date BETWEEN ? AND ? AND s.status != ? AND p.categoryId IS NOT NULL
+         GROUP BY p.categoryId
+       ) salesAgg ON salesAgg.catId = c.id
+       LEFT JOIN (
+         SELECT p.categoryId AS catId,
+                SUM(st.quantity * p.cost) AS inventoryValue
+         FROM stocks st
+         INNER JOIN products p ON p.id = st.productId
+         WHERE p.isActive = TRUE AND p.categoryId IS NOT NULL
+         GROUP BY p.categoryId
+       ) invAgg ON invAgg.catId = c.id
+       ORDER BY salesAgg.amount DESC`,
+      [from, to, SaleStatus.CANCELLED],
+    );
+
+    return rows.map((r) => {
+      const amount = Number(r.amount);
+      const cogs = Number(r.cogs);
+      const inventoryValue = Number(r.inventoryValue);
+      const marginPct = amount > 0 ? ((amount - cogs) / amount) * 100 : 0;
+      const turnover = inventoryValue > 0 ? cogs / inventoryValue : 0;
+      return {
+        id: r.id,
+        name: r.name,
+        amount,
+        marginPct: Math.round(marginPct * 10) / 10,
+        turnover: Math.round(turnover * 100) / 100,
+      };
+    });
+  }
+
+  /**
+   * Top N seguimientos pendientes: clientes en QUOTED o FOLLOW_UP ordenados
+   * por `nextFollowUpAt` ascendente (vencidos primero), con snapshot de la
+   * última cotización SENT/APPROVED del cliente.
+   *
+   * Solo devuelve clientes que tienen al menos una cotización SENT/APPROVED
+   * — sin eso, el card del dashboard no tiene quoteNumber/amount que mostrar.
+   */
+  private async urgentFollowUps(limit: number): Promise<DashboardFollowUpDto[]> {
+    const rows: Array<{
+      customerId: string;
+      customerName: string;
+      whatsappPhone: string | null;
+      phone: string | null;
+      lastContactAt: Date | null;
+      createdAt: Date;
+      quotationId: string;
+      quoteNumber: string;
+      amount: string;
+    }> = await this.ds.query(
+      `SELECT c.id AS customerId,
+              c.name AS customerName,
+              c.whatsappPhone AS whatsappPhone,
+              c.phone AS phone,
+              c.lastContactAt AS lastContactAt,
+              c.createdAt AS createdAt,
+              q.id AS quotationId,
+              q.number AS quoteNumber,
+              q.total AS amount
+       FROM customers c
+       INNER JOIN quotations q
+         ON q.id = (
+           SELECT q2.id FROM quotations q2
+           WHERE q2.customerId = c.id
+             AND q2.status IN (?, ?)
+           ORDER BY q2.date DESC
+           LIMIT 1
+         )
+       WHERE c.lifecycleStatus IN (?, ?)
+       ORDER BY c.nextFollowUpAt IS NULL, c.nextFollowUpAt ASC
+       LIMIT ?`,
+      [
+        QuotationStatus.SENT,
+        QuotationStatus.APPROVED,
+        LifecycleStatus.QUOTED,
+        LifecycleStatus.FOLLOW_UP,
+        limit,
+      ],
+    );
+
+    const now = Date.now();
+    return rows.map((r) => {
+      const ref = r.lastContactAt ?? r.createdAt;
+      const days = Math.max(
+        0,
+        Math.floor((now - new Date(ref).getTime()) / (24 * 60 * 60 * 1000)),
+      );
+      return {
+        id: r.quotationId,
+        customerName: r.customerName,
+        phone: r.whatsappPhone ?? r.phone ?? null,
+        quoteNumber: r.quoteNumber,
+        amount: Number(r.amount),
+        daysSinceLastContact: days,
+      };
+    });
+  }
+
+  /**
    * Conteos del embudo comercial (Fase 8.5):
    *   - pendingFollowUp: clientes en QUOTED o FOLLOW_UP.
    *   - overdueFollowUp: clientes en FOLLOW_UP (cron ya los detectó vencidos).
@@ -241,6 +637,47 @@ export class DashboardService {
       if (r.status === LifecycleStatus.FOLLOW_UP) overdue += n;
     }
     return { pendingFollowUp: pending, overdueFollowUp: overdue };
+  }
+
+  /**
+   * Funnel completo de 5 etapas. NEW/QUOTED/FOLLOW_UP/LOST son conteos del
+   * estado ACTUAL del cliente (sin filtro temporal). WON se completa en el
+   * caller con el mismo cálculo que `wonCustomersInRange` para mantener
+   * consistencia con `lifecycle.wonThisMonth`.
+   */
+  private async lifecycleFunnelCounts(
+    _monthStart: Date,
+    _monthEnd: Date,
+  ): Promise<Omit<DashboardLifecycleFunnelDto, 'WON'>> {
+    const rows = await this.customers
+      .createQueryBuilder('c')
+      .select('c.lifecycleStatus', 'status')
+      .addSelect('COUNT(c.id)', 'count')
+      .where('c.lifecycleStatus IN (:...statuses)', {
+        statuses: [
+          LifecycleStatus.NEW,
+          LifecycleStatus.QUOTED,
+          LifecycleStatus.FOLLOW_UP,
+          LifecycleStatus.LOST,
+        ],
+      })
+      .groupBy('c.lifecycleStatus')
+      .getRawMany<{ status: LifecycleStatus; count: string }>();
+
+    const counts: Omit<DashboardLifecycleFunnelDto, 'WON'> = {
+      NEW: 0,
+      QUOTED: 0,
+      FOLLOW_UP: 0,
+      LOST: 0,
+    };
+    for (const r of rows) {
+      const n = Number(r.count);
+      if (r.status === LifecycleStatus.NEW) counts.NEW = n;
+      else if (r.status === LifecycleStatus.QUOTED) counts.QUOTED = n;
+      else if (r.status === LifecycleStatus.FOLLOW_UP) counts.FOLLOW_UP = n;
+      else if (r.status === LifecycleStatus.LOST) counts.LOST = n;
+    }
+    return counts;
   }
 
   /**
@@ -331,46 +768,109 @@ export class DashboardService {
   }
 }
 
+// ---------- helpers privados a este módulo ----------
+
 /**
  * Calcula los bordes del día y mes ACTUAL en horario local del servidor.
- * Producción corre en America/Santiago — el sistema usa `new Date()` y los
- * comparadores TypeORM/MySQL ya trabajan en la zona del server.
+ * También expone el día anterior, mes anterior, y ventana de tendencia (30
+ * días terminando hoy). Producción corre en America/Santiago — el sistema
+ * usa `new Date()` y los comparadores TypeORM/MySQL ya trabajan en la zona
+ * del server.
  */
 function computeRanges(): {
   todayStart: Date;
   todayEnd: Date;
+  yesterdayStart: Date;
+  yesterdayEnd: Date;
   monthStart: Date;
   monthEnd: Date;
+  lastMonthStart: Date;
+  lastMonthEnd: Date;
+  trendStart: Date;
+  trendEnd: Date;
 } {
   const now = new Date();
-  const todayStart = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-    0,
-    0,
-    0,
-    0,
-  );
-  const todayEnd = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-    23,
-    59,
-    59,
-    999,
-  );
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-  const monthEnd = new Date(
-    now.getFullYear(),
-    now.getMonth() + 1,
-    0,
-    23,
-    59,
-    59,
-    999,
-  );
-  return { todayStart, todayEnd, monthStart, monthEnd };
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const d = now.getDate();
+
+  const todayStart = new Date(y, m, d, 0, 0, 0, 0);
+  const todayEnd = new Date(y, m, d, 23, 59, 59, 999);
+
+  const yesterdayStart = new Date(y, m, d - 1, 0, 0, 0, 0);
+  const yesterdayEnd = new Date(y, m, d - 1, 23, 59, 59, 999);
+
+  const monthStart = new Date(y, m, 1, 0, 0, 0, 0);
+  const monthEnd = new Date(y, m + 1, 0, 23, 59, 59, 999);
+
+  const lastMonthStart = new Date(y, m - 1, 1, 0, 0, 0, 0);
+  const lastMonthEnd = new Date(y, m, 0, 23, 59, 59, 999);
+
+  // 30 días terminando HOY (inclusive). trendStart es el día -29.
+  const trendStart = new Date(y, m, d - 29, 0, 0, 0, 0);
+  const trendEnd = todayEnd;
+
+  return {
+    todayStart,
+    todayEnd,
+    yesterdayStart,
+    yesterdayEnd,
+    monthStart,
+    monthEnd,
+    lastMonthStart,
+    lastMonthEnd,
+    trendStart,
+    trendEnd,
+  };
+}
+
+/**
+ * (a − b) / |b| × 100, redondeado a 1 decimal. Devuelve null cuando b = 0
+ * para evitar Infinity. Se usa para todos los deltas de comparación.
+ */
+function pctDelta(current: number, base: number): number | null {
+  if (base === 0) return null;
+  const raw = ((current - base) / Math.abs(base)) * 100;
+  return Math.round(raw * 10) / 10;
+}
+
+/**
+ * Normaliza el valor `DATE(...)` que devuelve MySQL al formato YYYY-MM-DD.
+ * MySQL puede devolver Date object o string según driver y configuración —
+ * normalizamos a string para que el lookup en el Map funcione siempre igual.
+ */
+function toIsoDate(value: string | Date): string {
+  if (value instanceof Date) {
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, '0');
+    const d = String(value.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  // 'YYYY-MM-DD HH:MM:SS' o 'YYYY-MM-DD' → tomamos los primeros 10 chars
+  return value.slice(0, 10);
+}
+
+/**
+ * Genera una serie diaria desde `from` hasta `to` (inclusive en ambos extremos)
+ * aplicando `makePoint(isoDate)` a cada día. Garantiza que el array resultante
+ * no tenga huecos — las fechas sin datos devuelven el punto que la función
+ * de fábrica decida (típicamente con valores en 0).
+ */
+function fillDailySeries<T>(
+  from: Date,
+  to: Date,
+  makePoint: (iso: string) => T,
+): T[] {
+  const out: T[] = [];
+  const cursor = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  const end = new Date(to.getFullYear(), to.getMonth(), to.getDate());
+  while (cursor.getTime() <= end.getTime()) {
+    const y = cursor.getFullYear();
+    const mo = String(cursor.getMonth() + 1).padStart(2, '0');
+    const da = String(cursor.getDate()).padStart(2, '0');
+    out.push(makePoint(`${y}-${mo}-${da}`));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return out;
 }
 

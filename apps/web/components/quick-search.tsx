@@ -65,7 +65,7 @@ export function QuickSearch() {
         type="button"
         onClick={() => setOpen(true)}
         aria-label="Buscar producto"
-        className="flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:w-72"
+        className="flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:w-full"
       >
         <Search className="h-4 w-4 shrink-0" />
         <span className="hidden sm:inline">Buscar producto…</span>

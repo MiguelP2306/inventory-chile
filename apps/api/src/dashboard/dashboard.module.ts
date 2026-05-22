@@ -6,8 +6,10 @@ import {
   Expense,
   InventoryMovement,
   Product,
+  ProductImage,
   Quotation,
   Sale,
+  SaleItem,
   Stock,
 } from '../database/entities';
 import { DashboardController } from './dashboard.controller';
@@ -17,11 +19,13 @@ import { DashboardService } from './dashboard.service';
   imports: [
     TypeOrmModule.forFeature([
       Sale,
+      SaleItem,
       Quotation,
       Customer,
       Expense,
       Stock,
       Product,
+      ProductImage,
       InventoryMovement,
     ]),
     CashboxModule,

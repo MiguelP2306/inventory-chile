@@ -8,6 +8,41 @@ export interface CategoryDto {
   // Ronda 10 — nombre del padre cuando aplica (para mostrar la jerarquía
   // "Padre › Hija" en selects y listados sin un join extra en frontend).
   parentName?: string | null;
+
+  // ===== Stats agregados (presentes solo con ?withStats=true) =====
+  // Ronda 11 — campos opcionales calculados sobre productos/stock/ventas.
+  //
+  // list({ withStats: true }): los 5 conteos lightweight se devuelven con
+  // alcance DIRECTO (solo productos cuyo categoryId === c.id). Sin
+  // topProducts (caro de calcular por fila).
+  //
+  // getOne(id, { withStats: true }): los 5 conteos vienen ROLLED-UP
+  // (categoría + sus subcategorías de 1 nivel) + topProducts del mes.
+
+  /** Cantidad de productos asociados. Direct en list, rolled-up en getOne. */
+  productCount?: number;
+
+  /** Suma de stock × costo unitario sobre productos activos. CLP. */
+  inventoryValue?: number;
+
+  /** Productos con stock total = 0 (suma todas las bodegas). */
+  outOfStockCount?: number;
+
+  /** Productos con stock > 0 pero < minStock (semáforo amarillo). */
+  lowStockCount?: number;
+
+  /** Margen promedio %, 0-100. AVG((price - cost) / price * 100). */
+  avgMarginPct?: number;
+
+  /** Top productos por monto facturado en el mes en curso (solo en getOne). */
+  topProducts?: Array<{
+    id: string;
+    sku: string | null;
+    name: string;
+    units: number;
+    amount: number;
+    coverUrl: string | null;
+  }>;
 }
 
 export interface BrandDto {
@@ -1043,6 +1078,53 @@ export interface VoidDispatchNoteInput {
 
 // ---------- Fase 9 — Dashboard ----------
 
+export interface DashboardSalesTrendPointDto {
+  date: string; // YYYY-MM-DD
+  amount: number;
+  count: number;
+}
+
+export interface DashboardCashFlowPointDto {
+  date: string; // YYYY-MM-DD
+  inflow: number;
+  outflow: number;
+}
+
+export interface DashboardTopProductDto {
+  id: string;
+  sku: string | null;
+  name: string;
+  units: number;
+  amount: number;
+  deltaPct: number | null; // % vs mes anterior; null si el mes anterior fue 0
+  coverUrl: string | null;
+}
+
+export interface DashboardCategoryBreakdownDto {
+  id: string;
+  name: string;
+  amount: number;
+  marginPct: number; // (amount − cogs) / amount × 100
+  turnover: number; // cogs_categoría / inventario_promedio_categoría
+}
+
+export interface DashboardFollowUpDto {
+  id: string; // id de la cotización (para link a /cotizaciones/:id) o customer si no hay cotización
+  customerName: string;
+  phone: string | null; // whatsappPhone con fallback a phone
+  quoteNumber: string;
+  amount: number;
+  daysSinceLastContact: number;
+}
+
+export interface DashboardLifecycleFunnelDto {
+  NEW: number;
+  QUOTED: number;
+  FOLLOW_UP: number;
+  WON: number;
+  LOST: number;
+}
+
 export interface DashboardSummaryDto {
   today: {
     sales: { count: number; amount: string };
@@ -1078,6 +1160,36 @@ export interface DashboardSummaryDto {
     inventoryTurnover: string;
     inventoryTurnoverIsApprox: boolean;
   };
+  // Series temporales últimos 30 días (huecos rellenados con 0).
+  trend: {
+    salesByDay: DashboardSalesTrendPointDto[];
+    cashFlowByDay: DashboardCashFlowPointDto[];
+  };
+  top: {
+    products: DashboardTopProductDto[]; // top 10 del mes por monto
+    categories: DashboardCategoryBreakdownDto[]; // todas las categorías con ventas del mes
+  };
+  // Top 10 clientes pendientes de seguimiento ordenados por nextFollowUpAt asc
+  // (vencidos primero). Incluye snapshot de la última cotización SENT/APPROVED.
+  followUps: DashboardFollowUpDto[];
+  // Deltas: hoy vs ayer para ventas y caja, mes actual vs mes anterior para
+  // utilidad. null cuando el período base es 0 (división indefinida).
+  comparison: {
+    salesDeltaPct: number | null;
+    cashDeltaPct: number | null;
+    profitDeltaPct: number | null;
+  };
+  // Desglose de utilidad del mes. `netSales` y `cogs` son alias de
+  // `month.salesSubtotal` y `month.cogs` exportados acá para que el front
+  // los consuma como un bloque coherente sin tener que leerlos de dos lugares.
+  monthBreakdown: {
+    netSales: number;
+    cogs: number;
+    expenses: number;
+  };
+  // Embudo lifecycle: NEW/QUOTED/FOLLOW_UP/LOST = conteo del estado ACTUAL,
+  // WON = mismo cálculo que `lifecycle.wonThisMonth` (cerrados en el mes).
+  lifecycleFunnel: DashboardLifecycleFunnelDto;
 }
 
 // ---------- Fase 9 — Reporte sin movimiento ----------

@@ -33,6 +33,12 @@ export interface ListCategoriesParams {
    *  - <uuid>: solo subcategorías de ese padre.
    */
   parentId?: string;
+  /**
+   * Ronda 11 — si true, cada item incluye stats lightweight DIRECTOS
+   * (productCount/inventoryValue/outOfStockCount/lowStockCount/avgMarginPct).
+   * No incluye topProducts — para eso usar `getCategory(id, { withStats: true })`.
+   */
+  withStats?: boolean;
 }
 
 export const listCategories = (params: ListCategoriesParams = {}) =>
@@ -42,6 +48,17 @@ export const listCategoriesPaginated = (params: ListPaginationParams) =>
   api
     .get<PaginatedResult<CategoryDto>>('/categories', { params })
     .then((r) => r.data);
+
+/**
+ * Ronda 11 — detalle de una categoría. Con `withStats: true` el response
+ * incluye los 5 stats agregados (rolled-up sobre la categoría + sus
+ * subcategorías de 1 nivel) y `topProducts` del mes en curso (top 3).
+ */
+export const getCategory = (
+  id: string,
+  params: { withStats?: boolean } = {},
+) =>
+  api.get<CategoryDto>(`/categories/${id}`, { params }).then((r) => r.data);
 
 export const createCategory = (input: { name: string; parentId?: string | null }) =>
   api.post<CategoryDto>('/categories', input).then((r) => r.data);
