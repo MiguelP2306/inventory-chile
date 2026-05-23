@@ -7,11 +7,13 @@ import {
   Product,
   ProductCode,
   ProductImage,
+  Stock,
   VehicleFitment,
   VehicleModel,
 } from '../database/entities';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { SettingsModule } from '../settings/settings.module';
+import { LabelService } from './label.service';
 import { ProductsController } from './products.controller';
 import { ProductsService } from './products.service';
 
@@ -21,6 +23,7 @@ import { ProductsService } from './products.service';
       Product,
       ProductCode,
       ProductImage,
+      Stock, // Fase 11 — LabelService lee Stock.locationCode para el footer.
       VehicleFitment,
       VehicleModel,
     ]),
@@ -31,7 +34,7 @@ import { ProductsService } from './products.service';
     SettingsModule,
   ],
   controllers: [ProductsController],
-  providers: [ProductsService],
+  providers: [ProductsService, LabelService],
   exports: [ProductsService],
 })
 export class ProductsModule {}

@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  NotFoundException,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -30,6 +31,7 @@ import { CategoriesService } from '../categories/categories.service';
 import { MONEY_FMT, sendXlsx, stylizeSheet } from '../common/xlsx-export';
 import { PdfService } from '../notifications/pdf.service';
 import { SettingsService } from '../settings/settings.service';
+import { LabelService } from './label.service';
 import {
   MAX_PRODUCT_IMAGE_BYTES,
   productImageFileFilter,
@@ -78,6 +80,7 @@ export class ProductsController {
     private readonly brands: BrandsService,
     private readonly pdf: PdfService,
     private readonly settings: SettingsService,
+    private readonly labels: LabelService,
   ) {}
 
   @Get()
@@ -93,6 +96,61 @@ export class ProductsController {
   @Get('quick-search')
   quickSearch(@Query() query: QuickSearchQueryDto) {
     return this.svc.quickSearch(query);
+  }
+
+  /**
+   * Fase 11 — lookup EXACTO por código. Pensado para scanners (USB o cámara).
+   * Compara por igualdad estricta contra `sku`, `partNumber`, `barcode`,
+   * `universalCode` y los `product_codes` compatibles. Si hay match devuelve
+   * el producto; si no, 404. El frontend distingue ambos casos para mostrar
+   * "código no reconocido" sin reintentar con quickSearch.
+   */
+  @Get('lookup')
+  async lookup(@Query('code') code: string | undefined) {
+    if (!code || !code.trim()) {
+      throw new BadRequestException('Query param `code` requerido');
+    }
+    const match = await this.svc.lookupExact(code);
+    if (!match) {
+      throw new NotFoundException(
+        `Ningún producto coincide exactamente con el código "${code}"`,
+      );
+    }
+    return match;
+  }
+
+  /**
+   * Fase 11 — etiqueta térmica 50×30mm con barcode CODE128.
+   *
+   *  - `qty=1..100` → cantidad de copias en el PDF (default 1). Cada copia es
+   *    una página independiente para que la térmica corte una a una.
+   *  - `warehouseId` → opcional. Si viene, el footer incluye el
+   *    `Stock.locationCode` de esa bodega.
+   *
+   * Devuelve `application/pdf` inline (el browser puede abrirlo en otra pestaña
+   * para imprimir directamente).
+   */
+  @Get(':id/label')
+  async label(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Query('qty') qty: string | undefined,
+    @Query('warehouseId') warehouseId: string | undefined,
+    @Res() res: Response,
+  ) {
+    const qtyNum = qty ? Number(qty) : 1;
+    if (!Number.isFinite(qtyNum) || qtyNum < 1 || qtyNum > 100) {
+      throw new BadRequestException('qty debe ser un entero entre 1 y 100');
+    }
+    const buffer = await this.labels.generate(id, {
+      qty: Math.floor(qtyNum),
+      warehouseId: warehouseId || undefined,
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="etiqueta-${id}.pdf"`,
+    );
+    res.send(buffer);
   }
 
   /**

@@ -1,9 +1,11 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Search } from 'lucide-react';
+import { Camera, Search } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
+import { CameraScanner } from '@/components/camera-scanner';
 import {
   CommandDialog,
   CommandEmpty,
@@ -12,7 +14,10 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
-import { quickSearchProducts } from '@/lib/catalog-api';
+import {
+  lookupProductByCode,
+  quickSearchProducts,
+} from '@/lib/catalog-api';
 
 function isMac() {
   if (typeof navigator === 'undefined') return false;
@@ -22,9 +27,32 @@ function isMac() {
 export function QuickSearch() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [scannerOpen, setScannerOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
   const [mac, setMac] = useState(false);
+
+  // Fase 11 — al escanear (cámara o tecleado por el USB), hacemos lookup
+  // exacto y si hay match navegamos directo al detalle. Si no, dejamos el
+  // texto en el input para que el operador vea matches LIKE.
+  const handleScannedCode = async (code: string) => {
+    try {
+      const match = await lookupProductByCode(code);
+      if (match) {
+        setOpen(false);
+        setQuery('');
+        router.push(`/productos/${match.id}`);
+      } else {
+        setQuery(code);
+        toast.warning(
+          `Sin match exacto para "${code}" — buscando coincidencias parciales.`,
+        );
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`No se pudo buscar: ${msg}`);
+    }
+  };
 
   useEffect(() => setMac(isMac()), []);
 
@@ -74,11 +102,23 @@ export function QuickSearch() {
         </kbd>
       </button>
       <CommandDialog open={open} onOpenChange={setOpen} shouldFilter={false}>
-        <CommandInput
-          placeholder="SKU, código universal, compatible, nombre…"
-          value={query}
-          onValueChange={setQuery}
-        />
+        <div className="flex items-center border-b">
+          <CommandInput
+            placeholder="SKU, código universal, compatible, nombre…"
+            value={query}
+            onValueChange={setQuery}
+            className="flex-1 border-0"
+          />
+          <button
+            type="button"
+            onClick={() => setScannerOpen(true)}
+            title="Escanear con cámara"
+            className="mr-2 inline-flex h-8 items-center gap-1.5 rounded-md border bg-card px-2.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <Camera className="h-3.5 w-3.5" />
+            Escanear
+          </button>
+        </div>
         <CommandList>
           {results.data && results.data.length === 0 && debounced && (
             <CommandEmpty>Sin resultados para “{debounced}”</CommandEmpty>
@@ -114,6 +154,15 @@ export function QuickSearch() {
           )}
         </CommandList>
       </CommandDialog>
+
+      {/* Fase 11 — scanner por cámara, reutiliza el mismo componente que
+          ProductPicker. Al detectar un código, lookup exacto → detalle. */}
+      <CameraScanner
+        open={scannerOpen}
+        onOpenChange={setScannerOpen}
+        onDetected={handleScannedCode}
+        hint="Apuntá al código del producto que querés abrir."
+      />
     </>
   );
 }

@@ -29,7 +29,7 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 | — | **Ronda 4** (transversal antes de Fase 9): responsive móvil — sidebar drawer + tablas optimizadas + revisión de forms en mobile | ✅ |
 | 9 | Dashboard mobile-first con KPIs **clicables** del día + alertas (iteración 9.1; gráficos 9.2 pendiente) | ✅ |
 | 10 | **Carga masiva Excel + exports masivos** — importers UPSERT (productos por SKU + auto-create cat/marcas, clientes y proveedores por RUT, todos con partial success) + 10 exports XLSX masivos que respetan filtros e ignoran paginación. Parser robusto contra Google Sheets / Numbers / fórmulas / formato chileno. | ✅ |
-| 11 | Códigos de barras + etiquetas + refinamiento de plantillas | pendiente |
+| 11 | **Códigos de barras + etiquetas térmicas + barcode en guía de despacho** — `<CameraScanner>` con `@zxing/browser` integrado en ProductPicker, Cmd+K y pantalla `/escanear`. Endpoint `/products/lookup?code=` para escáner USB (Enter → lookup exacto). Etiquetas 50×30mm con CODE128 (`bwip-js`) + dialog de cantidad en el detalle del producto. Barcode CODE128 del número de guía en el PDF de despacho. Detalle en [PHASE-11.md](PHASE-11.md). | ✅ |
 | 12 | Deploy (Railway + Vercel + Resend) | pendiente |
 | 13 | HubSpot refinamientos post-MVP (webhook inverso + Deals + sync histórico) — base ya en Fase 8.5 | pendiente |
 | 14 | Manual + video + soporte post-entrega | pendiente |
@@ -1561,6 +1561,63 @@ Una compra creada era inmutable; no se podía adjuntar la factura después.
 - **`POST /purchases/:id/cancel`**: cancelación atómica con motivo (mín. 5 caracteres). Revierte el stock emitiendo `RETURN_OUT` con qty negativa equivalente a cada `PURCHASE_IN` original (los movimientos son la fuente de verdad de a qué bodega volver) y anula la transacción de caja con `voidTransaction`. Si el stock ya se consumió, `applyMovement` rechaza con 409 — hay que revertir esas operaciones derivadas primero.
 - **Migración** `1779200000000-PurchaseEditCancelRound5.ts`: agrega a `purchase_entries` el enum `status` (`ACTIVE` | `CANCELLED`, default `ACTIVE`) más `cancelledAt`, `cancelReason`, `cancelledById` (FK a `users`) e índice sobre `status`.
 - **Frontend**: el listado `/compras` muestra badge de estado y las filas linkean al nuevo detalle [`/compras/[id]`](apps/web/app/(dashboard)/compras/[id]/page.tsx), con `EditPurchaseDialog` y `CancelPurchaseDialog`.
+
+---
+
+## Fase 11 — Códigos de barras, etiquetas y refinamiento de plantillas
+
+> **Documentación exhaustiva en [PHASE-11.md](PHASE-11.md)** — contexto completo, decisiones, arquitectura, endpoints, UI y plan detallado de tests E2E. Este resumen es para tener una referencia rápida desde el README general.
+
+### Qué incluye
+
+Cubre los **3 lados** del problema de códigos de barras en la operación diaria:
+
+1. **Entrada por scanner**: `<CameraScanner>` con `@zxing/browser` (cámara) + handler `onKeyDown Enter` para el lector USB que se comporta como teclado. Integrado en `<ProductPicker>` (ventas/cotizaciones), `<QuickSearch>` (Cmd+K global) y la nueva pantalla dedicada [`/escanear`](apps/web/app/(dashboard)/escanear/page.tsx).
+2. **Salida por etiqueta**: PDF térmico 50×30mm con barcode CODE128 + SKU + nombre + precio (opcional locationCode). Botón "Imprimir etiqueta" en el header del detalle de producto, abre un dialog con cantidad (1..100).
+3. **Refinamiento de plantillas**: barcode CODE128 del número agregado al PDF de **guía de despacho** (esquina superior derecha del título).
+
+### Stack agregado
+
+| Lado | Librería | Para qué |
+| --- | --- | --- |
+| Backend (`apps/api`) | [`bwip-js`](https://github.com/metafloor/bwip-js) | Genera PNG del barcode CODE128 para embeber en los PDFs (etiqueta y guía). |
+| Frontend (`apps/web`) | [`@zxing/browser`](https://github.com/zxing-js/browser) + [`@zxing/library`](https://github.com/zxing-js/library) | Decodifica códigos desde el video de la cámara. `BrowserMultiFormatReader` soporta CODE128, EAN-13, EAN-8, QR, Code39, ITF y más sin configuración. |
+
+### Endpoints nuevos
+
+| Método | Ruta | Para qué |
+| --- | --- | --- |
+| `GET` | [`/api/products/lookup?code=`](apps/api/src/products/products.controller.ts) | Lookup EXACTO contra `sku`, `partNumber`, `barcode`, `universalCode` y `product_codes.code`. Pensado para scanners: un match → acción inmediata sin tener que elegir entre N resultados. 404 si no hay match exacto. |
+| `GET` | [`/api/products/:id/label?qty=&warehouseId=`](apps/api/src/products/products.controller.ts) | PDF 50×30mm térmico con barcode CODE128 + SKU + nombre + precio. `qty` = cantidad de copias (1..100, default 1). `warehouseId` opcional = agrega `Stock.locationCode` al footer si está definido. |
+
+> El barcode CODE128 del número se renderea **inline en `generateDispatchLetter`** (no es endpoint nuevo) cuando se descarga el PDF de una guía activa.
+
+### Archivos nuevos
+
+```
+apps/api/src/
+├── common/barcode.ts                  helper renderBarcodePng() compartido (LabelService + PdfService)
+└── products/label.service.ts          PDF 50×30mm con N copias
+
+apps/web/
+├── components/camera-scanner.tsx      modal con video + @zxing/browser
+├── components/print-label-dialog.tsx  dialog "Imprimir etiqueta" (cantidad + opcional locationCode)
+└── app/(dashboard)/escanear/page.tsx  pantalla dedicada (input USB + botón cámara)
+```
+
+### Decisiones clave (resumen)
+
+| Tema | Decisión |
+| --- | --- |
+| Tipo de barcode | **CODE128** para todo. Alfanumérico, denso, soportado universalmente. |
+| Formato de etiqueta | **50 × 30 mm** una por página (la térmica corta una a una). Confirmado con cliente desde antes. |
+| Lookup vs LIKE | Endpoint dedicado `/lookup` para scanners (EQUALS, 404 si no hay match). El `/quick-search` existente sigue para humanos (LIKE %q%). |
+| Cámara fallback | Si no hay permiso o el browser no soporta MediaDevices → mensaje claro + tip "usa el lector USB o Cmd+K". |
+| Branding de PDFs | Solo barcode en guía de despacho. El branding completo (logo del cliente, paleta) queda para cuando entregue assets finales. |
+
+### Cómo testear
+
+Ver [PHASE-11.md → Plan de tests end-to-end](PHASE-11.md#plan-de-tests-end-to-end) — 7 secciones de verificación que cubren lookup vía API, etiquetas desde UI, URL directa del label, scanner USB, scanner cámara (desktop y mobile), barcode en guía de despacho, y regression de funcionalidad previa.
 
 ---
 

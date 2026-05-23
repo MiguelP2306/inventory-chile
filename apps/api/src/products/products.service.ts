@@ -301,6 +301,49 @@ export class ProductsService {
     return this.attachCoverImages(items);
   }
 
+  /**
+   * Fase 11 — lookup EXACTO por código, optimizado para escaneo (USB o cámara).
+   * A diferencia de `quickSearch` (LIKE %q%, devuelve N resultados), acá
+   * comparamos por igualdad estricta contra los 5 códigos que un scanner
+   * puede leer (`barcode`, `sku`, `partNumber`, `universalCode` y los
+   * `product_codes.code` compatibles). Devuelve el primer match con sus
+   * datos enriquecidos, o `null`.
+   *
+   * El operador escribe (o el scanner inyecta) un código + ENTER; el cliente
+   * llama este endpoint y, si hay match, navega/agrega el producto sin
+   * intervención adicional. Si no hay match, el cliente decide qué hacer
+   * (caer a quickSearch, mostrar "código no reconocido", etc.).
+   */
+  async lookupExact(rawCode: string): Promise<Product | null> {
+    const code = rawCode.trim();
+    if (!code) return null;
+    // Una sola query con OR sobre los 4 campos directos + EXISTS sobre la
+    // tabla `product_codes`. Tomamos el primero ordenado por activo + nombre.
+    const match = await this.products
+      .createQueryBuilder('p')
+      .leftJoinAndSelect('p.category', 'category')
+      .leftJoinAndSelect('p.brand', 'brand')
+      .where(
+        `(
+          p.sku = :code
+          OR p.partNumber = :code
+          OR p.barcode = :code
+          OR p.universalCode = :code
+          OR EXISTS (
+            SELECT 1 FROM product_codes pc
+            WHERE pc.productId = p.id AND pc.code = :code
+          )
+        )`,
+        { code },
+      )
+      .orderBy('p.isActive', 'DESC')
+      .addOrderBy('p.name', 'ASC')
+      .getOne();
+    if (!match) return null;
+    const [withCover] = await this.attachCoverImages([match]);
+    return withCover as Product;
+  }
+
   async quickSearch(query: QuickSearchQueryDto) {
     const limit = query.limit ?? 10;
     const qb = this.products

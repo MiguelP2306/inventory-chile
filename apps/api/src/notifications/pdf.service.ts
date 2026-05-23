@@ -12,6 +12,7 @@ import { readFile } from 'fs/promises';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { join } from 'path';
+import { renderBarcodePng } from '../common/barcode';
 import { CompanySettings } from '../database/entities';
 import { UPLOADS_ROOT } from '../uploads/upload-config';
 
@@ -636,6 +637,31 @@ export class PdfService {
       doc.setTextColor(200, 0, 0);
       doc.text('ANULADA', pageWidth - margin, y, { align: 'right' });
       doc.setTextColor(0, 0, 0);
+    } else {
+      // Fase 11 — barcode CODE128 del número de guía, esquina superior derecha
+      // del título. Permite escanear la guía con scanner USB/cámara para
+      // tracking interno o reimprimir copias. Si bwip-js falla, seguimos sin
+      // el barcode (best-effort, el PDF nunca se rompe por esto).
+      try {
+        const barcodePng = await renderBarcodePng(input.number, {
+          height: 8,
+          scale: 2,
+        });
+        const bcW = 110;
+        const bcH = 22;
+        doc.addImage(
+          barcodePng,
+          'PNG',
+          pageWidth - margin - bcW,
+          y - 16,
+          bcW,
+          bcH,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `No se pudo generar barcode de guía: ${(err as Error).message}`,
+        );
+      }
     }
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);

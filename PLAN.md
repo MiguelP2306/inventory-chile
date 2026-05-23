@@ -659,12 +659,45 @@ Fase 10 cubre dos capacidades complementarias para mover datos en bulk entre Exc
    - Formato monetario `#,##0` para CLP (sin decimales).
    - Nombre de archivo `<recurso>-<YYYY-MM-DD>.xlsx`.
 
-### Fase 11 — Códigos de barras y refinamiento de plantillas
+### Fase 11 — Códigos de barras y refinamiento de plantillas ✅
 
-1. **Lector USB:** input `autoFocus` + handler `Enter` — funciona out-of-the-box.
-2. **Cámara:** componente con `@zxing/browser` para móviles/laptops.
-3. **Generación de etiquetas:** PDF imprimible con barcode CODE128 + SKU + nombre + precio (`bwip-js`). **Formato confirmado con cliente: 50 mm de ancho × 30 mm de alto** para impresora térmica. Endpoint `GET /products/:id/label?format=50x30` y botón "Imprimir etiqueta" en el detalle del producto. Opcional: incluir el `Stock.locationCode` (Fase 7.5) si está definido en la bodega seleccionada — permite que el equipo pegue la etiqueta y se sepa dónde va.
-4. Refinar plantillas de cotización, nota de venta y guía de despacho con branding final del cliente (logo, colores, footer legal). Las plantillas funcionales 80mm + carta ya viven desde Fases 6/7/7.7 — esta fase es solo pulido.
+> Documentación exhaustiva en [PHASE-11.md](PHASE-11.md). Cubre los 3 lados
+> del problema: entrada por scanner (USB y cámara), salida por etiqueta
+> térmica y barcode CODE128 en el PDF de guía de despacho.
+
+1. **Lector USB:** input `autoFocus` + handler `onKeyDown Enter` que dispara
+   `lookupProductByCode` exacto. Aplicado en `<ProductPicker>`, `<QuickSearch>`
+   (Cmd+K) y la pantalla `/escanear`. El USB ya funciona como teclado nativo;
+   este handler hace que un ENTER tras escanear ejecute la acción sin tener
+   que clickear.
+2. **Cámara:** componente `<CameraScanner>` con `@zxing/browser`
+   (`BrowserMultiFormatReader` — soporta CODE128, EAN-13, QR, Code39, etc).
+   Modal reutilizable con marco-guía, busca cámara trasera primero,
+   libera el stream al cerrar. Integrado en los mismos 3 puntos que el USB.
+3. **Endpoint lookup exacto:** `GET /api/products/lookup?code=` compara por
+   igualdad estricta contra `sku`, `partNumber`, `barcode`, `universalCode`
+   y `product_codes.code`. 404 si no hay match. Distinto del `/quick-search`
+   (LIKE) que sigue para humanos.
+4. **Generación de etiquetas:** PDF imprimible 50×30mm con barcode CODE128
+   + nombre + SKU + precio + (opcional) `Stock.locationCode` (`bwip-js` +
+   `jsPDF`). Endpoint `GET /api/products/:id/label?qty=1..100&warehouseId=`.
+   Botón "Imprimir etiqueta" en el header del detalle de producto abre un
+   dialog con selector de cantidad (1..100, una página por copia para que la
+   térmica corte una a una).
+5. **Pantalla dedicada `/escanear`** con cards "Lector USB" + "Cámara",
+   item nuevo en sidebar (sección Operación). Al detectar un código, lookup
+   exacto → navega a `/productos/<id>`. Si no hay match, mensaje claro con
+   tip de fallback al listado.
+6. **Refinar plantillas** — **alcance MVP**: barcode CODE128 del número de
+   guía agregado al PDF de **guía de despacho** (esquina superior derecha
+   del título), best-effort (si bwip-js falla, el PDF se arma sin él). El
+   branding completo (logo del cliente, paleta corporativa, footer legal)
+   queda postergado hasta que el cliente entregue los assets reales.
+
+**Stack agregado**: `bwip-js` en `apps/api` (renderiza PNG del barcode para
+embeber en PDFs) + `@zxing/browser` + `@zxing/library` en `apps/web`
+(decodea el video de la cámara). Helper compartido `apps/api/src/common/barcode.ts`
+con `renderBarcodePng()` reusado por `LabelService` y `PdfService`.
 
 ### Fase 12 — Deploy
 

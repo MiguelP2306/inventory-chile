@@ -148,6 +148,35 @@ export const listProducts = (params: ListProductsParams = {}) =>
 export const getProduct = (id: string) =>
   api.get<ProductDto>(`/products/${id}`).then((r) => r.data);
 
+/**
+ * Fase 11 — lookup EXACTO por código (scanner USB o cámara). Devuelve el
+ * producto si hay match exacto contra `sku`, `partNumber`, `barcode`,
+ * `universalCode` o `product_codes.code`. Devuelve `null` si no hay match
+ * (404 atrapado para que el caller decida UX — toast "código no reconocido"
+ * o fallback a quickSearch).
+ */
+export const lookupProductByCode = async (
+  code: string,
+): Promise<ProductDto | null> => {
+  try {
+    const r = await api.get<ProductDto>('/products/lookup', {
+      params: { code },
+    });
+    return r.data;
+  } catch (err) {
+    // 404 = sin match. Cualquier otro error se propaga.
+    if (
+      err &&
+      typeof err === 'object' &&
+      'response' in err &&
+      (err as { response?: { status?: number } }).response?.status === 404
+    ) {
+      return null;
+    }
+    throw err;
+  }
+};
+
 export interface FitmentInput {
   modelId: string;
   yearFrom?: number | null;
@@ -261,4 +290,29 @@ export function apiErrorMessage(err: unknown, fallback = 'Error inesperado') {
   if (typeof message === 'string') return message;
   if (Array.isArray(message)) return message.join(', ');
   return fallback;
+}
+
+// ---------- Fase 11 — Etiquetas ----------
+
+/**
+ * URL absoluta del PDF de etiqueta térmica 50×30mm para un producto. El
+ * browser hace download/preview directo — sin pasar por axios — para que la
+ * impresora térmica pueda imprimirlo desde otra pestaña.
+ *
+ *  - `qty`: cantidad de copias (default 1, max 100).
+ *  - `warehouseId`: opcional, agrega `locationCode` al footer si está definido.
+ */
+export function getProductLabelUrl(
+  productId: string,
+  options: { qty?: number; warehouseId?: string } = {},
+): string {
+  const base = (
+    process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api'
+  ).replace(/\/$/, '');
+  const params: string[] = [];
+  if (options.qty && options.qty > 1) params.push(`qty=${options.qty}`);
+  if (options.warehouseId)
+    params.push(`warehouseId=${encodeURIComponent(options.warehouseId)}`);
+  const qs = params.length ? `?${params.join('&')}` : '';
+  return `${base}/products/${productId}/label${qs}`;
 }
