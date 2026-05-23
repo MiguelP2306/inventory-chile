@@ -28,7 +28,7 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 | 8.5 | **Lead lifecycle + Seguimiento comercial + HubSpot push** (WhatsApp como identificador, lifecycle automático `NEW`/`QUOTED`/`FOLLOW_UP`/`WON`/`LOST`, bandeja `/seguimiento`, sync one-way a HubSpot **off-by-default — stub listo, falta `@hubspot/api-client` cuando el cliente provea API key**) | ✅ |
 | — | **Ronda 4** (transversal antes de Fase 9): responsive móvil — sidebar drawer + tablas optimizadas + revisión de forms en mobile | ✅ |
 | 9 | Dashboard mobile-first con KPIs **clicables** del día + alertas (iteración 9.1; gráficos 9.2 pendiente) | ✅ |
-| 10 | Carga masiva Excel (upsert por SKU + auto-create categorías/marcas) | ✅ |
+| 10 | **Carga masiva Excel + exports masivos** — importers UPSERT (productos por SKU + auto-create cat/marcas, clientes y proveedores por RUT, todos con partial success) + 10 exports XLSX masivos que respetan filtros e ignoran paginación. Parser robusto contra Google Sheets / Numbers / fórmulas / formato chileno. | ✅ |
 | 11 | Códigos de barras + etiquetas + refinamiento de plantillas | pendiente |
 | 12 | Deploy (Railway + Vercel + Resend) | pendiente |
 | 13 | HubSpot refinamientos post-MVP (webhook inverso + Deals + sync histórico) — base ya en Fase 8.5 | pendiente |
@@ -1375,26 +1375,84 @@ Ver [TEST.md](TEST.md#fase-9--dashboard) — sección "Fase 9".
 
 ---
 
-## Fase 10 — Carga masiva Excel
+## Fase 10 — Carga masiva Excel + exports masivos
 
-Importador de productos en bloque para acelerar la carga inicial del catálogo o actualizaciones masivas (precio, costo, códigos compatibles). Flujo de 2 pasos: **subir → preview → confirmar**.
+Fase 10 cubre dos capacidades complementarias para mover datos en bulk entre Excel y la app:
 
-### Decisiones de diseño
+1. **Importer XLSX** — UPSERT masivo de productos, clientes y proveedores desde una plantilla (UX en 3 pasos: subir → preview → confirmar).
+2. **Exporter XLSX** — descarga masiva de cualquier listado del sistema respetando los filtros activos.
 
-- **Estrategia: UPSERT por SKU.** Si el SKU del Excel ya existe en el sistema, la fila lo **actualiza**; si no, lo **crea**. Permite cargar planillas incrementales sin duplicados ni errores. El preview marca cada fila como "Nuevo" (badge verde) o "Actualizar" (badge azul) antes de confirmar.
-- **Auto-create de categorías y marcas.** Si la columna `Categoria` trae un nombre que no existe en el sistema, se crea automáticamente al confirmar. Idem `Marca`. El preview los lista como "Se crearán automáticamente: 5 categorías, 3 marcas" para que el operador no se sorprenda.
-- **Partial success.** Si una fila tiene error (SKU vacío, costo no numérico, etc.), se reporta en el preview con número de fila + motivo. Al confirmar, **las filas válidas se importan y las inválidas se omiten** — no se aborta el batch. La pantalla de resultado lista cada error para que el operador corrija y re-suba si quiere.
-- **No carga stock inicial.** El Excel solo define metadata del catálogo. Stock arranca en 0 en todas las bodegas. Para cargar stock inicial el operador hace una compra histórica o un ajuste manual desde `/inventario`.
-- **Solo .xlsx (no .csv).** Aprovecha celdas tipadas y soporte nativo de Excel/Numbers. Tamaño máximo 5 MB.
+### Regla maestra de exports
 
-### Plantilla
+**Cada export respeta los filtros activos de la pantalla e ignora la paginación.** Sin filtros, baja la base completa. Con filtros, baja todos los matches (no solo la página visible). Esa regla aplica de forma uniforme a los 10 endpoints `.xlsx`.
 
-[`GET /api/imports/products/template.xlsx`](apps/api/src/imports/imports.service.ts) — descarga una plantilla con:
+Cómo se implementa según el caso:
 
-- **Hoja "Productos"** con headers en español + 1 fila de ejemplo.
-- **Hoja "Instrucciones"** con descripción de cada columna y cuáles son obligatorias.
+- **Servicios sin paginación nativa** (`customers`, `suppliers`, `inventory.listStock`): se llama sin `page`/`pageSize` y devuelven el array completo.
+- **Servicios siempre paginados** (`sales`, `purchases`, `quotations`, `cashbox`, `expenses`, `inventory.listMovements`): se itera con `fetchAllPages` (cap defensivo de 50 000 filas) tomando de a 200.
+- **Productos**: método `listForExport` sin tope. El catálogo PDF sigue capeado a 500 con `listForCatalog`.
 
-### Columnas
+### Tabla resumen — exports XLSX
+
+| Pantalla | Endpoint | Filtros respetados | Estrategia |
+| --- | --- | --- | --- |
+| [`/productos`](apps/web/app/(dashboard)/productos/page.tsx) | [`GET /api/products/export.xlsx`](apps/api/src/products/products.controller.ts) | q, categoryId, brandId, productKind, createdFrom/To | `listForExport` (sin cap) |
+| [`/clientes`](apps/web/app/(dashboard)/clientes/page.tsx) | [`GET /api/customers/export.xlsx`](apps/api/src/customers/customers.controller.ts) | q | `list({ q })` |
+| [`/proveedores`](apps/web/app/(dashboard)/proveedores/page.tsx) | [`GET /api/suppliers/export.xlsx`](apps/api/src/suppliers/suppliers.controller.ts) | q | `list({ q })` |
+| [`/cotizaciones`](apps/web/app/(dashboard)/cotizaciones/page.tsx) | [`GET /api/quotations/export.xlsx`](apps/api/src/quotations/quotations.controller.ts) | status, q, customerId, dateFrom/To | `fetchAllPages` |
+| [`/ventas`](apps/web/app/(dashboard)/ventas/page.tsx) | [`GET /api/sales/export.xlsx`](apps/api/src/sales/sales.controller.ts) | status, paymentMethod, q, dateFrom/To | `fetchAllPages` |
+| [`/compras`](apps/web/app/(dashboard)/compras/page.tsx) | [`GET /api/purchases/export.xlsx`](apps/api/src/purchases/purchases.controller.ts) | supplierId, warehouseId, dateFrom/To, totalMin/Max, q | `fetchAllPages` |
+| [`/inventario`](apps/web/app/(dashboard)/inventario/page.tsx) | [`GET /api/inventory/stock.xlsx`](apps/api/src/inventory/inventory.controller.ts) | q, warehouseId, status | `listStock` (sin paginar) |
+| [`/inventario/movimientos`](apps/web/app/(dashboard)/inventario/movimientos/page.tsx) | [`GET /api/inventory/movements.xlsx`](apps/api/src/inventory/inventory.controller.ts) | productId, warehouseId, type, dateFrom/To | `fetchAllPages` |
+| [`/caja`](apps/web/app/(dashboard)/caja/page.tsx) | [`GET /api/cashbox/transactions.xlsx`](apps/api/src/cashbox/cashbox.controller.ts) | type, source, paymentMethod, expenseCategoryId, dateFrom/To, q, includeVoided | `fetchAllPages` |
+| [`/gastos`](apps/web/app/(dashboard)/gastos/page.tsx) | [`GET /api/expenses/export.xlsx`](apps/api/src/expenses/expenses.controller.ts) | categoryId, paymentMethod, dateFrom/To, q, includeVoided | `fetchAllPages` |
+
+> **`/inventario/movimientos`** tiene una salvedad: el listado en pantalla es de "cards" (transacciones agrupadas) y soporta filtros adicionales (cliente/proveedor/búsqueda libre/usuario). El export trabaja a nivel de movimiento atómico y solo respeta los 5 filtros listados arriba. El tooltip del botón lo aclara.
+
+### Convenciones de estilo XLSX
+
+Todos los exports pasan por los helpers compartidos [`apps/api/src/common/xlsx-export.ts`](apps/api/src/common/xlsx-export.ts):
+
+- **Encabezado bold + fill gris** (`#E5E7EB`) — neutro, imprime bien en B/N.
+- **Freeze pane** sobre la primera fila — el header siempre visible al scrollear.
+- **AutoFilter** sobre todas las columnas — el usuario puede filtrar/ordenar el XLSX directamente.
+- **Formato monetario `#,##0`** para columnas de plata (sin decimales — CLP).
+- **Fechas en formato `yyyy-mm-dd`** para ordenamiento natural.
+- **Nombre de archivo** `<recurso>-<YYYY-MM-DD>.xlsx` para no sobreescribir descargas previas.
+
+### Importers XLSX (UPSERT + partial success)
+
+Tres entidades soportan carga masiva. Todas comparten la misma UX y los mismos parsers robustos:
+
+| Entidad | Llave UPSERT | Auto-create de | Plantilla |
+| --- | --- | --- | --- |
+| **Productos** | `SKU` | Categorías + marcas faltantes | [`GET /api/imports/products/template.xlsx`](apps/api/src/imports/imports.service.ts) |
+| **Clientes** | `RUT` | Mapea comuna por nombre contra catálogo Chile (346) | [`GET /api/imports/customers/template.xlsx`](apps/api/src/imports/customers-import.service.ts) |
+| **Proveedores** | `RUT` | — | [`GET /api/imports/suppliers/template.xlsx`](apps/api/src/imports/suppliers-import.service.ts) |
+
+**Decisiones de diseño comunes a los 3 importers:**
+
+- **UPSERT por llave.** Si la llave del Excel ya existe, la fila lo actualiza; si no, lo crea. El preview marca cada fila como "Nuevo" (verde) o "Actualizar" (azul).
+- **Partial success.** Una fila inválida se reporta con `rowNumber + motivo` pero no aborta el batch. Las válidas se importan; las inválidas se listan en la pantalla de resultado para que el operador corrija y re-suba.
+- **Auto-create de entidades relacionadas** (solo productos): categorías/marcas que no existen se crean en la misma transacción. El preview avisa antes de confirmar.
+- **Solo `.xlsx`.** Aprovecha celdas tipadas. Tamaño máximo 5 MB.
+- **Multer en memoria.** El archivo no se persiste a disco: se procesa y se descarta. El operador puede re-subir si necesita corregir.
+
+### Parser robusto — el bug "subo 10, importa 1"
+
+El parser original tenía tres bugs concurrentes que se manifestaban según qué herramienta había generado el XLSX. Polish de mayo 2026 los arregló:
+
+| Bug | Síntoma | Fix |
+| --- | --- | --- |
+| `sheet.actualRowCount` poco confiable | Google Sheets / Numbers / Looker / copy-paste dejaban el contador en 1 aunque el XLSX tuviera 10 filas. El loop se cortaba. | `Math.max(sheet.rowCount, sheet.actualRowCount, sheet.lastRow?.number ?? 0)` |
+| `String(cell.value)` rompía celdas con fórmula / richtext / hyperlink | Una celda `=A2*1.19` quedaba como `"[object Object]"` y rompía el SKU. | `readCellText` cubre `{formula, result}`, `{richText}`, `{text, hyperlink}`, Date, etc. |
+| Formato chileno se interpretaba como decimal US | `"8.000"` se leía como 8 en vez de 8000. | Heurística que detecta CL vs US: si hay punto + coma, el último es decimal; con un solo punto y 3 dígitos a la derecha → miles. |
+
+Los helpers viven en [`apps/api/src/common/xlsx-import.ts`](apps/api/src/common/xlsx-import.ts) y se comparten entre los 3 importers para que el fix nunca se desincronice. Hay también tolerancia a filas vacías intermedias (no cortan el loop) y detección automática del header en las primeras 5 filas (algunos exporters insertan filas vacías arriba).
+
+### Plantilla — columnas
+
+#### Productos
 
 | Columna del Excel | Obligatoria | Descripción |
 | --- | --- | --- |
@@ -1406,27 +1464,62 @@ Importador de productos en bloque para acelerar la carga inicial del catálogo o
 | `Descripcion` | — | Texto libre. |
 | `Categoria` | — | Nombre. Si no existe, se crea. Si vacío, producto sin categoría. |
 | `Marca` | — | Nombre. Si no existe, se crea. |
-| `Costo (bruto)` | — | CLP con IVA. Acepta `8000` o `8.000` o `8,00`. Default 0. |
+| `Costo (bruto)` | — | CLP con IVA. Acepta `8000`, `8.000`, `8,00`, `8.000,50`, `$8.000`. Default 0. |
 | `Precio (bruto)` | — | CLP con IVA. Default 0. |
 | `Stock minimo` | — | Entero ≥ 0. Default 0. |
 | `Stock maximo` | — | Entero ≥ 0. Vacío = sin límite. |
 | `Ubicacion (deprecated)` | — | Deprecated desde Fase 7.5. Usar `locationCode` por bodega. |
-| `Tipo (ORIGINAL/ALTERNATIVE)` | — | Default ORIGINAL. Acepta también "ALTERNATIVO". |
-| `Codigos compatibles (separados por ;)` | — | Lista de equivalencias separados por punto y coma. Ej: `A123; B456; XYZ-789`. Estrategia replace: borra los anteriores y reinserta. |
+| `Tipo (ORIGINAL/ALTERNATIVE)` | — | Default ORIGINAL. Acepta también "ALTERNATIVO" y "OEM". |
+| `Codigos compatibles (separados por ;)` | — | Lista de equivalencias separadas por `;` o `,`. Estrategia replace: borra los anteriores y reinserta. |
 
-### Endpoints
+#### Clientes
 
-- [`POST /api/imports/products/preview`](apps/api/src/imports/imports.controller.ts) — multipart con `file`. Parsea, valida, devuelve `ProductImportPreviewDto` (conteos + primeras 10 filas + errores + categorías/marcas a crear).
-- [`POST /api/imports/products/confirm`](apps/api/src/imports/imports.controller.ts) — mismo multipart. Ejecuta el upsert + auto-create. Devuelve `ProductImportResultDto` (importedCount, createdCount, updatedCount, failedCount, errors).
-- [`GET /api/imports/products/template.xlsx`](apps/api/src/imports/imports.controller.ts) — descarga la plantilla.
+| Columna | Obligatoria | Descripción |
+| --- | --- | --- |
+| `RUT` | ✅ | RUT chileno con DV (12345678-9). Llave del upsert. Validado módulo 11. |
+| `Nombre` | ✅ | Nombre del cliente. |
+| `Email` | — | Email opcional. Si viene, se valida. |
+| `Telefono` | — | Acepta formato local o internacional. Se normaliza a E.164. |
+| `WhatsApp` | — | Teléfono específico para WhatsApp. Fallback al `Telefono` si vacío. |
+| `Direccion` | — | Calle. |
+| `Numero` | — | Número de la dirección. |
+| `Comuna` | — | Nombre exacto contra catálogo Chile (346 comunas). Sin acentos OK. |
+| `Notas internas` | — | No aparecen en cotizaciones ni en portal del cliente. |
 
-### UI
+#### Proveedores
 
-- **`/productos/importar`** ([apps/web/app/(dashboard)/productos/importar/page.tsx](apps/web/app/(dashboard)/productos/importar/page.tsx)) — drag&drop o file picker. Tres estados:
-  1. **Subir**: zona drop con borde punteado. Acepta solo `.xlsx`.
-  2. **Preview**: 4 cards de conteo + lista de categorías/marcas a crear + lista de errores + tabla con primeras 10 filas válidas + botones "Cancelar" / "Confirmar e importar N productos".
-  3. **Resultado**: card verde de éxito + 4 cards de conteo final + lista de errores no resueltos + botones "Ver catálogo" / "Importar otro Excel".
-- Botón **"Importar Excel"** en el header de `/productos` que abre la pantalla.
+| Columna | Obligatoria | Descripción |
+| --- | --- | --- |
+| `RUT` | ✅ | RUT con DV. Llave del upsert. |
+| `Nombre comercial` | ✅ | Nombre con el que se conoce al proveedor. |
+| `Razon social` | — | Razón social formal cuando difiere del comercial. |
+| `Persona de contacto` | — | Vendedor habitual. |
+| `Email` | — | Email opcional. |
+| `Telefono` | — | Se normaliza a E.164. |
+| `Direccion` | — | Texto libre. |
+| `Notas` | — | Notas internas. |
+
+### Endpoints — import
+
+| Endpoint | Multipart | Devuelve |
+| --- | --- | --- |
+| [`POST /api/imports/products/preview`](apps/api/src/imports/imports.controller.ts) | `file` | `ProductImportPreviewDto` |
+| [`POST /api/imports/products/confirm`](apps/api/src/imports/imports.controller.ts) | `file` | `ProductImportResultDto` |
+| [`GET /api/imports/products/template.xlsx`](apps/api/src/imports/imports.controller.ts) | — | XLSX |
+| [`POST /api/imports/customers/preview`](apps/api/src/imports/imports.controller.ts) | `file` | `CustomerImportPreviewDto` |
+| [`POST /api/imports/customers/confirm`](apps/api/src/imports/imports.controller.ts) | `file` | `CustomerImportResultDto` |
+| [`GET /api/imports/customers/template.xlsx`](apps/api/src/imports/imports.controller.ts) | — | XLSX |
+| [`POST /api/imports/suppliers/preview`](apps/api/src/imports/imports.controller.ts) | `file` | `SupplierImportPreviewDto` |
+| [`POST /api/imports/suppliers/confirm`](apps/api/src/imports/imports.controller.ts) | `file` | `SupplierImportResultDto` |
+| [`GET /api/imports/suppliers/template.xlsx`](apps/api/src/imports/imports.controller.ts) | — | XLSX |
+
+### UI — import
+
+- [`/productos/importar`](apps/web/app/(dashboard)/productos/importar/page.tsx)
+- [`/clientes/importar`](apps/web/app/(dashboard)/clientes/importar/page.tsx)
+- [`/proveedores/importar`](apps/web/app/(dashboard)/proveedores/importar/page.tsx)
+
+Las tres tienen la misma UX: drag&drop o file picker → preview con conteos + primeras 10 filas + lista de errores → confirmación → pantalla de resultado con detalle. El botón **"Importar Excel"** vive en el header del listado correspondiente, junto a "Exportar Excel" y al CTA principal.
 
 ### Cómo testear
 

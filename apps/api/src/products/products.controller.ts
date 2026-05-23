@@ -27,6 +27,7 @@ import {
 import type { Response } from 'express';
 import { BrandsService } from '../brands/brands.service';
 import { CategoriesService } from '../categories/categories.service';
+import { MONEY_FMT, sendXlsx, stylizeSheet } from '../common/xlsx-export';
 import { PdfService } from '../notifications/pdf.service';
 import { SettingsService } from '../settings/settings.service';
 import {
@@ -99,6 +100,78 @@ export class ProductsController {
    * (`q`, `categoryId`, `brandId`, `productKind`, `createdFrom/To`) pero
    * ignora paginación: exporta hasta 500 productos.
    */
+  /**
+   * Export del catálogo a XLSX. Mismos filtros que `catalog.pdf` (`q`,
+   * `categoryId`, `brandId`, `productKind`, `createdFrom/To`), ignora
+   * paginación. Reusa `listForCatalog()` que limita a 500 productos —
+   * suficiente para SMB y evita OOM en catálogos gigantes.
+   */
+  @Get('export.xlsx')
+  async exportXlsx(
+    @Query() query: ListProductsQueryDto,
+    @Res() res: Response,
+  ) {
+    // Fase 10 polish — usamos `listForExport` (sin cap) en vez de
+    // `listForCatalog` (cap 500 para PDF). El operador debe poder bajar TODO
+    // el catálogo a Excel sin tope.
+    const products = await this.svc.listForExport(query);
+    const categoriesPlain = await this.categories.list();
+    const categoriesArr = Array.isArray(categoriesPlain)
+      ? categoriesPlain
+      : categoriesPlain.items;
+    const categoryById = new Map(categoriesArr.map((c) => [c.id, c]));
+
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Inventory App';
+    wb.created = new Date();
+
+    const sheet = wb.addWorksheet('Productos');
+    sheet.columns = [
+      { header: 'SKU', key: 'sku', width: 18 },
+      { header: 'Nombre', key: 'name', width: 36 },
+      { header: 'PartNumber', key: 'partNumber', width: 16 },
+      { header: 'Código de barras', key: 'barcode', width: 18 },
+      { header: 'Código universal', key: 'universalCode', width: 18 },
+      { header: 'Categoría', key: 'category', width: 22 },
+      { header: 'Subcategoría', key: 'subcategory', width: 22 },
+      { header: 'Marca', key: 'brand', width: 18 },
+      { header: 'Tipo', key: 'kind', width: 14 },
+      { header: 'Costo', key: 'cost', width: 14, style: { numFmt: MONEY_FMT } },
+      { header: 'Precio', key: 'price', width: 14, style: { numFmt: MONEY_FMT } },
+      { header: 'Stock mín.', key: 'minStock', width: 10 },
+      { header: 'Stock máx.', key: 'maxStock', width: 10 },
+      { header: 'Descripción', key: 'description', width: 40 },
+      { header: 'Activo', key: 'isActive', width: 8 },
+    ];
+
+    for (const p of products) {
+      const cat = p.categoryId ? categoryById.get(p.categoryId) : null;
+      const categoryName = cat?.parentName ?? cat?.name ?? '';
+      const subcategoryName = cat?.parentName ? cat.name : '';
+      sheet.addRow({
+        sku: p.sku ?? '',
+        name: p.name,
+        partNumber: p.partNumber ?? '',
+        barcode: p.barcode ?? '',
+        universalCode: p.universalCode ?? '',
+        category: categoryName,
+        subcategory: subcategoryName,
+        brand: p.brand?.name ?? '',
+        kind: p.productKind === 'ORIGINAL' ? 'Original' : 'Alternativo',
+        cost: parseFloat(p.cost ?? '0'),
+        price: parseFloat(p.price ?? '0'),
+        minStock: p.minStock ?? 0,
+        maxStock: p.maxStock ?? '',
+        description: p.description ?? '',
+        isActive: p.isActive ? 'Sí' : 'No',
+      });
+    }
+
+    stylizeSheet(sheet);
+    await sendXlsx(res, wb, 'productos');
+  }
+
   @Get('catalog.pdf')
   async catalogPdf(
     @Query() query: ListProductsQueryDto,

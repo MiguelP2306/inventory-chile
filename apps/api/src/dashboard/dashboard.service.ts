@@ -8,6 +8,7 @@ import type {
   DashboardCategoryBreakdownDto,
   DashboardFollowUpDto,
   DashboardLifecycleFunnelDto,
+  DashboardRangeDto,
   DashboardSalesTrendPointDto,
   DashboardSummaryDto,
   DashboardTopProductDto,
@@ -74,37 +75,31 @@ export class DashboardService {
     private readonly cashbox: CashboxService,
   ) {}
 
-  async summary(): Promise<DashboardSummaryDto> {
+  async summary(range: DashboardRangeDto): Promise<DashboardSummaryDto> {
     const {
-      todayStart,
-      todayEnd,
-      yesterdayStart,
-      yesterdayEnd,
-      monthStart,
-      monthEnd,
-      lastMonthStart,
-      lastMonthEnd,
+      currentStart,
+      currentEnd,
+      prevStart,
+      prevEnd,
       trendStart,
       trendEnd,
-    } = computeRanges();
+    } = computeRanges(range);
 
     // Disparamos todas las queries en paralelo. Cada bloque es independiente.
     const [
-      todaySalesAgg,
-      yesterdaySalesAgg,
-      todayQuotationsAgg,
-      todayCashFlow,
-      yesterdayCashFlow,
+      currentSalesAgg,
+      prevSalesAgg,
+      currentQuotationsAgg,
+      currentCashFlow,
+      prevCashFlow,
       cashBalance,
       lifecycleCounts,
       lifecycleFunnel,
-      wonThisMonth,
-      monthSalesAgg,
-      monthCogs,
-      monthExpensesAgg,
-      lastMonthSalesAgg,
-      lastMonthCogs,
-      lastMonthExpensesAgg,
+      wonInRange,
+      currentCogs,
+      currentExpensesAgg,
+      prevCogs,
+      prevExpensesAgg,
       inventoryValue,
       stockStatusCounts,
       noMovementCount,
@@ -114,72 +109,66 @@ export class DashboardService {
       topCategories,
       followUps,
     ] = await Promise.all([
-      this.aggregateSalesInRange(todayStart, todayEnd),
-      this.aggregateSalesInRange(yesterdayStart, yesterdayEnd),
-      this.aggregateQuotationsInRange(todayStart, todayEnd),
-      this.aggregateCashFlowNetInRange(todayStart, todayEnd),
-      this.aggregateCashFlowNetInRange(yesterdayStart, yesterdayEnd),
+      this.aggregateSalesInRange(currentStart, currentEnd),
+      this.aggregateSalesInRange(prevStart, prevEnd),
+      this.aggregateQuotationsInRange(currentStart, currentEnd),
+      this.aggregateCashFlowNetInRange(currentStart, currentEnd),
+      this.aggregateCashFlowNetInRange(prevStart, prevEnd),
       this.cashbox.balance(),
       this.lifecycleCounts(),
-      this.lifecycleFunnelCounts(monthStart, monthEnd),
-      this.wonCustomersInRange(monthStart, monthEnd),
-      this.aggregateSalesInRange(monthStart, monthEnd),
-      this.aggregateCogsInRange(monthStart, monthEnd),
-      this.aggregateExpensesInRange(monthStart, monthEnd),
-      this.aggregateSalesInRange(lastMonthStart, lastMonthEnd),
-      this.aggregateCogsInRange(lastMonthStart, lastMonthEnd),
-      this.aggregateExpensesInRange(lastMonthStart, lastMonthEnd),
+      this.lifecycleFunnelCounts(),
+      this.wonCustomersInRange(currentStart, currentEnd),
+      this.aggregateCogsInRange(currentStart, currentEnd),
+      this.aggregateExpensesInRange(currentStart, currentEnd),
+      this.aggregateCogsInRange(prevStart, prevEnd),
+      this.aggregateExpensesInRange(prevStart, prevEnd),
       this.totalInventoryValue(),
       this.stockStatusCounts(),
       this.noMovementCount(30),
       this.aggregateSalesByDayInRange(trendStart, trendEnd),
       this.aggregateCashFlowByDayInRange(trendStart, trendEnd),
-      this.topProductsForMonth(monthStart, monthEnd, lastMonthStart, lastMonthEnd, 10),
-      this.categoriesBreakdownForMonth(monthStart, monthEnd),
+      this.topProductsForRange(currentStart, currentEnd, prevStart, prevEnd, 10),
+      this.categoriesBreakdownForRange(currentStart, currentEnd),
       this.urgentFollowUps(10),
     ]);
 
-    // Utilidad del mes (sin IVA): ventas_subtotal − COGS − gastos.
+    // Utilidad del período seleccionado (sin IVA): subtotal_ventas − COGS − gastos.
     // (Decisión documentada en CHANGELOG-FASE-9: la fórmula deja afuera el IVA
     // débito porque no es ganancia del negocio; el IVA se balancea contra el
     // IVA crédito de compras en el reporte de IVA separado.)
-    const monthProfitNum =
-      Number(monthSalesAgg.subtotal) - Number(monthCogs) - Number(monthExpensesAgg);
-    const lastMonthProfitNum =
-      Number(lastMonthSalesAgg.subtotal) -
-      Number(lastMonthCogs) -
-      Number(lastMonthExpensesAgg);
-    const profit = monthProfitNum.toFixed(2);
+    const currentProfitNum =
+      Number(currentSalesAgg.subtotal) -
+      Number(currentCogs) -
+      Number(currentExpensesAgg);
+    const prevProfitNum =
+      Number(prevSalesAgg.subtotal) - Number(prevCogs) - Number(prevExpensesAgg);
+    const profit = currentProfitNum.toFixed(2);
 
-    // Rotación de inventario: COGS_del_mes / inventario_promedio_del_mes.
-    // Si todavía no tenemos un snapshot histórico para inventario promedio,
-    // aproximamos con el inventario ACTUAL (single-point en lugar de
-    // promedio). Es una aproximación razonable mientras no haya un job que
-    // capture stock diario. Lo marcamos en la respuesta para que la UI lo
-    // muestre como "aprox.".
+    // Rotación de inventario: COGS_del_rango / inventario_actual.
+    // Aproximación válida mientras no haya snapshot histórico de stock.
     const turnover =
       Number(inventoryValue) > 0
-        ? Number(monthCogs) / Number(inventoryValue)
+        ? Number(currentCogs) / Number(inventoryValue)
         : 0;
 
-    // Deltas hoy vs ayer / mes vs mes anterior. null cuando la base es 0 para
-    // evitar Infinity en la UI.
+    // Deltas: período actual vs período previo del mismo tamaño.
     const salesDeltaPct = pctDelta(
-      Number(todaySalesAgg.total),
-      Number(yesterdaySalesAgg.total),
+      Number(currentSalesAgg.total),
+      Number(prevSalesAgg.total),
     );
-    const cashDeltaPct = pctDelta(todayCashFlow, yesterdayCashFlow);
-    const profitDeltaPct = pctDelta(monthProfitNum, lastMonthProfitNum);
+    const cashDeltaPct = pctDelta(currentCashFlow, prevCashFlow);
+    const profitDeltaPct = pctDelta(currentProfitNum, prevProfitNum);
 
     return {
+      range,
       today: {
         sales: {
-          count: todaySalesAgg.count,
-          amount: todaySalesAgg.total,
+          count: currentSalesAgg.count,
+          amount: currentSalesAgg.total,
         },
         quotations: {
-          count: todayQuotationsAgg.count,
-          amount: todayQuotationsAgg.total,
+          count: currentQuotationsAgg.count,
+          amount: currentQuotationsAgg.total,
         },
         cash: {
           total: cashBalance.total,
@@ -189,13 +178,13 @@ export class DashboardService {
       lifecycle: {
         pendingFollowUp: lifecycleCounts.pendingFollowUp,
         overdueFollowUp: lifecycleCounts.overdueFollowUp,
-        wonThisMonth,
+        wonThisMonth: wonInRange,
       },
       month: {
         profit,
-        salesSubtotal: monthSalesAgg.subtotal,
-        cogs: monthCogs,
-        expenses: monthExpensesAgg,
+        salesSubtotal: currentSalesAgg.subtotal,
+        cogs: currentCogs,
+        expenses: currentExpensesAgg,
         inventoryValue,
       },
       alerts: {
@@ -220,15 +209,15 @@ export class DashboardService {
         profitDeltaPct,
       },
       monthBreakdown: {
-        netSales: Number(monthSalesAgg.subtotal),
-        cogs: Number(monthCogs),
-        expenses: Number(monthExpensesAgg),
+        netSales: Number(currentSalesAgg.subtotal),
+        cogs: Number(currentCogs),
+        expenses: Number(currentExpensesAgg),
       },
       lifecycleFunnel: {
         NEW: lifecycleFunnel.NEW,
         QUOTED: lifecycleFunnel.QUOTED,
         FOLLOW_UP: lifecycleFunnel.FOLLOW_UP,
-        WON: wonThisMonth, // alineado con lifecycle.wonThisMonth por consistencia
+        WON: wonInRange,
         LOST: lifecycleFunnel.LOST,
       },
     };
@@ -406,7 +395,7 @@ export class DashboardService {
    * Hace 3 queries: top del mes, mismos productos en mes anterior, covers en
    * batch. Ordenado por amount desc.
    */
-  private async topProductsForMonth(
+  private async topProductsForRange(
     from: Date,
     to: Date,
     prevFrom: Date,
@@ -487,7 +476,7 @@ export class DashboardService {
    *
    * Una sola query con LEFT JOIN a subqueries de inventario.
    */
-  private async categoriesBreakdownForMonth(
+  private async categoriesBreakdownForRange(
     from: Date,
     to: Date,
   ): Promise<DashboardCategoryBreakdownDto[]> {
@@ -645,10 +634,9 @@ export class DashboardService {
    * caller con el mismo cálculo que `wonCustomersInRange` para mantener
    * consistencia con `lifecycle.wonThisMonth`.
    */
-  private async lifecycleFunnelCounts(
-    _monthStart: Date,
-    _monthEnd: Date,
-  ): Promise<Omit<DashboardLifecycleFunnelDto, 'WON'>> {
+  private async lifecycleFunnelCounts(): Promise<
+    Omit<DashboardLifecycleFunnelDto, 'WON'>
+  > {
     const rows = await this.customers
       .createQueryBuilder('c')
       .select('c.lifecycleStatus', 'status')
@@ -771,21 +759,29 @@ export class DashboardService {
 // ---------- helpers privados a este módulo ----------
 
 /**
- * Calcula los bordes del día y mes ACTUAL en horario local del servidor.
- * También expone el día anterior, mes anterior, y ventana de tendencia (30
- * días terminando hoy). Producción corre en America/Santiago — el sistema
- * usa `new Date()` y los comparadores TypeORM/MySQL ya trabajan en la zona
- * del server.
+ * Calcula los bordes del rango seleccionado y el rango previo (de igual
+ * tamaño) para los deltas de comparación. También fija la ventana de
+ * tendencia (chart) según el rango.
+ *
+ * Reglas:
+ *   - `hoy`  → currentRange = hoy. prevRange = ayer. trend = últimos 30 días
+ *     (1 punto no se puede graficar, así que mantenemos el contexto extendido).
+ *   - `7d`   → currentRange = últimos 7 días terminando hoy. prevRange = los 7
+ *     días previos. trend = mismos 7 días.
+ *   - `30d`  → currentRange = últimos 30 días. prevRange = los 30 días previos.
+ *     trend = mismos 30 días.
+ *   - `mes`  → currentRange = mes actual (día 1 al fin de mes). prevRange = mes
+ *     anterior. trend = días del mes actual transcurridos + lo que falte hasta
+ *     fin de mes (huecos se rellenan con 0).
+ *
+ * Producción corre en America/Santiago — el sistema usa `new Date()` y los
+ * comparadores TypeORM/MySQL ya trabajan en la zona del server.
  */
-function computeRanges(): {
-  todayStart: Date;
-  todayEnd: Date;
-  yesterdayStart: Date;
-  yesterdayEnd: Date;
-  monthStart: Date;
-  monthEnd: Date;
-  lastMonthStart: Date;
-  lastMonthEnd: Date;
+function computeRanges(range: DashboardRangeDto): {
+  currentStart: Date;
+  currentEnd: Date;
+  prevStart: Date;
+  prevEnd: Date;
   trendStart: Date;
   trendEnd: Date;
 } {
@@ -797,30 +793,50 @@ function computeRanges(): {
   const todayStart = new Date(y, m, d, 0, 0, 0, 0);
   const todayEnd = new Date(y, m, d, 23, 59, 59, 999);
 
-  const yesterdayStart = new Date(y, m, d - 1, 0, 0, 0, 0);
-  const yesterdayEnd = new Date(y, m, d - 1, 23, 59, 59, 999);
+  if (range === 'hoy') {
+    return {
+      currentStart: todayStart,
+      currentEnd: todayEnd,
+      prevStart: new Date(y, m, d - 1, 0, 0, 0, 0),
+      prevEnd: new Date(y, m, d - 1, 23, 59, 59, 999),
+      // 30 días terminando hoy para que el chart tenga contexto suficiente.
+      trendStart: new Date(y, m, d - 29, 0, 0, 0, 0),
+      trendEnd: todayEnd,
+    };
+  }
 
+  if (range === '7d') {
+    return {
+      currentStart: new Date(y, m, d - 6, 0, 0, 0, 0),
+      currentEnd: todayEnd,
+      prevStart: new Date(y, m, d - 13, 0, 0, 0, 0),
+      prevEnd: new Date(y, m, d - 7, 23, 59, 59, 999),
+      trendStart: new Date(y, m, d - 6, 0, 0, 0, 0),
+      trendEnd: todayEnd,
+    };
+  }
+
+  if (range === '30d') {
+    return {
+      currentStart: new Date(y, m, d - 29, 0, 0, 0, 0),
+      currentEnd: todayEnd,
+      prevStart: new Date(y, m, d - 59, 0, 0, 0, 0),
+      prevEnd: new Date(y, m, d - 30, 23, 59, 59, 999),
+      trendStart: new Date(y, m, d - 29, 0, 0, 0, 0),
+      trendEnd: todayEnd,
+    };
+  }
+
+  // 'mes'
   const monthStart = new Date(y, m, 1, 0, 0, 0, 0);
   const monthEnd = new Date(y, m + 1, 0, 23, 59, 59, 999);
-
-  const lastMonthStart = new Date(y, m - 1, 1, 0, 0, 0, 0);
-  const lastMonthEnd = new Date(y, m, 0, 23, 59, 59, 999);
-
-  // 30 días terminando HOY (inclusive). trendStart es el día -29.
-  const trendStart = new Date(y, m, d - 29, 0, 0, 0, 0);
-  const trendEnd = todayEnd;
-
   return {
-    todayStart,
-    todayEnd,
-    yesterdayStart,
-    yesterdayEnd,
-    monthStart,
-    monthEnd,
-    lastMonthStart,
-    lastMonthEnd,
-    trendStart,
-    trendEnd,
+    currentStart: monthStart,
+    currentEnd: monthEnd,
+    prevStart: new Date(y, m - 1, 1, 0, 0, 0, 0),
+    prevEnd: new Date(y, m, 0, 23, 59, 59, 999),
+    trendStart: monthStart,
+    trendEnd: monthEnd,
   };
 }
 

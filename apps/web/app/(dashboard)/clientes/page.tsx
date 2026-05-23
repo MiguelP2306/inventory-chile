@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Plus } from 'lucide-react';
+import { FileDown, FileSpreadsheet, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,6 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { apiAbsoluteUrl } from '@/lib/api';
 import { listCustomersPaginated } from '@/lib/customers-api';
 import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
@@ -45,14 +46,36 @@ export default function ClientesPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-semibold">Clientes</h1>
-        <Button asChild>
-          <Link href="/clientes/nuevo">
-            <Plus className="h-4 w-4" />
-            Nuevo cliente
-          </Link>
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" size="sm">
+            <a
+              href={apiAbsoluteUrl(
+                `customers/export.xlsx${
+                  debouncedQ ? `?q=${encodeURIComponent(debouncedQ)}` : ''
+                }`,
+              )}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <FileDown className="h-4 w-4" />
+              Exportar Excel
+            </a>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/clientes/importar">
+              <FileSpreadsheet className="h-4 w-4" />
+              Importar Excel
+            </Link>
+          </Button>
+          <Button asChild>
+            <Link href="/clientes/nuevo">
+              <Plus className="h-4 w-4" />
+              Nuevo cliente
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <Input

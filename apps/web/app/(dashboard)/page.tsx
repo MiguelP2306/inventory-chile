@@ -29,7 +29,7 @@ import {
   Zap,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useState, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import {
   Area,
   AreaChart,
@@ -43,7 +43,66 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { publicImageUrl } from '@/lib/catalog-api';
 import { getDashboardSummary } from '@/lib/dashboard-api';
 import { formatCurrency } from '@/lib/format';
+import { useUrlFilters } from '@/lib/use-url-filters';
 import { cn } from '@/lib/utils';
+import type { DashboardRangeDto } from '@inventory/shared';
+
+/* Rangos válidos del dashboard. Persistidos como `?range=hoy|7d|30d|mes`. */
+const RANGES: DashboardRangeDto[] = ['hoy', '7d', '30d', 'mes'];
+
+function parseRange(raw: string | undefined): DashboardRangeDto {
+  return RANGES.includes(raw as DashboardRangeDto)
+    ? (raw as DashboardRangeDto)
+    : 'hoy';
+}
+
+/* Texto que reemplaza al "hoy/del día/este mes" según el rango activo.
+ *  - `bigTitle`: usado en el H1 ("Hoy llevás X ventas").
+ *  - `period`:   sufijo genérico ("X cotizaciones del día").
+ *  - `kpiSub`:   subtítulo de KPI cards ("Ventas del día").
+ *  - `deltaBase`: descripción del período de comparación ("vs ayer").
+ *  - `trendWindow`: descripción de la ventana temporal del chart. Cuando
+ *    range='hoy' el chart muestra 30 días para que tenga contexto; cuando
+ *    se elige otro rango, la ventana iguala al rango. */
+const RANGE_TEXT: Record<
+  DashboardRangeDto,
+  {
+    bigTitle: string;
+    period: string;
+    kpiSub: string;
+    deltaBase: string;
+    trendWindow: string;
+  }
+> = {
+  hoy: {
+    bigTitle: 'Hoy llevás',
+    period: 'del día',
+    kpiSub: 'del día',
+    deltaBase: 'vs ayer',
+    trendWindow: 'últimos 30 días',
+  },
+  '7d': {
+    bigTitle: 'En los últimos 7 días llevás',
+    period: 'últimos 7 días',
+    kpiSub: '7 días',
+    deltaBase: 'vs 7d previos',
+    trendWindow: 'últimos 7 días',
+  },
+  '30d': {
+    bigTitle: 'En los últimos 30 días llevás',
+    period: 'últimos 30 días',
+    kpiSub: '30 días',
+    deltaBase: 'vs 30d previos',
+    trendWindow: 'últimos 30 días',
+  },
+  mes: {
+    bigTitle: 'Este mes llevás',
+    period: 'este mes',
+    kpiSub: 'del mes',
+    deltaBase: 'vs mes anterior',
+    trendWindow: 'este mes',
+  },
+};
 
 /**
  * Fase 9 — Dashboard rediseño D1+D3 fusion.
@@ -81,6 +140,30 @@ function monthStartIso(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
 }
 
+/* Convierte el rango activo del dashboard a parámetros `?dateFrom=&dateTo=`
+ * usables en los links a /ventas, /cotizaciones, etc. — así el click de un
+ * KPI lleva al listado filtrado por el mismo período del dashboard. */
+function rangeToDateParams(range: DashboardRangeDto): {
+  from: string;
+  to: string;
+} {
+  const now = new Date();
+  const todayIso = now.toISOString().slice(0, 10);
+  if (range === 'hoy') return { from: todayIso, to: todayIso };
+  if (range === '7d') {
+    const d = new Date(now);
+    d.setDate(d.getDate() - 6);
+    return { from: d.toISOString().slice(0, 10), to: todayIso };
+  }
+  if (range === '30d') {
+    const d = new Date(now);
+    d.setDate(d.getDate() - 29);
+    return { from: d.toISOString().slice(0, 10), to: todayIso };
+  }
+  // 'mes'
+  return { from: monthStartIso(), to: todayIso };
+}
+
 /** Formatea CLP compacto ($1.2M, $80K, $250). */
 function fmtCompact(n: number): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
@@ -108,15 +191,23 @@ type DashboardSummary = Awaited<ReturnType<typeof getDashboardSummary>>;
    COMPONENTE PRINCIPAL
    ============================================================ */
 export default function DashboardHome() {
+  const { values, setFilter } = useUrlFilters({ range: '' });
+  const range = parseRange(values.range);
+
   const q = useQuery({
-    queryKey: ['dashboard', 'summary'],
-    queryFn: getDashboardSummary,
+    queryKey: ['dashboard', 'summary', range],
+    queryFn: () => getDashboardSummary(range),
     refetchInterval: 60_000,
     staleTime: 30_000,
   });
 
   const todayIso = new Date().toISOString().slice(0, 10);
   const monthStart = monthStartIso();
+
+  const setRange = (r: DashboardRangeDto) => {
+    // `range=hoy` es el default — lo limpiamos de la URL para mantenerla corta.
+    setFilter('range', r === 'hoy' ? null : r);
+  };
 
   if (q.isLoading) return <DashboardSkeleton />;
   if (q.error || !q.data) {
@@ -139,7 +230,13 @@ export default function DashboardHome() {
       {/* ============================================================
           PAGE HEAD
           ============================================================ */}
-      <PageHead summary={s} onRefresh={() => q.refetch()} isRefreshing={q.isFetching && !q.isLoading} />
+      <PageHead
+        summary={s}
+        range={range}
+        onRangeChange={setRange}
+        onRefresh={() => q.refetch()}
+        isRefreshing={q.isFetching && !q.isLoading}
+      />
 
       {/* ============================================================
           ALERTS BANNER (solo si hay productos sin stock)
@@ -155,38 +252,38 @@ export default function DashboardHome() {
           ROW 1 · 4 KPIs (ventas / caja / utilidad / cotizaciones)
           ============================================================ */}
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-        <KpiVentasHoy summary={s} todayIso={todayIso} />
-        <KpiCaja summary={s} />
-        <KpiUtilidad summary={s} monthStart={monthStart} todayIso={todayIso} />
-        <KpiCotizaciones summary={s} todayIso={todayIso} />
+        <KpiVentasHoy summary={s} range={range} />
+        <KpiCaja summary={s} range={range} />
+        <KpiUtilidad summary={s} range={range} />
+        <KpiCotizaciones summary={s} range={range} />
       </div>
 
       {/* ============================================================
-          ROW 2 · TENDENCIA 30 DÍAS (hero chart)
+          ROW 2 · TENDENCIA (hero chart — sigue el rango)
           ============================================================ */}
-      <SalesTrendCard summary={s} />
+      <SalesTrendCard summary={s} range={range} />
 
       {/* ============================================================
           ROW 3 · FLUJO CAJA (2/3) + EMBUDO (1/3)
           ============================================================ */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[2fr_1fr]">
-        <CashFlowCard summary={s} />
-        <FunnelCard summary={s} monthStart={monthStart} todayIso={todayIso} />
+        <CashFlowCard summary={s} range={range} />
+        <FunnelCard summary={s} range={range} />
       </div>
 
       {/* ============================================================
           ROW 4 · TOP PRODUCTOS (1/2) + MIX DE PAGO (1/2)
           ============================================================ */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <TopProductsCard summary={s} />
-        <MixPagoCard summary={s} />
+        <TopProductsCard summary={s} range={range} />
+        <MixPagoCard summary={s} range={range} />
       </div>
 
       {/* ============================================================
           ROW 5 · VENTAS POR CATEGORÍA (1/2) + FOLLOW-UPS (1/2)
           ============================================================ */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <CategorySalesCard summary={s} />
+        <CategorySalesCard summary={s} range={range} />
         <FollowUpsCard summary={s} />
       </div>
 
@@ -194,8 +291,8 @@ export default function DashboardHome() {
           ROW 6 · MARGEN (1/2) + ROTACIÓN HEATMAP (1/2)
           ============================================================ */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <MarginCategoryCard summary={s} />
-        <RotationByCategoryCard summary={s} />
+        <MarginCategoryCard summary={s} range={range} />
+        <RotationByCategoryCard summary={s} range={range} />
       </div>
 
       {/* ============================================================
@@ -211,13 +308,18 @@ export default function DashboardHome() {
    ============================================================ */
 function PageHead({
   summary: s,
+  range,
+  onRangeChange,
   onRefresh,
   isRefreshing,
 }: {
   summary: DashboardSummary;
+  range: DashboardRangeDto;
+  onRangeChange: (r: DashboardRangeDto) => void;
   onRefresh: () => void;
   isRefreshing: boolean;
 }) {
+  const txt = RANGE_TEXT[range];
   return (
     <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 flex-col gap-1.5">
@@ -229,7 +331,7 @@ function PageHead({
           <span>Buen día · {todayHuman()}</span>
         </div>
         <h1 className="text-2xl font-semibold tracking-tight sm:text-[28px]">
-          Hoy llevás{' '}
+          {txt.bigTitle}{' '}
           <span className="text-orange-600 dark:text-orange-400">
             {s.today.sales.count} {s.today.sales.count === 1 ? 'venta' : 'ventas'}
           </span>{' '}
@@ -240,7 +342,7 @@ function PageHead({
             <strong className="font-medium text-foreground">
               {s.today.quotations.count}
             </strong>{' '}
-            cotizaciones del día
+            cotizaciones {txt.period}
           </span>
           <span className="h-1 w-1 rounded-full bg-muted-foreground/40" />
           <span>
@@ -258,7 +360,12 @@ function PageHead({
           </span>
         </p>
       </div>
-      <Toolbar onRefresh={onRefresh} isRefreshing={isRefreshing} />
+      <Toolbar
+        range={range}
+        onRangeChange={onRangeChange}
+        onRefresh={onRefresh}
+        isRefreshing={isRefreshing}
+      />
     </div>
   );
 }
@@ -365,34 +472,47 @@ function QuickActions() {
 
 function KpiVentasHoy({
   summary: s,
-  todayIso,
+  range,
 }: {
   summary: DashboardSummary;
-  todayIso: string;
+  range: DashboardRangeDto;
 }) {
   const delta = s.comparison?.salesDeltaPct;
+  const txt = RANGE_TEXT[range];
+  const dates = rangeToDateParams(range);
+  // Para el sparkline tomamos hasta 14 puntos. En rango 'hoy' la serie es 30
+  // días largos; en 'mes' es ~30; en '7d' / '30d' coincide con el rango.
   const series = s.trend?.salesByDay?.slice(-14).map((p) => p.amount) ?? null;
   return (
     <Link
-      href={`/ventas?dateFrom=${todayIso}&dateTo=${todayIso}`}
+      href={`/ventas?dateFrom=${dates.from}&dateTo=${dates.to}`}
       className="group relative flex flex-col gap-2 overflow-hidden rounded-2xl border border-foreground bg-foreground p-5 text-background shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
     >
-      <KpiHeader icon={<ShoppingCart className="h-3.5 w-3.5" />} title="Ventas del día" invert />
+      <KpiHeader icon={<ShoppingCart className="h-3.5 w-3.5" />} title={`Ventas ${txt.kpiSub}`} invert />
       <div className="text-3xl font-semibold leading-none tracking-tight tabular-nums">
         {formatCurrency(s.today.sales.amount)}
       </div>
       <div className="flex items-center gap-2 text-[12px] text-background/70">
         {delta != null && <Delta pct={delta} invert />}
-        <span>· {s.today.sales.count} {s.today.sales.count === 1 ? 'venta' : 'ventas'} hoy</span>
+        <span>
+          · {s.today.sales.count} {s.today.sales.count === 1 ? 'venta' : 'ventas'} {txt.period}
+        </span>
       </div>
       {series && series.length > 1 && <Sparkline data={series} invert />}
     </Link>
   );
 }
 
-function KpiCaja({ summary: s }: { summary: DashboardSummary }) {
+function KpiCaja({
+  summary: s,
+  range,
+}: {
+  summary: DashboardSummary;
+  range: DashboardRangeDto;
+}) {
   const cashTotal = Number(s.today.cash.total);
   const delta = s.comparison?.cashDeltaPct;
+  const txt = RANGE_TEXT[range];
   return (
     <Link
       href="/caja"
@@ -403,7 +523,11 @@ function KpiCaja({ summary: s }: { summary: DashboardSummary }) {
         {formatCurrency(cashTotal)}
       </div>
       <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-        {delta != null ? <Delta pct={delta} /> : <span className="text-muted-foreground">Hoy</span>}
+        {delta != null ? (
+          <Delta pct={delta} />
+        ) : (
+          <span className="text-muted-foreground">{txt.deltaBase}</span>
+        )}
         <span>· por método</span>
       </div>
       <div className="mt-1 flex flex-col gap-1">
@@ -426,12 +550,10 @@ function KpiCaja({ summary: s }: { summary: DashboardSummary }) {
 
 function KpiUtilidad({
   summary: s,
-  monthStart,
-  todayIso,
+  range,
 }: {
   summary: DashboardSummary;
-  monthStart: string;
-  todayIso: string;
+  range: DashboardRangeDto;
 }) {
   const profit = Number(s.month.profit);
   const delta = s.comparison?.profitDeltaPct;
@@ -439,12 +561,14 @@ function KpiUtilidad({
   const cogs = s.monthBreakdown?.cogs;
   const expenses = Number(s.month.expenses);
   const isNegative = profit < 0;
+  const txt = RANGE_TEXT[range];
+  const dates = rangeToDateParams(range);
   return (
     <Link
-      href={`/reportes/ventas?dateFrom=${monthStart}&dateTo=${todayIso}`}
+      href={`/reportes/ventas?dateFrom=${dates.from}&dateTo=${dates.to}`}
       className="group relative flex flex-col gap-2 overflow-hidden rounded-2xl border bg-card p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
     >
-      <KpiHeader icon={<TrendingUp className="h-3.5 w-3.5" />} title="Utilidad del mes" />
+      <KpiHeader icon={<TrendingUp className="h-3.5 w-3.5" />} title={`Utilidad ${txt.kpiSub}`} />
       <div
         className={cn(
           'text-3xl font-semibold leading-none tracking-tight tabular-nums',
@@ -473,17 +597,22 @@ function KpiUtilidad({
 
 function KpiCotizaciones({
   summary: s,
-  todayIso,
+  range,
 }: {
   summary: DashboardSummary;
-  todayIso: string;
+  range: DashboardRangeDto;
 }) {
+  const txt = RANGE_TEXT[range];
+  const dates = rangeToDateParams(range);
   return (
     <Link
-      href={`/cotizaciones?dateFrom=${todayIso}&dateTo=${todayIso}`}
+      href={`/cotizaciones?dateFrom=${dates.from}&dateTo=${dates.to}`}
       className="group relative flex flex-col gap-2 overflow-hidden rounded-2xl border bg-card p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
     >
-      <KpiHeader icon={<FileText className="h-3.5 w-3.5" />} title="Cotizaciones día" />
+      <KpiHeader
+        icon={<FileText className="h-3.5 w-3.5" />}
+        title={`Cotizaciones ${txt.kpiSub}`}
+      />
       <div className="text-3xl font-semibold leading-none tracking-tight tabular-nums">
         {formatCurrency(s.today.quotations.amount)}
       </div>
@@ -608,10 +737,17 @@ function SectionHeader({
 /* ============================================================
    TENDENCIA DE VENTAS — hero area chart 30 días
    ============================================================ */
-function SalesTrendCard({ summary: s }: { summary: DashboardSummary }) {
+function SalesTrendCard({
+  summary: s,
+  range,
+}: {
+  summary: DashboardSummary;
+  range: DashboardRangeDto;
+}) {
   const data = s.trend?.salesByDay;
-  const totalMonth = data?.reduce((a, b) => a + b.amount, 0);
+  const totalRange = data?.reduce((a, b) => a + b.amount, 0);
   const delta = s.comparison?.salesDeltaPct;
+  const txt = RANGE_TEXT[range];
   return (
     <SectionCard>
       <SectionHeader
@@ -619,9 +755,9 @@ function SalesTrendCard({ summary: s }: { summary: DashboardSummary }) {
         subtitle={
           data ? (
             <>
-              {totalMonth != null && (
+              {totalRange != null && (
                 <strong className="text-foreground tabular-nums">
-                  {formatCurrency(String(totalMonth))}
+                  {formatCurrency(String(totalRange))}
                 </strong>
               )}
               {delta != null && (
@@ -636,14 +772,14 @@ function SalesTrendCard({ summary: s }: { summary: DashboardSummary }) {
                     )}
                   >
                     {delta >= 0 ? '+' : ''}
-                    {delta}% vs período anterior
+                    {delta}% {txt.deltaBase}
                   </span>
                 </>
               )}
-              {' · últimos 30 días'}
+              {` · ${txt.trendWindow}`}
             </>
           ) : (
-            'Últimos 30 días'
+            txt.trendWindow.charAt(0).toUpperCase() + txt.trendWindow.slice(1)
           )
         }
         action={
@@ -698,7 +834,7 @@ function SalesTrendCard({ summary: s }: { summary: DashboardSummary }) {
       ) : (
         <EmptyChartState
           title="Sin datos de tendencia"
-          hint="Aún no hay ventas registradas en los últimos 30 días."
+          hint={`Aún no hay ventas registradas en ${txt.trendWindow}.`}
           height={220}
         />
       )}
@@ -707,18 +843,25 @@ function SalesTrendCard({ summary: s }: { summary: DashboardSummary }) {
 }
 
 /* ============================================================
-   FLUJO DE CAJA — área apilada ingresos vs egresos 30 días
+   FLUJO DE CAJA — área apilada ingresos vs egresos
    ============================================================ */
-function CashFlowCard({ summary: s }: { summary: DashboardSummary }) {
+function CashFlowCard({
+  summary: s,
+  range,
+}: {
+  summary: DashboardSummary;
+  range: DashboardRangeDto;
+}) {
   const data = s.trend?.cashFlowByDay;
   const totalIn = data?.reduce((a, b) => a + b.inflow, 0) ?? 0;
   const totalOut = data?.reduce((a, b) => a + b.outflow, 0) ?? 0;
   const net = totalIn - totalOut;
+  const txt = RANGE_TEXT[range];
   return (
     <SectionCard>
       <SectionHeader
         title="Flujo de caja"
-        subtitle="Ingresos vs egresos · últimos 30 días"
+        subtitle={`Ingresos vs egresos · ${txt.trendWindow}`}
         action={
           <Link
             href="/caja"
@@ -798,7 +941,7 @@ function CashFlowCard({ summary: s }: { summary: DashboardSummary }) {
       ) : (
         <EmptyChartState
           title="Sin datos de flujo"
-          hint="Aún no hay movimientos de caja en los últimos 30 días."
+          hint={`Aún no hay movimientos de caja en ${txt.trendWindow}.`}
           height={200}
         />
       )}
@@ -807,33 +950,44 @@ function CashFlowCard({ summary: s }: { summary: DashboardSummary }) {
 }
 
 /* ============================================================
-   EMBUDO COMERCIAL — funnel preserved from original
+   EMBUDO COMERCIAL — el funnel mezcla estado actual (NEW/QUOTED/
+   FOLLOW_UP/LOST son conteos de lifecycle independientes del rango) con
+   "Ganados" que SÍ depende del rango (clientes WON en el período).
    ============================================================ */
 function FunnelCard({
   summary: s,
-  monthStart,
-  todayIso,
+  range,
 }: {
   summary: DashboardSummary;
-  monthStart: string;
-  todayIso: string;
+  range: DashboardRangeDto;
 }) {
   const full = s.lifecycleFunnel;
+  const txt = RANGE_TEXT[range];
+  const dates = rangeToDateParams(range);
+  const wonLabel =
+    range === 'hoy'
+      ? 'Ganados (hoy)'
+      : range === 'mes'
+        ? 'Ganados (mes)'
+        : `Ganados (${txt.period})`;
   const rows = [
     { label: 'Nuevos', value: full.NEW, tone: 'blue' as const, href: '/seguimiento?tab=nuevos' },
     { label: 'Cotizados', value: full.QUOTED, tone: 'violet' as const, href: '/seguimiento?tab=cotizados' },
     { label: 'Seguimiento', value: full.FOLLOW_UP, tone: 'amber' as const, href: '/seguimiento?tab=pendientes' },
     {
-      label: 'Ganados (mes)',
+      label: wonLabel,
       value: full.WON,
       tone: 'emerald' as const,
-      href: `/ventas?status=PAID&dateFrom=${monthStart}&dateTo=${todayIso}`,
+      href: `/ventas?status=PAID&dateFrom=${dates.from}&dateTo=${dates.to}`,
     },
     { label: 'Perdidos', value: full.LOST, tone: 'rose' as const, href: '/seguimiento?tab=perdidos' },
   ];
   return (
     <SectionCard>
-      <SectionHeader title="Embudo comercial" subtitle="Lifecycle completo del mes" />
+      <SectionHeader
+        title="Embudo comercial"
+        subtitle={`Lifecycle · ganados ${txt.period}`}
+      />
       <Funnel rows={rows} />
     </SectionCard>
   );
@@ -882,15 +1036,22 @@ function Funnel({
 }
 
 /* ============================================================
-   TOP PRODUCTOS DEL MES
+   TOP PRODUCTOS — del período seleccionado
    ============================================================ */
-function TopProductsCard({ summary: s }: { summary: DashboardSummary }) {
+function TopProductsCard({
+  summary: s,
+  range,
+}: {
+  summary: DashboardSummary;
+  range: DashboardRangeDto;
+}) {
   const items = s.top?.products;
   const max = items && items.length > 0 ? Math.max(...items.map((i) => i.amount)) : 0;
+  const txt = RANGE_TEXT[range];
   return (
     <SectionCard>
       <SectionHeader
-        title="Top productos del mes"
+        title={`Top productos ${txt.kpiSub}`}
         subtitle="Por monto facturado"
         action={
           <Link
@@ -956,7 +1117,7 @@ function TopProductsCard({ summary: s }: { summary: DashboardSummary }) {
       ) : (
         <EmptyChartState
           title="Sin datos de top productos"
-          hint="Sin ventas en el mes — los productos top aparecen cuando hay al menos una venta confirmada."
+          hint={`Sin ventas ${txt.period} — los productos top aparecen cuando hay al menos una venta confirmada.`}
           height={200}
         />
       )}
@@ -965,9 +1126,15 @@ function TopProductsCard({ summary: s }: { summary: DashboardSummary }) {
 }
 
 /* ============================================================
-   MIX DE PAGO — donut (caja del día)
+   MIX DE PAGO — donut con la caja del período seleccionado
    ============================================================ */
-function MixPagoCard({ summary: s }: { summary: DashboardSummary }) {
+function MixPagoCard({
+  summary: s,
+  range,
+}: {
+  summary: DashboardSummary;
+  range: DashboardRangeDto;
+}) {
   const cashTotal = Number(s.today.cash.total);
   const donutData = CASH_METHODS.map((m) => ({
     label: m.label,
@@ -977,9 +1144,13 @@ function MixPagoCard({ summary: s }: { summary: DashboardSummary }) {
     color: m.color,
   }));
   const sumAll = donutData.reduce((a, b) => a + b.value, 0);
+  const txt = RANGE_TEXT[range];
   return (
     <SectionCard>
-      <SectionHeader title="Mix de pago" subtitle="Distribución de caja del día" />
+      <SectionHeader
+        title="Mix de pago"
+        subtitle={`Distribución de caja ${txt.period}`}
+      />
       <div className="flex items-center gap-6">
         <Donut
           data={donutData}
@@ -1009,15 +1180,22 @@ function MixPagoCard({ summary: s }: { summary: DashboardSummary }) {
 /* ============================================================
    VENTAS POR CATEGORÍA — stacked horizontal bar + legend
    ============================================================ */
-function CategorySalesCard({ summary: s }: { summary: DashboardSummary }) {
+function CategorySalesCard({
+  summary: s,
+  range,
+}: {
+  summary: DashboardSummary;
+  range: DashboardRangeDto;
+}) {
   const items = s.top?.categories;
   const total = items?.reduce((a, c) => a + c.amount, 0) ?? 0;
   const palette = ['#10b981', '#3b82f6', '#ef4444', '#0ea5e9', '#8b5cf6', '#f59e0b', '#06b6d4'];
+  const txt = RANGE_TEXT[range];
   return (
     <SectionCard>
       <SectionHeader
         title="Ventas por categoría"
-        subtitle="Distribución del mes en curso"
+        subtitle={`Distribución ${txt.period}`}
       />
       {items && items.length > 0 ? (
         <>
@@ -1054,7 +1232,7 @@ function CategorySalesCard({ summary: s }: { summary: DashboardSummary }) {
       ) : (
         <EmptyChartState
           title="Sin datos por categoría"
-          hint="Aún no hay categorías con ventas este mes."
+          hint={`Aún no hay categorías con ventas ${txt.period}.`}
           height={140}
         />
       )}
@@ -1149,13 +1327,20 @@ function FollowUpsCard({ summary: s }: { summary: DashboardSummary }) {
 /* ============================================================
    MARGEN POR CATEGORÍA — bars simples
    ============================================================ */
-function MarginCategoryCard({ summary: s }: { summary: DashboardSummary }) {
+function MarginCategoryCard({
+  summary: s,
+  range,
+}: {
+  summary: DashboardSummary;
+  range: DashboardRangeDto;
+}) {
   const items = s.top?.categories;
+  const txt = RANGE_TEXT[range];
   return (
     <SectionCard>
       <SectionHeader
         title="Margen por categoría"
-        subtitle="Promedio del mes · ventas − costo"
+        subtitle={`Promedio ${txt.period} · ventas − costo`}
       />
       {items && items.length > 0 ? (
         <div className="flex flex-col gap-2.5">
@@ -1182,7 +1367,7 @@ function MarginCategoryCard({ summary: s }: { summary: DashboardSummary }) {
       ) : (
         <EmptyChartState
           title="Sin datos de margen"
-          hint="Aún no hay categorías con margen calculable este mes."
+          hint={`Aún no hay categorías con margen calculable ${txt.period}.`}
           height={180}
         />
       )}
@@ -1199,11 +1384,18 @@ function MarginCategoryCard({ summary: s }: { summary: DashboardSummary }) {
    necesitamos snapshots diarios de stock (fuera de scope). El día que llegue,
    se reintroduce un heatmap apoyado en /reportes/rotacion/12m.
    ============================================================ */
-function RotationByCategoryCard({ summary: s }: { summary: DashboardSummary }) {
+function RotationByCategoryCard({
+  summary: s,
+  range,
+}: {
+  summary: DashboardSummary;
+  range: DashboardRangeDto;
+}) {
   const items = s.top.categories;
   const overall = Number(s.alerts.inventoryTurnover);
   const sorted = [...items].sort((a, b) => b.turnover - a.turnover);
   const maxTurnover = sorted.length > 0 ? Math.max(...sorted.map((c) => c.turnover), 0.0001) : 1;
+  const txt = RANGE_TEXT[range];
 
   return (
     <SectionCard>
@@ -1216,7 +1408,7 @@ function RotationByCategoryCard({ summary: s }: { summary: DashboardSummary }) {
               {s.alerts.inventoryTurnoverIsApprox && <> · aproximado</>}
             </>
           ) : (
-            'COGS del mes / inventario actual'
+            `COGS ${txt.period} / inventario actual`
           )
         }
       />
@@ -1514,39 +1706,37 @@ function ChartTooltip({
    TOOLBAR — range selector + refresh (idem original, sólo retoque)
    ============================================================ */
 function Toolbar({
+  range,
+  onRangeChange,
   onRefresh,
   isRefreshing,
 }: {
+  range: DashboardRangeDto;
+  onRangeChange: (r: DashboardRangeDto) => void;
   onRefresh: () => void;
   isRefreshing: boolean;
 }) {
-  // El endpoint actual sólo devuelve snapshot "hoy". Las otras opciones del
-  // rango quedan deshabilitadas hasta que `/dashboard/summary` acepte
-  // `dateFrom` / `dateTo`. El refresh sí está cableado a `q.refetch()`.
-  const [range] = useState<'hoy'>('hoy');
+  // Polish Mayo 2026 — los 4 rangos están cableados. El range se persiste en
+  // URL como `?range=hoy|7d|30d|mes` (default `hoy` sin param). Cambia los
+  // bloques temporales del dashboard; alertas y embudo quedan independientes.
   return (
     <div className="flex shrink-0 items-center gap-2">
       <div className="inline-flex h-9 items-center rounded-[10px] border bg-card p-0.5 shadow-sm">
-        {(['hoy', '7d', '30d', 'mes'] as const).map((k) => {
-          const enabled = k === 'hoy';
-          return (
-            <button
-              key={k}
-              type="button"
-              disabled={!enabled}
-              className={cn(
-                'h-full rounded-md px-3 text-xs font-medium transition-colors',
-                range === k
-                  ? 'bg-foreground text-background'
-                  : 'text-muted-foreground hover:text-foreground',
-                !enabled && 'cursor-not-allowed opacity-40 hover:text-muted-foreground',
-              )}
-              title={enabled ? undefined : 'Próximamente — requiere extender /dashboard/summary con rango'}
-            >
-              {k === 'hoy' ? 'Hoy' : k === '7d' ? '7d' : k === '30d' ? '30d' : 'Mes'}
-            </button>
-          );
-        })}
+        {RANGES.map((k) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => onRangeChange(k)}
+            className={cn(
+              'h-full rounded-md px-3 text-xs font-medium transition-colors',
+              range === k
+                ? 'bg-foreground text-background'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {k === 'hoy' ? 'Hoy' : k === 'mes' ? 'Mes' : k}
+          </button>
+        ))}
       </div>
       <button
         type="button"

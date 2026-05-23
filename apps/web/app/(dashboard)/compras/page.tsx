@@ -1,10 +1,11 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Paperclip, Plus } from 'lucide-react';
+import { FileDown, Paperclip, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { apiAbsoluteUrl } from '@/lib/api';
 import { publicDocumentUrl } from '@/lib/cashbox-api';
 import {
   Select,
@@ -118,14 +119,35 @@ export default function ComprasPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-semibold">Compras</h1>
-        <Button asChild>
-          <Link href="/compras/nuevo">
-            <Plus className="h-4 w-4" />
-            Nueva entrada
-          </Link>
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" size="sm">
+            <a
+              href={apiAbsoluteUrl(
+                `purchases/export.xlsx${buildPurchasesExportQuery({
+                  supplierId: supplierId === ALL ? undefined : supplierId,
+                  warehouseId: warehouseId === ALL ? undefined : warehouseId,
+                  dateFrom: dateFrom || undefined,
+                  dateTo: dateTo || undefined,
+                  totalMin: totalMin || undefined,
+                  totalMax: totalMax || undefined,
+                })}`,
+              )}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <FileDown className="h-4 w-4" />
+              Exportar Excel
+            </a>
+          </Button>
+          <Button asChild>
+            <Link href="/compras/nuevo">
+              <Plus className="h-4 w-4" />
+              Nueva entrada
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {/* Ronda 9 — KPIs del mes actual. Clicables: cada card filtra la
@@ -397,4 +419,14 @@ function KpiCard({
       )}
     </div>
   );
+}
+
+function buildPurchasesExportQuery(
+  params: Record<string, string | undefined>,
+): string {
+  const entries = Object.entries(params).filter(
+    ([, v]) => v != null && v !== '',
+  ) as [string, string][];
+  if (entries.length === 0) return '';
+  return '?' + entries.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
 }

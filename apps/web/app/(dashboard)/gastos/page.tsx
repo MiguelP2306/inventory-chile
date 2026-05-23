@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Ban, Paperclip, Pencil, Plus } from 'lucide-react';
+import { Ban, FileDown, Paperclip, Pencil, Plus } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/confirm-dialog';
@@ -25,6 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { apiAbsoluteUrl } from '@/lib/api';
 import {
   listExpenseCategories,
   listExpenses,
@@ -127,17 +128,38 @@ export default function GastosPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-semibold">Gastos</h1>
-        <Button
-          onClick={() => {
-            setEditing(null);
-            setDialogOpen(true);
-          }}
-        >
-          <Plus className="h-4 w-4" />
-          Nuevo gasto
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" size="sm">
+            <a
+              href={apiAbsoluteUrl(
+                `expenses/export.xlsx${buildGastosExportQuery({
+                  categoryId: category === ALL ? undefined : category,
+                  paymentMethod: method === ALL ? undefined : method,
+                  dateFrom: dateFrom || undefined,
+                  dateTo: dateTo || undefined,
+                  q: q || undefined,
+                  includeVoided: includeVoided ? '1' : undefined,
+                })}`,
+              )}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <FileDown className="h-4 w-4" />
+              Exportar Excel
+            </a>
+          </Button>
+          <Button
+            onClick={() => {
+              setEditing(null);
+              setDialogOpen(true);
+            }}
+          >
+            <Plus className="h-4 w-4" />
+            Nuevo gasto
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
@@ -386,4 +408,14 @@ export default function GastosPage() {
       />
     </div>
   );
+}
+
+function buildGastosExportQuery(
+  params: Record<string, string | undefined>,
+): string {
+  const entries = Object.entries(params).filter(
+    ([, v]) => v != null && v !== '',
+  ) as [string, string][];
+  if (entries.length === 0) return '';
+  return '?' + entries.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
 }

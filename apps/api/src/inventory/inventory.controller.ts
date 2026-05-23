@@ -3,7 +3,27 @@ import type { Response } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/types';
 import { CategoriesService } from '../categories/categories.service';
+import {
+  fetchAllPages,
+  MONEY_FMT,
+  sendXlsx,
+  stylizeSheet,
+} from '../common/xlsx-export';
 import { WarehousesService } from '../warehouses/warehouses.service';
+
+const MOVEMENT_TYPE_LABEL: Record<string, string> = {
+  PURCHASE_IN: 'Compra',
+  SALE_OUT: 'Venta',
+  ADJUSTMENT: 'Ajuste',
+  RETURN_IN: 'Dev. cliente',
+  RETURN_OUT: 'Dev. proveedor',
+  RETURN_IN_DAMAGED: 'Dev. dañado',
+  RETURN_DAMAGED_CANCELLED: 'Dev. dañado anulada',
+  TRANSFER_OUT: 'Transf. salida',
+  TRANSFER_IN: 'Transf. entrada',
+  DISPATCH_OUT: 'Despacho',
+  DISPATCH_VOIDED: 'Despacho anulado',
+};
 import {
   AdjustStockDto,
   ListMovementCardsQueryDto,
@@ -60,9 +80,7 @@ export class InventoryController {
     workbook.creator = 'Inventory App';
     workbook.created = new Date();
 
-    const sheet = workbook.addWorksheet('Inventario', {
-      views: [{ state: 'frozen', ySplit: 1 }],
-    });
+    const sheet = workbook.addWorksheet('Inventario');
     sheet.columns = [
       { header: 'SKU', key: 'sku', width: 18 },
       { header: 'Nombre', key: 'name', width: 35 },
@@ -73,16 +91,15 @@ export class InventoryController {
       { header: 'Ubicación', key: 'location', width: 16 },
       { header: 'Cantidad', key: 'qty', width: 10 },
       { header: 'Estado', key: 'status', width: 12 },
-      { header: 'Costo unit.', key: 'cost', width: 14, style: { numFmt: '#,##0' } },
-      { header: 'Precio unit.', key: 'price', width: 14, style: { numFmt: '#,##0' } },
+      { header: 'Costo unit.', key: 'cost', width: 14, style: { numFmt: MONEY_FMT } },
+      { header: 'Precio unit.', key: 'price', width: 14, style: { numFmt: MONEY_FMT } },
       {
         header: 'Valor inventario',
         key: 'inventoryValue',
         width: 18,
-        style: { numFmt: '#,##0' },
+        style: { numFmt: MONEY_FMT },
       },
     ];
-    sheet.getRow(1).font = { bold: true };
 
     for (const it of items) {
       const cat = it.product.category
@@ -115,21 +132,66 @@ export class InventoryController {
       });
     }
 
-    const buffer = await workbook.xlsx.writeBuffer();
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    );
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="inventario-${new Date().toISOString().slice(0, 10)}.xlsx"`,
-    );
-    res.send(Buffer.from(buffer as ArrayBuffer));
+    stylizeSheet(sheet);
+    await sendXlsx(res, workbook, 'inventario');
   }
 
   @Get('movements')
   listMovements(@Query() query: ListMovementsQueryDto) {
     return this.svc.listMovements(query);
+  }
+
+  /**
+   * Export del historial de movimientos a XLSX. Respeta `productId`,
+   * `warehouseId`, `type`, `dateFrom/To`. Ignora paginación (batch interno).
+   */
+  @Get('movements.xlsx')
+  async exportMovements(
+    @Query() query: ListMovementsQueryDto,
+    @Res() res: Response,
+  ) {
+    const items = await fetchAllPages((page, pageSize) =>
+      this.svc.listMovements({ ...query, page, pageSize }),
+    );
+
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Inventory App';
+    wb.created = new Date();
+
+    const sheet = wb.addWorksheet('Movimientos');
+    sheet.columns = [
+      { header: 'Fecha', key: 'date', width: 12 },
+      { header: 'Tipo', key: 'type', width: 18 },
+      { header: 'SKU', key: 'sku', width: 16 },
+      { header: 'Producto', key: 'product', width: 32 },
+      { header: 'Bodega', key: 'warehouse', width: 18 },
+      { header: 'Cantidad', key: 'qty', width: 10 },
+      { header: 'Costo unit.', key: 'unitCost', width: 14, style: { numFmt: MONEY_FMT } },
+      { header: 'Referencia', key: 'reference', width: 14 },
+      { header: 'Ref ID', key: 'refId', width: 16 },
+      { header: 'Usuario', key: 'user', width: 22 },
+    ];
+
+    for (const m of items) {
+      sheet.addRow({
+        date: m.createdAt
+          ? new Date(m.createdAt).toISOString().slice(0, 10)
+          : '',
+        type: MOVEMENT_TYPE_LABEL[m.type] ?? m.type,
+        sku: m.product?.sku ?? '',
+        product: m.product?.name ?? '',
+        warehouse: m.warehouse?.name ?? '',
+        qty: m.qty,
+        unitCost: m.unitCost != null ? Number(m.unitCost) : '',
+        reference: m.reference ?? '',
+        refId: m.refId ?? '',
+        user: m.user?.name ?? '',
+      });
+    }
+
+    stylizeSheet(sheet);
+    await sendXlsx(res, wb, 'movimientos');
   }
 
   // Ronda 13 — listado de movimientos agrupados por transacción para la vista

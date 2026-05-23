@@ -1353,7 +1353,26 @@ export interface DashboardLifecycleFunnelDto {
   LOST: number;
 }
 
+/**
+ * Rango temporal del dashboard. Default `hoy`. Persistido en URL como
+ * `?range=hoy|7d|30d|mes`. Cuando cambia, casi todos los bloques con
+ * semántica temporal del DTO se recalculan (`today` deja de significar
+ * literalmente "hoy" y pasa a ser "el rango seleccionado" — el frontend
+ * adapta los labels).
+ *
+ * Estados / contadores que NO son temporales (alerts de stock, embudo
+ * lifecycle, valor de inventario) quedan independientes del filtro.
+ */
+export type DashboardRangeDto = 'hoy' | '7d' | '30d' | 'mes';
+
 export interface DashboardSummaryDto {
+  // Rango efectivo aplicado al snapshot. El frontend lo usa para ajustar
+  // labels ("Hoy llevás" vs "Últimos 7 días"). Si el cliente manda
+  // `?range=xx` inválido, el backend lo normaliza a 'hoy' y lo devuelve acá.
+  range: DashboardRangeDto;
+  // Métricas del rango seleccionado: ventas, cotizaciones y caja del período.
+  // La clave se llama `today` por compatibilidad con la versión anterior del
+  // DTO; semánticamente es "current period".
   today: {
     sales: { count: number; amount: string };
     quotations: { count: number; amount: string };
@@ -1527,6 +1546,85 @@ export interface ProductImportResultDto {
   // Categorías/marcas que se crearon como efecto colateral.
   createdCategories: string[];
   createdBrands: string[];
+}
+
+// ---------- Importers de clientes / proveedores (polish Mayo 2026) ----------
+//
+// Mismo patrón de UX que Fase 10 productos: subir → preview → confirmar.
+// Estrategia UPSERT por RUT (taxId) + partial success.
+
+export type ContactImportAction = 'create' | 'update' | 'skip';
+
+export interface ContactImportErrorDto {
+  rowNumber: number;
+  taxId: string | null;
+  message: string;
+}
+
+export interface CustomerImportRowDto {
+  rowNumber: number;
+  action: ContactImportAction;
+  taxId: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  whatsappPhone: string | null;
+  addressStreet: string | null;
+  addressNumber: string | null;
+  communeName: string | null;
+  communeId: string | null; // resuelto en preview por lookup por nombre
+  internalNotes: string | null;
+  existingCustomerId: string | null;
+}
+
+export interface CustomerImportPreviewDto {
+  totalRows: number;
+  validCount: number;
+  createCount: number;
+  updateCount: number;
+  errorCount: number;
+  previewRows: CustomerImportRowDto[];
+  errors: ContactImportErrorDto[];
+}
+
+export interface CustomerImportResultDto {
+  importedCount: number;
+  createdCount: number;
+  updatedCount: number;
+  failedCount: number;
+  errors: ContactImportErrorDto[];
+}
+
+export interface SupplierImportRowDto {
+  rowNumber: number;
+  action: ContactImportAction;
+  taxId: string;
+  name: string;
+  legalName: string | null;
+  contactPerson: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  notes: string | null;
+  existingSupplierId: string | null;
+}
+
+export interface SupplierImportPreviewDto {
+  totalRows: number;
+  validCount: number;
+  createCount: number;
+  updateCount: number;
+  errorCount: number;
+  previewRows: SupplierImportRowDto[];
+  errors: ContactImportErrorDto[];
+}
+
+export interface SupplierImportResultDto {
+  importedCount: number;
+  createdCount: number;
+  updatedCount: number;
+  failedCount: number;
+  errors: ContactImportErrorDto[];
 }
 
 // ---------- Ronda 9: SupplierCredit + Compras KPIs ----------

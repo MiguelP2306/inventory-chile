@@ -14,6 +14,13 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { Workbook } from 'exceljs';
 import { DataSource, In, Repository } from 'typeorm';
 import {
+  findHeaderRow,
+  lastDataRow,
+  parseInteger,
+  parseNumeric,
+  readCellText,
+} from '../common/xlsx-import';
+import {
   Brand,
   Category,
   Product,
@@ -350,63 +357,64 @@ export class ImportsService {
       throw new BadRequestException(`No se pudo leer el Excel: ${message}`);
     }
 
-    const sheet = wb.worksheets[0];
+    // Detectar la hoja de datos: priorizamos "Productos" (de la plantilla), si
+    // no existe usamos la primera hoja con contenido. La segunda hoja de la
+    // plantilla es "Instrucciones" y no debe parsearse como datos.
+    const sheet =
+      wb.getWorksheet('Productos') ??
+      wb.worksheets.find((w) => w.rowCount > 0) ??
+      wb.worksheets[0];
     if (!sheet) {
       throw new BadRequestException('El Excel no tiene hojas.');
     }
 
-    // Map header row → column index. El operador puede haber renombrado los
-    // headers en el Excel, así que comparamos contra `HEADERS` por igualdad
-    // case-insensitive sin acentos.
-    const headerRow = sheet.getRow(1);
-    const colIndex: Partial<Record<Column, number>> = {};
-    headerRow.eachCell({ includeEmpty: false }, (cell, idx) => {
-      const raw = String(cell.value ?? '').trim();
-      const normalized = normalizeHeader(raw);
-      for (const col of COLUMNS) {
-        if (normalizeHeader(HEADERS[col]) === normalized) {
-          colIndex[col] = idx;
-          break;
-        }
-      }
-    });
-
-    if (colIndex.sku === undefined || colIndex.name === undefined) {
+    // Buscar la fila de header: típicamente es la 1, pero algunos exporters
+    // (Google Sheets, Numbers, Looker Studio) insertan filas vacías arriba.
+    // Probamos hasta las primeras 5 filas y nos quedamos con la que tenga
+    // las columnas obligatorias "SKU" y "Nombre".
+    const found = findHeaderRow(sheet, HEADERS, ['sku', 'name']);
+    if (!found) {
       throw new BadRequestException(
-        'Faltan las columnas obligatorias "SKU" y/o "Nombre" en la primera fila del Excel.',
+        'No encontré las columnas obligatorias "SKU" y "Nombre" en las primeras 5 filas. Descargá la plantilla nueva desde el botón "Descargar plantilla".',
       );
     }
+    const { headerRowNumber, colIndex } = found;
 
     const valid: Omit<ProductImportRowDto, 'action' | 'existingProductId'>[] = [];
     const errors: ProductImportErrorDto[] = [];
 
-    const lastRow = sheet.actualRowCount;
-    let totalDataRows = 0;
-    const seenSkusInBatch = new Set<string>();
+    // Upper-bound robusto del último número de fila — ver `lastDataRow` para
+    // detalles del bug histórico con `actualRowCount`.
+    const lastRowNumber = lastDataRow(sheet);
 
-    for (let r = 2; r <= lastRow; r += 1) {
+    let totalDataRows = 0;
+    let consecutiveEmptyRows = 0;
+    const seenSkusInBatch = new Set<string>();
+    const seenBarcodesInBatch = new Set<string>();
+
+    for (let r = headerRowNumber + 1; r <= lastRowNumber; r += 1) {
       const row = sheet.getRow(r);
       const cellText = (col: Column): string => {
         const idx = colIndex[col];
         if (idx === undefined) return '';
-        const v = row.getCell(idx).value;
-        if (v == null) return '';
-        if (typeof v === 'object' && 'text' in v) {
-          // Rich text cell
-          return String((v as { text: string }).text ?? '').trim();
-        }
-        if (v instanceof Date) return v.toISOString();
-        return String(v).trim();
+        return readCellText(row.getCell(idx));
       };
+
+      // Filas completamente vacías: las saltamos pero NO cortamos el loop —
+      // el operador puede tener una fila en blanco intercalada por accidente
+      // (ej. separador visual). Sólo cortamos si encontramos 50 filas vacías
+      // consecutivas, asumiendo que ya estamos pasando del final real.
+      const isFullyEmpty = COLUMNS.every((col) => cellText(col) === '');
+      if (isFullyEmpty) {
+        consecutiveEmptyRows += 1;
+        if (consecutiveEmptyRows >= 50) break;
+        continue;
+      }
+      consecutiveEmptyRows = 0;
+      totalDataRows += 1;
 
       const sku = cellText('sku');
       const name = cellText('name');
-
-      // Filas completamente vacías se ignoran.
-      if (sku === '' && name === '' && cellText('barcode') === '' && cellText('partNumber') === '') {
-        continue;
-      }
-      totalDataRows += 1;
 
       if (sku === '') {
         errors.push({ rowNumber: r, sku: null, message: 'SKU vacío' });
@@ -417,63 +425,123 @@ export class ImportsService {
         continue;
       }
       if (sku.length > 60) {
-        errors.push({ rowNumber: r, sku, message: 'SKU supera 60 caracteres' });
+        errors.push({
+          rowNumber: r,
+          sku,
+          message: `SKU supera 60 caracteres (tiene ${sku.length})`,
+        });
+        continue;
+      }
+      if (name.length > 200) {
+        errors.push({
+          rowNumber: r,
+          sku,
+          message: `Nombre supera 200 caracteres (tiene ${name.length})`,
+        });
         continue;
       }
       if (seenSkusInBatch.has(sku)) {
         errors.push({
           rowNumber: r,
           sku,
-          message: 'SKU duplicado dentro del mismo Excel',
+          message: `SKU "${sku}" aparece más de una vez en el Excel`,
         });
         continue;
       }
       seenSkusInBatch.add(sku);
 
-      // Numéricos
-      const cost = parseNumeric(cellText('cost'));
-      const price = parseNumeric(cellText('price'));
-      const minStock = parseInteger(cellText('minStock'));
+      // Barcode duplicado en el mismo batch (la columna NO es única en DB pero
+      // duplicar dentro del mismo upload casi siempre es un copy/paste por error).
+      const barcode = cellText('barcode');
+      if (barcode !== '') {
+        if (seenBarcodesInBatch.has(barcode)) {
+          errors.push({
+            rowNumber: r,
+            sku,
+            message: `Código de barras "${barcode}" aparece más de una vez en el Excel`,
+          });
+          continue;
+        }
+        seenBarcodesInBatch.add(barcode);
+      }
+
+      // Numéricos — el helper devuelve `null` solo cuando el string es no-vacío
+      // pero no parseable. Empty string siempre devuelve `null` también, así
+      // que diferenciamos con el `raw`.
+      const costRaw = cellText('cost');
+      const priceRaw = cellText('price');
+      const minStockRaw = cellText('minStock');
       const maxStockRaw = cellText('maxStock');
+      const cost = parseNumeric(costRaw);
+      const price = parseNumeric(priceRaw);
+      const minStock = parseInteger(minStockRaw);
       const maxStock = maxStockRaw === '' ? null : parseInteger(maxStockRaw);
 
-      if (cost === null && cellText('cost') !== '') {
-        errors.push({ rowNumber: r, sku, message: 'Costo no es un número válido' });
+      if (cost === null && costRaw !== '') {
+        errors.push({
+          rowNumber: r,
+          sku,
+          message: `Costo no es un número válido: "${costRaw}"`,
+        });
         continue;
       }
-      if (price === null && cellText('price') !== '') {
-        errors.push({ rowNumber: r, sku, message: 'Precio no es un número válido' });
+      if (price === null && priceRaw !== '') {
+        errors.push({
+          rowNumber: r,
+          sku,
+          message: `Precio no es un número válido: "${priceRaw}"`,
+        });
         continue;
       }
-      if (minStock === null && cellText('minStock') !== '') {
-        errors.push({ rowNumber: r, sku, message: 'Stock mínimo no es entero válido' });
+      if (minStock === null && minStockRaw !== '') {
+        errors.push({
+          rowNumber: r,
+          sku,
+          message: `Stock mínimo no es entero válido: "${minStockRaw}"`,
+        });
         continue;
       }
-      if (maxStock === null && maxStockRaw !== '' && maxStockRaw !== undefined) {
-        errors.push({ rowNumber: r, sku, message: 'Stock máximo no es entero válido' });
+      if (maxStock === null && maxStockRaw !== '') {
+        errors.push({
+          rowNumber: r,
+          sku,
+          message: `Stock máximo no es entero válido: "${maxStockRaw}"`,
+        });
+        continue;
+      }
+      if (cost !== null && cost < 0) {
+        errors.push({ rowNumber: r, sku, message: 'Costo no puede ser negativo' });
+        continue;
+      }
+      if (price !== null && price < 0) {
+        errors.push({ rowNumber: r, sku, message: 'Precio no puede ser negativo' });
         continue;
       }
 
       // productKind
       const kindRaw = cellText('productKind').toUpperCase();
       let productKind: 'ORIGINAL' | 'ALTERNATIVE' | null = null;
-      if (kindRaw === '' || kindRaw === 'ORIGINAL') {
+      if (kindRaw === '' || kindRaw === 'ORIGINAL' || kindRaw === 'OEM') {
         productKind = ProductKind.ORIGINAL as 'ORIGINAL';
-      } else if (kindRaw === 'ALTERNATIVE' || kindRaw === 'ALTERNATIVO') {
+      } else if (
+        kindRaw === 'ALTERNATIVE' ||
+        kindRaw === 'ALTERNATIVO' ||
+        kindRaw === 'ALTERNATIVA'
+      ) {
         productKind = ProductKind.ALTERNATIVE as 'ALTERNATIVE';
       } else {
         errors.push({
           rowNumber: r,
           sku,
-          message: `productKind inválido: "${kindRaw}". Use ORIGINAL o ALTERNATIVE.`,
+          message: `Tipo inválido: "${kindRaw}". Use ORIGINAL o ALTERNATIVE.`,
         });
         continue;
       }
 
-      // Códigos compatibles: lista separada por `;`
+      // Códigos compatibles: lista separada por `;` o por `,`.
       const codesRaw = cellText('compatibleCodes');
       const compatibleCodes = codesRaw
-        .split(';')
+        .split(/[;,]/)
         .map((c) => c.trim())
         .filter(Boolean);
       const longCode = compatibleCodes.find((c) => c.length > 80);
@@ -485,13 +553,15 @@ export class ImportsService {
         });
         continue;
       }
+      // Códigos compatibles repetidos dentro de la misma fila → quedan únicos.
+      const compatibleCodesUnique = Array.from(new Set(compatibleCodes));
 
       valid.push({
         rowNumber: r,
         sku,
         name,
         partNumber: cellText('partNumber') || null,
-        barcode: cellText('barcode') || null,
+        barcode: barcode || null,
         universalCode: cellText('universalCode') || null,
         description: cellText('description') || null,
         categoryName: cellText('categoryName') || null,
@@ -502,7 +572,7 @@ export class ImportsService {
         maxStock,
         location: cellText('location') || null,
         productKind,
-        compatibleCodes,
+        compatibleCodes: compatibleCodesUnique,
       });
     }
 
@@ -563,27 +633,3 @@ export class ImportsService {
   }
 }
 
-function normalizeHeader(raw: string): string {
-  return raw
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
-}
-
-function parseNumeric(raw: string): number | null {
-  if (raw === '') return null;
-  // Acepta formato chileno con coma o internacional con punto.
-  const sanitized = raw.replace(/\./g, '').replace(',', '.');
-  const n = Number(sanitized);
-  return Number.isFinite(n) ? n : null;
-}
-
-function parseInteger(raw: string): number | null {
-  if (raw === '') return null;
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return null;
-  if (!Number.isInteger(n)) return null;
-  if (n < 0) return null;
-  return n;
-}

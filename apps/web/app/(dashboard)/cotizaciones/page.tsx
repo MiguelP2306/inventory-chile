@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Eye, Pencil, Plus } from 'lucide-react';
+import { Eye, FileDown, Pencil, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -26,6 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { apiAbsoluteUrl } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
 import { listQuotations } from '@/lib/quotations-api';
 import { useUrlFilters } from '@/lib/use-url-filters';
@@ -104,12 +105,31 @@ export default function CotizacionesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-semibold">Cotizaciones</h1>
-        <Button onClick={() => setDialogOpen(true)}>
-          <Plus className="h-4 w-4" />
-          Nueva cotización
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" size="sm">
+            <a
+              href={apiAbsoluteUrl(
+                `quotations/export.xlsx${buildQuotationsExportQuery({
+                  status: status === ALL ? undefined : status,
+                  q: debouncedQ || undefined,
+                  dateFrom: dateFrom || undefined,
+                  dateTo: dateTo || undefined,
+                })}`,
+              )}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <FileDown className="h-4 w-4" />
+              Exportar Excel
+            </a>
+          </Button>
+          <Button onClick={() => setDialogOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Nueva cotización
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
@@ -309,4 +329,18 @@ export default function CotizacionesPage() {
       />
     </div>
   );
+}
+
+/**
+ * Arma la querystring para `GET /quotations/export.xlsx` con los filtros
+ * activos. Omite valores vacíos / undefined.
+ */
+function buildQuotationsExportQuery(
+  params: Record<string, string | undefined>,
+): string {
+  const entries = Object.entries(params).filter(
+    ([, v]) => v != null && v !== '',
+  ) as [string, string][];
+  if (entries.length === 0) return '';
+  return '?' + entries.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
 }

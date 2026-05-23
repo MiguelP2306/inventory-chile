@@ -450,6 +450,27 @@ export class ProductsService {
    * legible en un PDF de catálogo.
    */
   async listForCatalog(query: ListProductsQueryDto): Promise<Product[]> {
+    return this.queryFilteredProducts(query, { limit: 500 });
+  }
+
+  /**
+   * Fase 10 polish — lista TODOS los productos que matchean los filtros para
+   * exportar a XLSX. **Sin cap** — la regla del MVP es: si no hay filtros se
+   * exporta toda la base sin pagination. ExcelJS aguanta decenas de miles
+   * de filas sin drama.
+   */
+  async listForExport(query: ListProductsQueryDto): Promise<Product[]> {
+    return this.queryFilteredProducts(query, { limit: null });
+  }
+
+  /**
+   * Helper interno que comparte los filtros entre catálogo PDF y export XLSX.
+   * `limit = null` significa sin tope; un número impone un `take(n)`.
+   */
+  private async queryFilteredProducts(
+    query: ListProductsQueryDto,
+    options: { limit: number | null },
+  ): Promise<Product[]> {
     const qb = this.products
       .createQueryBuilder('p')
       .leftJoinAndSelect('p.category', 'category')
@@ -487,7 +508,7 @@ export class ProductsService {
       });
     }
 
-    qb.take(500);
+    if (options.limit !== null) qb.take(options.limit);
     return qb.getMany();
   }
 

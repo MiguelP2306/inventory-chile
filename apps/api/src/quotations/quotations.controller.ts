@@ -14,6 +14,12 @@ import {
 import type { Response } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/types';
+import {
+  fetchAllPages,
+  MONEY_FMT,
+  sendXlsx,
+  stylizeSheet,
+} from '../common/xlsx-export';
 import { EmailService } from '../notifications/email.service';
 import { PdfService } from '../notifications/pdf.service';
 import {
@@ -31,6 +37,15 @@ import {
 } from './dto';
 import { QuotationsService } from './quotations.service';
 
+const QUOTATION_STATUS_LABEL: Record<string, string> = {
+  DRAFT: 'Borrador',
+  SENT: 'Enviada',
+  APPROVED: 'Aprobada',
+  REJECTED: 'Rechazada',
+  CONVERTED: 'Convertida',
+  EXPIRED: 'Vencida',
+};
+
 @Controller('quotations')
 export class QuotationsController {
   constructor(
@@ -42,6 +57,68 @@ export class QuotationsController {
   @Get()
   list(@Query() query: ListQuotationsQueryDto) {
     return this.svc.list(query);
+  }
+
+  /**
+   * Export XLSX — una fila por cotización con los datos de cabecera. Respeta
+   * `q`, `status`, `customerId`, `dateFrom/To` pero ignora paginación
+   * (batchea internamente via `fetchAllPages`).
+   */
+  @Get('export.xlsx')
+  async exportXlsx(
+    @Query() query: ListQuotationsQueryDto,
+    @Res() res: Response,
+  ) {
+    const items = await fetchAllPages((page, pageSize) =>
+      this.svc.list({ ...query, page, pageSize }),
+    );
+
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Inventory App';
+    wb.created = new Date();
+
+    const sheet = wb.addWorksheet('Cotizaciones');
+    sheet.columns = [
+      { header: 'Número', key: 'number', width: 16 },
+      { header: 'Fecha', key: 'date', width: 12 },
+      { header: 'Válida hasta', key: 'validUntil', width: 14 },
+      { header: 'Estado', key: 'status', width: 14 },
+      { header: 'Cliente', key: 'customer', width: 30 },
+      { header: 'RUT', key: 'taxId', width: 14 },
+      { header: 'Email', key: 'email', width: 26 },
+      { header: 'Teléfono', key: 'phone', width: 18 },
+      { header: 'Items', key: 'itemsCount', width: 8 },
+      { header: 'Subtotal', key: 'subtotal', width: 14, style: { numFmt: MONEY_FMT } },
+      { header: 'IVA', key: 'taxAmount', width: 14, style: { numFmt: MONEY_FMT } },
+      { header: 'Total', key: 'total', width: 14, style: { numFmt: MONEY_FMT } },
+      { header: 'Vendedor', key: 'user', width: 22 },
+      { header: 'Notas', key: 'notes', width: 30 },
+      { header: 'Enviada', key: 'sentAt', width: 12 },
+    ];
+
+    for (const q of items) {
+      sheet.addRow({
+        number: q.number,
+        date: q.date ? q.date.slice(0, 10) : '',
+        validUntil: q.validUntil ? q.validUntil.slice(0, 10) : '',
+        status: QUOTATION_STATUS_LABEL[q.status] ?? q.status,
+        customer: q.customerView?.name ?? '',
+        taxId: q.customerView?.taxId ?? '',
+        email: q.customerView?.email ?? '',
+        phone: q.customerView?.phone ?? '',
+        itemsCount: q.items?.length ?? 0,
+        subtotal: Number(q.subtotal) || 0,
+        taxAmount: Number(q.taxAmount) || 0,
+        total: Number(q.total) || 0,
+        user: q.user?.name ?? '',
+        notes: q.notes ?? '',
+        sentAt: q.sentAt ? q.sentAt.slice(0, 10) : '',
+      });
+    }
+
+    stylizeSheet(sheet);
+    await sendXlsx(res, wb, 'cotizaciones');
   }
 
   @Get(':id')

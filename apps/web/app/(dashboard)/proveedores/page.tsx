@@ -1,7 +1,14 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ExternalLink, Pencil, Plus, Trash2 } from 'lucide-react';
+import {
+  ExternalLink,
+  FileDown,
+  FileSpreadsheet,
+  Pencil,
+  Plus,
+  Trash2,
+} from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -25,6 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { apiAbsoluteUrl } from '@/lib/api';
 import { apiErrorMessage } from '@/lib/catalog-api';
 import {
   createSupplier,
@@ -148,12 +156,34 @@ export default function ProveedoresPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-semibold">Proveedores</h1>
-        <Button onClick={startCreate}>
-          <Plus className="h-4 w-4" />
-          Nuevo proveedor
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" size="sm">
+            <a
+              href={apiAbsoluteUrl(
+                `suppliers/export.xlsx${
+                  debouncedQ ? `?q=${encodeURIComponent(debouncedQ)}` : ''
+                }`,
+              )}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <FileDown className="h-4 w-4" />
+              Exportar Excel
+            </a>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/proveedores/importar">
+              <FileSpreadsheet className="h-4 w-4" />
+              Importar Excel
+            </Link>
+          </Button>
+          <Button onClick={startCreate}>
+            <Plus className="h-4 w-4" />
+            Nuevo proveedor
+          </Button>
+        </div>
       </div>
 
       <Input

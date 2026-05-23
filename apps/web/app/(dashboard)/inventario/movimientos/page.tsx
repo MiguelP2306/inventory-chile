@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Calendar as CalendarIcon,
   ChevronDown,
+  FileDown,
   Filter as FilterIcon,
   Package as PackageIcon,
   Search,
@@ -23,6 +24,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
+import { apiAbsoluteUrl } from '@/lib/api';
 import { getProduct } from '@/lib/catalog-api';
 import { getCustomer } from '@/lib/customers-api';
 import { getSupplier, listMovementCards } from '@/lib/inventory-api';
@@ -242,6 +244,25 @@ export default function MovimientosPage() {
             )}
           </p>
         </div>
+        <Button asChild variant="outline" size="sm">
+          <a
+            href={apiAbsoluteUrl(
+              `inventory/movements.xlsx${buildMovementsExportQuery({
+                productId: values.productId || undefined,
+                warehouseId: values.warehouseId || undefined,
+                type: values.type || undefined,
+                dateFrom: values.dateFrom || undefined,
+                dateTo: values.dateTo || undefined,
+              })}`,
+            )}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Exporta movimientos atómicos respetando los filtros de producto, bodega, tipo y fecha. Los filtros de cliente/proveedor/búsqueda libre se aplican solo a la vista de cards."
+          >
+            <FileDown className="h-4 w-4" />
+            Exportar Excel
+          </a>
+        </Button>
       </div>
 
       {/* ============================================================
@@ -758,4 +779,14 @@ function FilterTag({
       </button>
     </span>
   );
+}
+
+function buildMovementsExportQuery(
+  params: Record<string, string | undefined>,
+): string {
+  const entries = Object.entries(params).filter(
+    ([, v]) => v != null && v !== '',
+  ) as [string, string][];
+  if (entries.length === 0) return '';
+  return '?' + entries.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
 }

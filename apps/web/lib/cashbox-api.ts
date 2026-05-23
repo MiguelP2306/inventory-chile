@@ -154,7 +154,12 @@ export interface UpdateCompanySettingsInput {
   quotationFooter?: string | null;
   defaultValidityDays?: number;
   taxRate?: string;
+  // Ronda 9 — `cardCommissionRate` queda como legacy (ya no se edita desde
+  // la UI). Las comisiones reales viven en los 3 campos desdoblados.
   cardCommissionRate?: string;
+  cardDebitCommissionRate?: string;
+  cardCreditCommissionRate?: string;
+  paymentLinkCommissionRate?: string;
   defaultLeadTimeDays?: number;
   // Fase 8.5
   followUpHoursDefault?: number;

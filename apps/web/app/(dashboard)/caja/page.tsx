@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { ArrowDownToLine, ArrowUpToLine, Wallet } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpToLine, FileDown, Wallet } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,6 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { apiAbsoluteUrl } from '@/lib/api';
 import {
   getCashboxBalance,
   listCashTransactions,
@@ -124,8 +125,28 @@ export default function CajaPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-semibold">Libro de caja</h1>
+        <Button asChild variant="outline" size="sm">
+          <a
+            href={apiAbsoluteUrl(
+              `cashbox/transactions.xlsx${buildCajaExportQuery({
+                type: type === ALL ? undefined : type,
+                source: source === ALL ? undefined : source,
+                paymentMethod: methodVal === ALL ? undefined : methodVal,
+                expenseCategoryId: category === ALL ? undefined : category,
+                dateFrom: dateFrom || undefined,
+                dateTo: dateTo || undefined,
+                includeVoided: includeVoided ? '1' : undefined,
+              })}`,
+            )}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <FileDown className="h-4 w-4" />
+            Exportar Excel
+          </a>
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
@@ -397,4 +418,14 @@ function BalanceCard({
       </div>
     </div>
   );
+}
+
+function buildCajaExportQuery(
+  params: Record<string, string | undefined>,
+): string {
+  const entries = Object.entries(params).filter(
+    ([, v]) => v != null && v !== '',
+  ) as [string, string][];
+  if (entries.length === 0) return '';
+  return '?' + entries.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
 }

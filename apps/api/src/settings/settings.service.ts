@@ -39,12 +39,19 @@ export class SettingsService {
         throw new BadRequestException('taxRate debe ser un decimal entre 0 y 1');
       }
     }
-    if (dto.cardCommissionRate !== undefined) {
-      const n = parseFloat(dto.cardCommissionRate);
+    // Validación uniforme para las 4 tasas de comisión (legacy + 3 nuevas
+    // desdobladas por método). Cada una debe estar entre 0 y 1.
+    for (const key of [
+      'cardCommissionRate',
+      'cardDebitCommissionRate',
+      'cardCreditCommissionRate',
+      'paymentLinkCommissionRate',
+    ] as const) {
+      const raw = dto[key];
+      if (raw === undefined) continue;
+      const n = parseFloat(raw);
       if (!Number.isFinite(n) || n < 0 || n > 1) {
-        throw new BadRequestException(
-          'cardCommissionRate debe ser un decimal entre 0 y 1',
-        );
+        throw new BadRequestException(`${key} debe ser un decimal entre 0 y 1`);
       }
     }
 

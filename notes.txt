@@ -12,6 +12,8 @@ probar cuantos metodos de pago hay usando tarjeta
 
 Bugs Actuales:
 
+los metodos de pago como credito, debito y link de pago tienen comisiones no configurables y se debe de poder configurar
+
 =========================
 
 Puntos a futuro:

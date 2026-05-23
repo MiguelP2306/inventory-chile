@@ -611,13 +611,53 @@ Cards en grid responsive (`grid-cols-1` en mobile, `grid-cols-2` md, `grid-cols-
 - Ticket promedio, crecimiento de ventas vs mes anterior.
 - **Embudo del lifecycle** (NEW → QUOTED → WON / LOST) con porcentajes — visualiza la performance comercial.
 
-### Fase 10 — Carga masiva Excel
+### Fase 10 — Carga masiva Excel + exports masivos ✅
 
-1. `POST /imports/products` recibe `.xlsx` con `exceljs`.
-2. Plantilla con columnas: SKU, partNumber, barcode, **universalCode**, nombre, descripción, categoría, marca, costo, precio, stockMin, stockMax, ubicación, **productKind** (ORIGINAL/ALTERNATIVE), **códigos compatibles** (separados por `;`).
-3. Validación fila por fila (Zod), reporte de errores legible.
-4. Plantilla descargable con encabezados e instrucciones.
-5. UI con drag-and-drop, preview de primeras 10 filas, lista de errores antes de confirmar.
+Fase 10 cubre dos capacidades complementarias para mover datos en bulk entre Excel y la app:
+
+**A) Importer XLSX (UPSERT + partial success)**
+
+1. **3 entidades soportan import masivo:**
+   - Productos (UPSERT por SKU + auto-create de categorías/marcas).
+   - Clientes (UPSERT por RUT con validación módulo 11 + mapping de comuna por nombre contra el catálogo Chile).
+   - Proveedores (UPSERT por RUT).
+2. `POST /imports/{products|customers|suppliers}/preview` y `.../confirm` reciben `.xlsx` con `exceljs`. Multer en memoria — el archivo no se persiste.
+3. **Partial success**: una fila inválida (RUT mal formado, costo no numérico, comuna inexistente) se reporta con `rowNumber + motivo` pero no aborta el batch.
+4. Plantilla descargable por entidad con headers + fila de ejemplo + hoja "Instrucciones".
+5. UI uniforme en 3 pasos (drag&drop → preview con conteos + errores + primeras filas → resultado).
+6. **Parser robusto** (helpers compartidos en `apps/api/src/common/xlsx-import.ts`):
+   - Iteración resistente a `actualRowCount` engañoso (Google Sheets, Numbers, Looker, copy-paste).
+   - `readCellText` que cubre fórmulas, richtext, hyperlinks, dates, numbers.
+   - `parseNumeric` con detección automática de formato chileno vs US (`8.000` → 8000; `8.000,50` → 8000.5; `1.5` → 1.5).
+   - Detección automática del header en las primeras 5 filas (algunos exporters insertan filas vacías arriba).
+
+**B) Exporter XLSX masivo (regla: respeta filtros, ignora paginación)**
+
+7. **10 endpoints `.xlsx`** distribuidos por módulo:
+
+   | Pantalla | Endpoint |
+   | --- | --- |
+   | `/productos` | `GET /products/export.xlsx` |
+   | `/clientes` | `GET /customers/export.xlsx` |
+   | `/proveedores` | `GET /suppliers/export.xlsx` |
+   | `/cotizaciones` | `GET /quotations/export.xlsx` |
+   | `/ventas` | `GET /sales/export.xlsx` |
+   | `/compras` | `GET /purchases/export.xlsx` |
+   | `/inventario` | `GET /inventory/stock.xlsx` |
+   | `/inventario/movimientos` | `GET /inventory/movements.xlsx` |
+   | `/caja` | `GET /cashbox/transactions.xlsx` |
+   | `/gastos` | `GET /expenses/export.xlsx` |
+
+8. **Regla maestra:** cada export respeta los filtros activos de la pantalla y NO aplica paginación. Sin filtros, se baja la base completa. Tres estrategias según el servicio subyacente:
+   - Servicios sin paginación nativa (clientes, proveedores, stock): llamada sin `page`/`pageSize`.
+   - Servicios siempre paginados (ventas, compras, etc.): `fetchAllPages` (helper común) batchea de a 200 con cap defensivo de 50 000 filas.
+   - Productos: método dedicado `listForExport` sin tope (el catálogo PDF mantiene su cap de 500).
+9. **Estilo XLSX uniforme** vía helper compartido `apps/api/src/common/xlsx-export.ts`:
+   - Header bold + fill gris claro.
+   - Freeze pane sobre la primera fila.
+   - AutoFilter sobre todas las columnas (el operador puede filtrar/ordenar el XLSX descargado).
+   - Formato monetario `#,##0` para CLP (sin decimales).
+   - Nombre de archivo `<recurso>-<YYYY-MM-DD>.xlsx`.
 
 ### Fase 11 — Códigos de barras y refinamiento de plantillas
 

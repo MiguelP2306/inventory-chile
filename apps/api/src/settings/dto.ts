@@ -70,6 +70,22 @@ export class UpdateCompanySettingsDto {
   @IsNumberString({ no_symbols: false })
   cardCommissionRate?: string;
 
+  // Ronda 9 — Comisiones desdobladas por método de pago. Cada uno se descuenta
+  // automáticamente como egreso de caja al confirmar la venta con el método
+  // correspondiente. `cardCommissionRate` arriba es legacy y se mantiene en
+  // schema pero la UI nueva no la edita más.
+  @IsOptional()
+  @IsNumberString({ no_symbols: false })
+  cardDebitCommissionRate?: string;
+
+  @IsOptional()
+  @IsNumberString({ no_symbols: false })
+  cardCreditCommissionRate?: string;
+
+  @IsOptional()
+  @IsNumberString({ no_symbols: false })
+  paymentLinkCommissionRate?: string;
+
   // Lead time default (Fase 8). Días de cobertura por debajo de los cuales un
   // producto se marca crítico en /proyeccion.
   @IsOptional()

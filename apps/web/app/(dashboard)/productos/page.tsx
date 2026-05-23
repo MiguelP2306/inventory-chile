@@ -227,6 +227,26 @@ export default function ProductosPage() {
           <Button asChild variant="outline" size="sm">
             <a
               href={apiAbsoluteUrl(
+                `products/export.xlsx${buildCatalogQuery({
+                  q: debouncedQ,
+                  categoryId: categoryId === ALL ? undefined : categoryId,
+                  brandId: brandId === ALL ? undefined : brandId,
+                  productKind:
+                    productKind === ALL ? undefined : productKind,
+                  createdFrom: createdFrom || undefined,
+                  createdTo: createdTo || undefined,
+                })}`,
+              )}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <FileDown className="h-4 w-4" />
+              Exportar Excel
+            </a>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <a
+              href={apiAbsoluteUrl(
                 `products/catalog.pdf${buildCatalogQuery({
                   q: debouncedQ,
                   categoryId: categoryId === ALL ? undefined : categoryId,

@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Eye, Plus } from 'lucide-react';
+import { Eye, FileDown, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -25,6 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { apiAbsoluteUrl } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
 import { getSalesKpis, listSales } from '@/lib/sales-api';
 import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
@@ -124,14 +125,32 @@ export default function VentasPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-semibold">Ventas</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {filtersActive && (
             <Button variant="ghost" size="sm" onClick={clear}>
               Limpiar filtros
             </Button>
           )}
+          <Button asChild variant="outline" size="sm">
+            <a
+              href={apiAbsoluteUrl(
+                `sales/export.xlsx${buildSalesExportQuery({
+                  status: status === ALL ? undefined : status,
+                  paymentMethod: method === ALL ? undefined : method,
+                  q: debouncedQ || undefined,
+                  dateFrom: dateFrom || undefined,
+                  dateTo: dateTo || undefined,
+                })}`,
+              )}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <FileDown className="h-4 w-4" />
+              Exportar Excel
+            </a>
+          </Button>
           <Button onClick={() => setDialogOpen(true)}>
             <Plus className="h-4 w-4" />
             Nueva venta
@@ -475,4 +494,14 @@ function KpiCard({
       )}
     </div>
   );
+}
+
+function buildSalesExportQuery(
+  params: Record<string, string | undefined>,
+): string {
+  const entries = Object.entries(params).filter(
+    ([, v]) => v != null && v !== '',
+  ) as [string, string][];
+  if (entries.length === 0) return '';
+  return '?' + entries.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
 }

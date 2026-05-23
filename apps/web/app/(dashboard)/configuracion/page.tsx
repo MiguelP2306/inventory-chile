@@ -25,9 +25,14 @@ import { testHubspotSync } from '@/lib/lifecycle-api';
 import type { HubspotTestResultDto } from '@inventory/shared';
 
 // Tasas se editan como porcentaje "humano" (19) y se guardan como decimal (0.1900).
+// Polish Mayo 2026 — la comisión de tarjeta se desdobló en 3 inputs por método
+// de pago (débito / crédito / link de pago). El campo `cardCommissionRate`
+// legacy queda en DB pero ya no se edita desde la UI.
 const schema = z.object({
   taxRatePct: z.coerce.number().min(0).max(100),
-  cardCommissionRatePct: z.coerce.number().min(0).max(100),
+  cardDebitCommissionRatePct: z.coerce.number().min(0).max(100),
+  cardCreditCommissionRatePct: z.coerce.number().min(0).max(100),
+  paymentLinkCommissionRatePct: z.coerce.number().min(0).max(100),
   // Días de lead time default usados por la proyección de stock (Fase 8).
   defaultLeadTimeDays: z.coerce.number().int().min(1).max(365),
 });
@@ -51,7 +56,9 @@ export default function ConfiguracionPage() {
     resolver: zodResolver(schema),
     defaultValues: {
       taxRatePct: 19,
-      cardCommissionRatePct: 2.5,
+      cardDebitCommissionRatePct: 1.5,
+      cardCreditCommissionRatePct: 2.5,
+      paymentLinkCommissionRatePct: 3.5,
       defaultLeadTimeDays: 75,
     },
   });
@@ -60,7 +67,11 @@ export default function ConfiguracionPage() {
     if (settings) {
       form.reset({
         taxRatePct: rateToPct(settings.taxRate),
-        cardCommissionRatePct: rateToPct(settings.cardCommissionRate),
+        cardDebitCommissionRatePct: rateToPct(settings.cardDebitCommissionRate),
+        cardCreditCommissionRatePct: rateToPct(settings.cardCreditCommissionRate),
+        paymentLinkCommissionRatePct: rateToPct(
+          settings.paymentLinkCommissionRate,
+        ),
         defaultLeadTimeDays: settings.defaultLeadTimeDays,
       });
     }
@@ -70,7 +81,11 @@ export default function ConfiguracionPage() {
     mutationFn: (values: FormValues) =>
       updateCompanySettings({
         taxRate: pctToRate(values.taxRatePct),
-        cardCommissionRate: pctToRate(values.cardCommissionRatePct),
+        cardDebitCommissionRate: pctToRate(values.cardDebitCommissionRatePct),
+        cardCreditCommissionRate: pctToRate(values.cardCreditCommissionRatePct),
+        paymentLinkCommissionRate: pctToRate(
+          values.paymentLinkCommissionRatePct,
+        ),
         defaultLeadTimeDays: values.defaultLeadTimeDays,
       }),
     onSuccess: () => {
@@ -133,29 +148,86 @@ export default function ConfiguracionPage() {
               )}
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="cardCommissionRatePct">Comisión tarjeta (%)</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="cardCommissionRatePct"
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  max={100}
-                  {...form.register('cardCommissionRatePct')}
-                  className="max-w-[160px]"
-                />
-                <span className="text-sm text-muted-foreground">%</span>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Se descuenta automáticamente como egreso de caja al confirmar
-                una venta con tarjeta.
-              </p>
-              {form.formState.errors.cardCommissionRatePct?.message && (
-                <p className="text-xs text-destructive">
-                  {form.formState.errors.cardCommissionRatePct.message}
+            <div className="space-y-3 rounded-md border bg-background/40 p-4">
+              <div>
+                <h3 className="text-sm font-medium">Comisiones por método de pago</h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Al confirmar una venta con uno de estos métodos, el sistema
+                  descuenta automáticamente la comisión como egreso de caja.
                 </p>
-              )}
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="cardDebitCommissionRatePct" className="text-xs">
+                    Débito (%)
+                  </Label>
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      id="cardDebitCommissionRatePct"
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      max={100}
+                      {...form.register('cardDebitCommissionRatePct')}
+                    />
+                    <span className="text-sm text-muted-foreground">%</span>
+                  </div>
+                  {form.formState.errors.cardDebitCommissionRatePct?.message && (
+                    <p className="text-xs text-destructive">
+                      {form.formState.errors.cardDebitCommissionRatePct.message}
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="cardCreditCommissionRatePct" className="text-xs">
+                    Crédito (%)
+                  </Label>
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      id="cardCreditCommissionRatePct"
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      max={100}
+                      {...form.register('cardCreditCommissionRatePct')}
+                    />
+                    <span className="text-sm text-muted-foreground">%</span>
+                  </div>
+                  {form.formState.errors.cardCreditCommissionRatePct?.message && (
+                    <p className="text-xs text-destructive">
+                      {form.formState.errors.cardCreditCommissionRatePct.message}
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="paymentLinkCommissionRatePct" className="text-xs">
+                    Link de pago (%)
+                  </Label>
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      id="paymentLinkCommissionRatePct"
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      max={100}
+                      {...form.register('paymentLinkCommissionRatePct')}
+                    />
+                    <span className="text-sm text-muted-foreground">%</span>
+                  </div>
+                  {form.formState.errors.paymentLinkCommissionRatePct?.message && (
+                    <p className="text-xs text-destructive">
+                      {form.formState.errors.paymentLinkCommissionRatePct.message}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Defaults Chile: Débito 1.5% · Crédito 2.5% · Link 3.5%. Efectivo
+                y transferencia no tienen comisión.
+              </p>
             </div>
 
             <div className="space-y-2">

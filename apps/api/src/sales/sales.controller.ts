@@ -11,6 +11,12 @@ import {
 import type { Response } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/types';
+import {
+  fetchAllPages,
+  MONEY_FMT,
+  sendXlsx,
+  stylizeSheet,
+} from '../common/xlsx-export';
 import { PdfService } from '../notifications/pdf.service';
 import {
   CancelSaleDto,
@@ -20,6 +26,21 @@ import {
   SalesKpisQueryDto,
 } from './dto';
 import { SalesService } from './sales.service';
+
+const PAYMENT_METHOD_LABEL: Record<string, string> = {
+  CASH: 'Efectivo',
+  TRANSFER: 'Transferencia',
+  CARD: 'Tarjeta',
+  CARD_DEBIT: 'Tarjeta débito',
+  CARD_CREDIT: 'Tarjeta crédito',
+  PAYMENT_LINK: 'Link de pago',
+};
+
+const SALE_STATUS_LABEL: Record<string, string> = {
+  PENDING: 'Pendiente',
+  PAID: 'Pagada',
+  CANCELLED: 'Cancelada',
+};
 
 @Controller('sales')
 export class SalesController {
@@ -31,6 +52,69 @@ export class SalesController {
   @Get()
   list(@Query() query: ListSalesQueryDto) {
     return this.svc.list(query);
+  }
+
+  /**
+   * Export XLSX — una fila por venta. Respeta filtros del listado e ignora
+   * la paginación (batch interno).
+   */
+  @Get('export.xlsx')
+  async exportXlsx(
+    @Query() query: ListSalesQueryDto,
+    @Res() res: Response,
+  ) {
+    const items = await fetchAllPages((page, pageSize) =>
+      this.svc.list({ ...query, page, pageSize }),
+    );
+
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Inventory App';
+    wb.created = new Date();
+
+    const sheet = wb.addWorksheet('Ventas');
+    sheet.columns = [
+      { header: 'Número', key: 'number', width: 16 },
+      { header: 'Fecha', key: 'date', width: 12 },
+      { header: 'Estado', key: 'status', width: 12 },
+      { header: 'Cliente', key: 'customer', width: 30 },
+      { header: 'RUT', key: 'taxId', width: 14 },
+      { header: 'Bodega', key: 'warehouse', width: 18 },
+      { header: 'Método pago', key: 'paymentMethod', width: 16 },
+      { header: 'Items', key: 'itemsCount', width: 8 },
+      { header: 'Subtotal', key: 'subtotal', width: 14, style: { numFmt: MONEY_FMT } },
+      { header: 'IVA', key: 'taxAmount', width: 14, style: { numFmt: MONEY_FMT } },
+      { header: 'Comisión', key: 'commissionAmount', width: 14, style: { numFmt: MONEY_FMT } },
+      { header: 'Total', key: 'total', width: 14, style: { numFmt: MONEY_FMT } },
+      { header: 'Cotización origen', key: 'quotation', width: 18 },
+      { header: 'Vendedor', key: 'user', width: 22 },
+      { header: 'Cancelada', key: 'cancelledAt', width: 12 },
+      { header: 'Motivo cancelación', key: 'cancelReason', width: 30 },
+    ];
+
+    for (const s of items) {
+      sheet.addRow({
+        number: s.number,
+        date: s.date ? s.date.slice(0, 10) : '',
+        status: SALE_STATUS_LABEL[s.status] ?? s.status,
+        customer: s.customer?.name ?? '',
+        taxId: s.customer?.taxId ?? '',
+        warehouse: s.warehouse?.name ?? '',
+        paymentMethod: PAYMENT_METHOD_LABEL[s.paymentMethod] ?? s.paymentMethod,
+        itemsCount: s.items?.length ?? 0,
+        subtotal: Number(s.subtotal) || 0,
+        taxAmount: Number(s.taxAmount) || 0,
+        commissionAmount: Number(s.commissionAmount) || 0,
+        total: Number(s.total) || 0,
+        quotation: s.quotation?.number ?? '',
+        user: s.user?.name ?? '',
+        cancelledAt: s.cancelledAt ? s.cancelledAt.slice(0, 10) : '',
+        cancelReason: s.cancelReason ?? '',
+      });
+    }
+
+    stylizeSheet(sheet);
+    await sendXlsx(res, wb, 'ventas');
   }
 
   /**
