@@ -64,10 +64,13 @@ export class AuthController {
 
   private setAuthCookies(res: Response, result: LoginResult) {
     const isProd = this.config.get<string>('NODE_ENV') === 'production';
+    // En producción frontend (Vercel) y backend (Railway) viven en dominios
+    // distintos → las cookies necesitan `SameSite=None; Secure` para sobrevivir
+    // un request cross-site. En dev seguimos con `lax` (ambos en localhost).
     const base: CookieOptions = {
       httpOnly: true,
       secure: isProd,
-      sameSite: 'lax',
+      sameSite: isProd ? 'none' : 'lax',
     };
     res.cookie('access_token', result.accessToken, {
       ...base,
@@ -83,10 +86,13 @@ export class AuthController {
 
   private clearAuthCookies(res: Response) {
     const isProd = this.config.get<string>('NODE_ENV') === 'production';
+    // En producción frontend (Vercel) y backend (Railway) viven en dominios
+    // distintos → las cookies necesitan `SameSite=None; Secure` para sobrevivir
+    // un request cross-site. En dev seguimos con `lax` (ambos en localhost).
     const base: CookieOptions = {
       httpOnly: true,
       secure: isProd,
-      sameSite: 'lax',
+      sameSite: isProd ? 'none' : 'lax',
     };
     res.clearCookie('access_token', { ...base, path: '/' });
     res.clearCookie('refresh_token', { ...base, path: '/api/auth' });

@@ -45,14 +45,19 @@ import { WarrantiesModule } from './warranties/warranties.module';
     }),
     ScheduleModule.forRoot(),
     TypeOrmModule.forRoot(dataSourceOptions),
-    // Sirve archivos subidos como estáticos bajo `/api/uploads/*` (mismo
-    // prefix que la API). Convención y validaciones: ver
-    // apps/api/src/uploads/upload-config.ts.
-    ServeStaticModule.forRoot({
-      rootPath: UPLOADS_ROOT,
-      serveRoot: '/api/uploads',
-      serveStaticOptions: { fallthrough: true, index: false },
-    }),
+    // Sirve archivos subidos como estáticos bajo `/api/uploads/*` SOLO en el
+    // driver local. Con `STORAGE_DRIVER=cloudinary` (Fase 12 / Railway) las
+    // URLs ya son absolutas a Cloudinary y este static handler no se necesita.
+    // Convención y validaciones: ver apps/api/src/uploads/upload-config.ts.
+    ...((process.env.STORAGE_DRIVER ?? 'local').toLowerCase() === 'cloudinary'
+      ? []
+      : [
+          ServeStaticModule.forRoot({
+            rootPath: UPLOADS_ROOT,
+            serveRoot: '/api/uploads',
+            serveStaticOptions: { fallthrough: true, index: false },
+          }),
+        ]),
     AuthModule,
     CategoriesModule,
     BrandsModule,

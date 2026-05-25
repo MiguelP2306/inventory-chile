@@ -7,7 +7,7 @@
     "build": "nest build",
     "start": "nest start",
     "dev": "nest start --watch",
-    "start:prod": "node dist/main.js",
+    "start:prod": "node dist/database/run-migrations.js && node dist/database/seeds/run-seeds.js && node dist/main.js",
     "lint": "eslint \"{src,test}/**/*.ts\" --fix",
     "typecheck": "tsc --noEmit",
     "test": "jest",
@@ -16,7 +16,9 @@
     "db:migrate": "typeorm-ts-node-commonjs migration:run -d src/database/data-source.ts",
     "db:migrate:revert": "typeorm-ts-node-commonjs migration:revert -d src/database/data-source.ts",
     "db:migrate:generate": "typeorm-ts-node-commonjs migration:generate -d src/database/data-source.ts",
-    "db:seed": "ts-node -r tsconfig-paths/register src/database/seeds/run-seeds.ts"
+    "db:migrate:prod": "node dist/database/run-migrations.js",
+    "db:seed": "ts-node -r tsconfig-paths/register src/database/seeds/run-seeds.ts",
+    "db:seed:prod": "node dist/database/seeds/run-seeds.js"
   },
   "dependencies": {
     "@inventory/shared": "workspace:*",
@@ -34,6 +36,7 @@
     "bwip-js": "^4.10.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
+    "cloudinary": "^2.10.0",
     "cookie-parser": "^1.4.7",
     "csv-stringify": "^6.7.0",
     "dotenv": "^16.4.5",

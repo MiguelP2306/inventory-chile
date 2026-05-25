@@ -485,7 +485,7 @@ export default function MovimientosPage() {
           {productValue && (
             <FilterTag
               k="Producto"
-              v={productValue.sku}
+              v={productValue.sku ?? ''}
               onRemove={() => setFilter('productId', null)}
             />
           )}

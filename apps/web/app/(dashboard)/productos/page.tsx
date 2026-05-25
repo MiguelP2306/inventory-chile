@@ -548,9 +548,11 @@ export default function ProductosPage() {
             {!isLoading &&
               items.map((p) => {
                 const cover = publicImageUrl(p.coverUrl ?? null);
+                const costNum = p.cost ? Number(p.cost) : 0;
+                const priceNum = p.price ? Number(p.price) : 0;
                 const margin =
-                  p.cost && p.price
-                    ? Math.round(((p.price - p.cost) / p.price) * 100)
+                  costNum > 0 && priceNum > 0
+                    ? Math.round(((priceNum - costNum) / priceNum) * 100)
                     : null;
                 return (
                   <TableRow key={p.id} className="group cursor-pointer">

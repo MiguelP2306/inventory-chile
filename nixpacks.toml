@@ -1,0 +1,8 @@
+# Nixpacks config para el deploy del backend en Railway.
+# El frontend va en Vercel y NO usa este archivo.
+#
+# Forzamos Node 20 (el package.json requiere >=20.11.0). pnpm se activa via
+# corepack (incluido con Node 20) en el buildCommand de railway.json.
+
+[phases.setup]
+nixPkgs = ['nodejs_20']

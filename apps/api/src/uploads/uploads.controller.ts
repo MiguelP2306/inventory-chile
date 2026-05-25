@@ -6,18 +6,20 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { StorageService } from './storage.service';
 import {
   documentFileFilter,
   EXPENSE_RECEIPTS_SUBDIR,
   expenseReceiptStorage,
   MAX_DOCUMENT_BYTES,
-  publicUploadUrl,
   PURCHASE_INVOICES_SUBDIR,
   purchaseInvoiceStorage,
 } from './upload-config';
 
 @Controller('uploads')
 export class UploadsController {
+  constructor(private readonly storage: StorageService) {}
+
   @Post('purchase-invoice')
   @UseInterceptors(
     FileInterceptor('file', {
@@ -26,14 +28,12 @@ export class UploadsController {
       limits: { fileSize: MAX_DOCUMENT_BYTES },
     }),
   )
-  uploadPurchaseInvoice(@UploadedFile() file?: Express.Multer.File) {
+  async uploadPurchaseInvoice(@UploadedFile() file?: Express.Multer.File) {
     if (!file) throw new BadRequestException('Archivo requerido');
+    const stored = await this.storage.store(file, PURCHASE_INVOICES_SUBDIR);
     return {
-      url: publicUploadUrl(PURCHASE_INVOICES_SUBDIR, file.filename),
-      filename: file.filename,
+      ...stored,
       originalName: file.originalname,
-      mimeType: file.mimetype,
-      size: file.size,
     };
   }
 
@@ -45,14 +45,12 @@ export class UploadsController {
       limits: { fileSize: MAX_DOCUMENT_BYTES },
     }),
   )
-  uploadExpenseReceipt(@UploadedFile() file?: Express.Multer.File) {
+  async uploadExpenseReceipt(@UploadedFile() file?: Express.Multer.File) {
     if (!file) throw new BadRequestException('Archivo requerido');
+    const stored = await this.storage.store(file, EXPENSE_RECEIPTS_SUBDIR);
     return {
-      url: publicUploadUrl(EXPENSE_RECEIPTS_SUBDIR, file.filename),
-      filename: file.filename,
+      ...stored,
       originalName: file.originalname,
-      mimeType: file.mimetype,
-      size: file.size,
     };
   }
 }

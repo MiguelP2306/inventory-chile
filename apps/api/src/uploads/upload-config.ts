@@ -1,21 +1,24 @@
 import { BadRequestException } from '@nestjs/common';
-import { randomUUID } from 'crypto';
 import { existsSync, mkdirSync } from 'fs';
-import { extname, join, resolve } from 'path';
+import { resolve } from 'path';
 import type { Request } from 'express';
-import { diskStorage } from 'multer';
+import { memoryStorage } from 'multer';
 
 /**
  * Convenciones transversales de uploads (ver README → "Subida de archivos").
  *
- * - Storage en disco local en `apps/api/uploads/<recurso>/`.
- * - Cada archivo se renombra a `<uuid>.<ext>` para evitar path traversal.
- * - El upload validate vive en cada controller — éste solo provee `diskStorage`
- *   y los whitelists/limits por recurso.
+ * Desde Fase 12 (deploy), todos los uploads usan `memoryStorage()` de multer
+ * y la persistencia final la decide `StorageService` según `STORAGE_DRIVER`:
+ *   - `local` (dev): escribe al disco en `apps/api/uploads/<subdir>/<uuid>.<ext>`.
+ *   - `cloudinary` (prod): sube a Cloudinary con folder = subdir.
+ *
+ * Multer en memoria nos da un único path de código; `StorageService` se encarga
+ * del resto. En cualquier caso el archivo se renombra a `<uuid>.<ext>` para evitar
+ * path traversal.
  */
 
-// Resuelve a `<repo>/apps/api/uploads/`. `__dirname` en runtime es `dist/uploads`,
-// por eso vamos dos niveles arriba.
+// Resuelve a `<repo>/apps/api/uploads/` para el driver local. `__dirname` en
+// runtime es `dist/uploads`, por eso vamos dos niveles arriba.
 export const UPLOADS_ROOT = resolve(__dirname, '..', '..', 'uploads');
 
 export const PRODUCT_IMAGES_SUBDIR = 'products';
@@ -27,45 +30,32 @@ export const ACCEPTED_PRODUCT_IMAGE_MIMES = new Set([
 ]);
 export const ACCEPTED_PRODUCT_IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 
-function ensureDir(dir: string) {
+export function ensureDir(dir: string) {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 }
 
+// Aseguramos el root para el driver local. En driver=cloudinary este dir no se
+// usa, pero crearlo es barato y nos evita un `if` extra al arrancar en dev.
 ensureDir(UPLOADS_ROOT);
 
 /**
- * Storage configurado para fotos de producto.
- *
- * - Filtra por MIME type whitelist.
- * - Renombra a `<uuid>.<ext>`.
- * - Crea el directorio si no existe.
+ * Storage en memoria para fotos de producto. La persistencia final la decide
+ * `StorageService.store(file, subdir)` desde el controller/service.
  */
-export const productImageStorage = diskStorage({
-  destination: (_req, _file, cb) => {
-    const dir = join(UPLOADS_ROOT, PRODUCT_IMAGES_SUBDIR);
-    ensureDir(dir);
-    cb(null, dir);
-  },
-  filename: (_req, file, cb) => {
-    const ext = extname(file.originalname).toLowerCase();
-    cb(null, `${randomUUID()}${ext}`);
-  },
-});
+export const productImageStorage = memoryStorage();
 
 export function productImageFileFilter(
   _req: Request,
   file: Express.Multer.File,
   cb: (err: Error | null, accept: boolean) => void,
 ) {
-  const ext = extname(file.originalname).toLowerCase();
+  const ext = extnameFromOriginalName(file.originalname);
   if (
     !ACCEPTED_PRODUCT_IMAGE_MIMES.has(file.mimetype) ||
     !ACCEPTED_PRODUCT_IMAGE_EXTS.has(ext)
   ) {
     cb(
-      new BadRequestException(
-        'Formato no permitido. Subí JPG, PNG o WEBP.',
-      ),
+      new BadRequestException('Formato no permitido. Subí JPG, PNG o WEBP.'),
       false,
     );
     return;
@@ -74,9 +64,9 @@ export function productImageFileFilter(
 }
 
 /**
- * Devuelve la URL pública relativa para un archivo guardado en
- * `<UPLOADS_ROOT>/<subdir>/<filename>`. Sirve para persistir en `url` del
- * registro y luego servirla via ServeStaticModule.
+ * Devuelve la URL pública para un archivo local guardado en
+ * `<UPLOADS_ROOT>/<subdir>/<filename>`. Solo aplica al driver local; el driver
+ * cloudinary devuelve `secure_url` absoluta desde el SDK.
  */
 export function publicUploadUrl(subdir: string, filename: string): string {
   return `/uploads/${subdir}/${filename}`;
@@ -101,29 +91,15 @@ export const ACCEPTED_DOCUMENT_EXTS = new Set([
   '.webp',
 ]);
 
-function makeStorage(subdir: string) {
-  return diskStorage({
-    destination: (_req, _file, cb) => {
-      const dir = join(UPLOADS_ROOT, subdir);
-      ensureDir(dir);
-      cb(null, dir);
-    },
-    filename: (_req, file, cb) => {
-      const ext = extname(file.originalname).toLowerCase();
-      cb(null, `${randomUUID()}${ext}`);
-    },
-  });
-}
-
-export const purchaseInvoiceStorage = makeStorage(PURCHASE_INVOICES_SUBDIR);
-export const expenseReceiptStorage = makeStorage(EXPENSE_RECEIPTS_SUBDIR);
+export const purchaseInvoiceStorage = memoryStorage();
+export const expenseReceiptStorage = memoryStorage();
 
 export function documentFileFilter(
   _req: Request,
   file: Express.Multer.File,
   cb: (err: Error | null, accept: boolean) => void,
 ) {
-  const ext = extname(file.originalname).toLowerCase();
+  const ext = extnameFromOriginalName(file.originalname);
   if (
     !ACCEPTED_DOCUMENT_MIMES.has(file.mimetype) ||
     !ACCEPTED_DOCUMENT_EXTS.has(ext)
@@ -137,4 +113,10 @@ export function documentFileFilter(
     return;
   }
   cb(null, true);
+}
+
+function extnameFromOriginalName(name: string): string {
+  const idx = name.lastIndexOf('.');
+  if (idx < 0) return '';
+  return name.slice(idx).toLowerCase();
 }

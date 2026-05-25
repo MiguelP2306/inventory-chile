@@ -6,8 +6,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { unlink } from 'fs/promises';
-import { join } from 'path';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { CategoriesService } from '../categories/categories.service';
 import { CountersService } from '../common/counters.service';
@@ -20,7 +18,8 @@ import {
   VehicleFitment,
   VehicleModel,
 } from '../database/entities';
-import { UPLOADS_ROOT } from '../uploads/upload-config';
+import { PRODUCT_IMAGES_SUBDIR } from '../uploads/upload-config';
+import { StorageService } from '../uploads/storage.service';
 import {
   ByVehicleQueryDto,
   CreateProductDto,
@@ -45,6 +44,7 @@ export class ProductsService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly counters: CountersService,
     private readonly categories: CategoriesService,
+    private readonly storage: StorageService,
   ) {}
 
   async list(query: ListProductsQueryDto) {
@@ -207,7 +207,7 @@ export class ProductsService {
 
     // Limpieza de archivos físicos. No falla la operación si alguno no existe.
     await Promise.all(
-      productImages.map((img) => this.unlinkUploadedFile(img.url)),
+      productImages.map((img) => this.storage.delete(img.url)),
     );
     return { ok: true };
   }
@@ -221,10 +221,12 @@ export class ProductsService {
     if (!file) throw new BadRequestException('No se recibió archivo');
     const product = await this.products.findOne({ where: { id: productId } });
     if (!product) {
-      // Si el producto no existe, el archivo ya está en disco — limpio.
-      await this.unlinkUploadedFile(`/uploads/products/${file.filename}`);
+      // El archivo aún no se persistió (multer está en memoria) — no hay nada
+      // que limpiar, solo abortamos.
       throw new NotFoundException('Producto no encontrado');
     }
+
+    const stored = await this.storage.store(file, PRODUCT_IMAGES_SUBDIR);
 
     const existing = await this.images.find({ where: { productId } });
     const isFirst = existing.length === 0;
@@ -232,7 +234,7 @@ export class ProductsService {
 
     const image = this.images.create({
       productId,
-      url: `/uploads/products/${file.filename}`,
+      url: stored.url,
       isCover: isFirst,
       position: maxPosition + 1,
     });
@@ -261,7 +263,7 @@ export class ProductsService {
     if (!image) throw new NotFoundException('Imagen no encontrada');
     const wasCover = image.isCover;
     await this.images.remove(image);
-    await this.unlinkUploadedFile(image.url);
+    await this.storage.delete(image.url);
 
     // Si la imagen borrada era cover y quedan otras, promover la primera.
     if (wasCover) {
@@ -578,21 +580,6 @@ export class ProductsService {
       map.set(c.productId, c.url);
     }
     return map;
-  }
-
-  private async unlinkUploadedFile(publicUrl: string | null | undefined) {
-    if (!publicUrl) return;
-    // publicUrl viene como `/uploads/products/<file>`. Mapeo a path físico.
-    const prefix = '/uploads/';
-    if (!publicUrl.startsWith(prefix)) return;
-    const relative = publicUrl.slice(prefix.length);
-    const fullPath = join(UPLOADS_ROOT, relative);
-    try {
-      await unlink(fullPath);
-    } catch {
-      // El archivo puede no existir (caso típico: ya borrado, o env distinto).
-      // No queremos romper el delete del registro por eso.
-    }
   }
 
   // Reemplaza la lista completa de códigos compatibles del producto vía endpoint

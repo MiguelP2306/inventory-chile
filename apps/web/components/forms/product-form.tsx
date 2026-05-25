@@ -1878,8 +1878,12 @@ function PendingImagesUploader({
   function move(idx: number, dir: -1 | 1) {
     const j = idx + dir;
     if (j < 0 || j >= files.length) return;
+    const a = files[idx];
+    const b = files[j];
+    if (!a || !b) return;
     const next = [...files];
-    [next[idx], next[j]] = [next[j], next[idx]];
+    next[idx] = b;
+    next[j] = a;
     onChange(next);
   }
 
