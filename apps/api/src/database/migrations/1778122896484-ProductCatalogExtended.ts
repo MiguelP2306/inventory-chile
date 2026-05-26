@@ -35,7 +35,7 @@ export class ProductCatalogExtended1778122896484 implements MigrationInterface {
     // 3. Tabla product_images
     await queryRunner.query(`CREATE TABLE \`product_images\` (
       \`id\` varchar(36) NOT NULL,
-      \`productId\` char(36) NOT NULL,
+      \`productId\` varchar(36) NOT NULL,
       \`url\` varchar(500) NOT NULL,
       \`isCover\` tinyint NOT NULL DEFAULT 0,
       \`position\` int NOT NULL DEFAULT 0,
@@ -52,7 +52,7 @@ export class ProductCatalogExtended1778122896484 implements MigrationInterface {
     // 4. Tabla product_codes
     await queryRunner.query(`CREATE TABLE \`product_codes\` (
       \`id\` varchar(36) NOT NULL,
-      \`productId\` char(36) NOT NULL,
+      \`productId\` varchar(36) NOT NULL,
       \`code\` varchar(80) NOT NULL,
       \`kind\` enum('COMPATIBLE') NOT NULL DEFAULT 'COMPATIBLE',
       INDEX \`idx_product_codes_product\` (\`productId\`),

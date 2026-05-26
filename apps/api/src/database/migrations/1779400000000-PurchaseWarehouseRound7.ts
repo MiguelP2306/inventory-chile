@@ -17,7 +17,7 @@ export class PurchaseWarehouseRound7_1779400000000
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
-      `ALTER TABLE \`purchase_entries\` ADD \`warehouseId\` char(36) NULL`,
+      `ALTER TABLE \`purchase_entries\` ADD \`warehouseId\` varchar(36) NULL`,
     );
 
     // Backfill desde inventory_movements: tomar la bodega del primer

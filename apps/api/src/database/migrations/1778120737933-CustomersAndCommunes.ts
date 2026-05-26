@@ -39,7 +39,7 @@ export class CustomersAndCommunes1778120737933 implements MigrationInterface {
       `ALTER TABLE \`customers\` ADD \`addressNumber\` varchar(20) NULL`,
     );
     await queryRunner.query(
-      `ALTER TABLE \`customers\` ADD \`communeId\` char(36) NULL`,
+      `ALTER TABLE \`customers\` ADD \`communeId\` varchar(36) NULL`,
     );
     await queryRunner.query(
       `CREATE INDEX \`idx_customers_commune\` ON \`customers\` (\`communeId\`)`,

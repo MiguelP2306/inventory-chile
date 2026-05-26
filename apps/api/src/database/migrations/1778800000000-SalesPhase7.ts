@@ -27,7 +27,7 @@ export class SalesPhase71778800000000 implements MigrationInterface {
     // ---- sales: warehouseId con backfill ----
     // 1a. Agregar columna nullable temporalmente para poder backfillear.
     await queryRunner.query(
-      `ALTER TABLE \`sales\` ADD \`warehouseId\` char(36) NULL`,
+      `ALTER TABLE \`sales\` ADD \`warehouseId\` varchar(36) NULL`,
     );
 
     // 1b. Backfill: tomar el id de la bodega "Principal" o, si no existe, la
@@ -60,7 +60,7 @@ export class SalesPhase71778800000000 implements MigrationInterface {
 
     // 1c. Pasar a NOT NULL ahora que está backfilleado.
     await queryRunner.query(
-      `ALTER TABLE \`sales\` MODIFY COLUMN \`warehouseId\` char(36) NOT NULL`,
+      `ALTER TABLE \`sales\` MODIFY COLUMN \`warehouseId\` varchar(36) NOT NULL`,
     );
 
     // 1d. FK + índice.
@@ -81,7 +81,7 @@ export class SalesPhase71778800000000 implements MigrationInterface {
       `ALTER TABLE \`sales\` ADD \`cancelReason\` text NULL`,
     );
     await queryRunner.query(
-      `ALTER TABLE \`sales\` ADD \`cancelledById\` char(36) NULL`,
+      `ALTER TABLE \`sales\` ADD \`cancelledById\` varchar(36) NULL`,
     );
     await queryRunner.query(
       `ALTER TABLE \`sales\` ADD CONSTRAINT \`FK_sales_cancelled_by\`

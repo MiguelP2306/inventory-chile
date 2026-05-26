@@ -52,8 +52,8 @@ export class LeadLifecycleAndHubSpotPhase85_1779500000000
 
     await queryRunner.query(`
       CREATE TABLE \`lead_events\` (
-        \`id\` char(36) NOT NULL,
-        \`customerId\` char(36) NOT NULL,
+        \`id\` varchar(36) NOT NULL,
+        \`customerId\` varchar(36) NOT NULL,
         \`type\` enum(
           'QUOTATION_CREATED',
           'QUOTATION_SENT',
@@ -63,9 +63,9 @@ export class LeadLifecycleAndHubSpotPhase85_1779500000000
           'MANUAL_CONTACT'
         ) NOT NULL,
         \`refType\` varchar(40) NULL,
-        \`refId\` char(36) NULL,
+        \`refId\` varchar(36) NULL,
         \`occurredAt\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-        \`userId\` char(36) NULL,
+        \`userId\` varchar(36) NULL,
         PRIMARY KEY (\`id\`),
         INDEX \`idx_lead_events_customer\` (\`customerId\`),
         INDEX \`idx_lead_events_occurred\` (\`occurredAt\`),
@@ -80,8 +80,8 @@ export class LeadLifecycleAndHubSpotPhase85_1779500000000
 
     await queryRunner.query(`
       CREATE TABLE \`hubspot_sync_jobs\` (
-        \`id\` char(36) NOT NULL,
-        \`customerId\` char(36) NOT NULL,
+        \`id\` varchar(36) NOT NULL,
+        \`customerId\` varchar(36) NOT NULL,
         \`status\` enum('PENDING','PROCESSING','DONE','FAILED','SKIPPED') NOT NULL DEFAULT 'PENDING',
         \`attempts\` int NOT NULL DEFAULT 0,
         \`lastError\` text NULL,

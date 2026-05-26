@@ -31,8 +31,8 @@ export class Round7BugfixesBundle_1779700000000 implements MigrationInterface {
     // -------- 2. Crear tabla purchase_invoices --------
     await queryRunner.query(`
       CREATE TABLE \`purchase_invoices\` (
-        \`id\` char(36) NOT NULL,
-        \`purchaseEntryId\` char(36) NOT NULL,
+        \`id\` varchar(36) NOT NULL,
+        \`purchaseEntryId\` varchar(36) NOT NULL,
         \`url\` varchar(500) NOT NULL,
         \`filename\` varchar(255) NOT NULL,
         \`originalName\` varchar(255) NOT NULL,

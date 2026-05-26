@@ -137,14 +137,14 @@ export class Round9BugfixesBundle_1779900000000 implements MigrationInterface {
     // ---------- 6. SupplierCredit ----------
     await queryRunner.query(`
       CREATE TABLE \`supplier_credits\` (
-        \`id\` char(36) NOT NULL,
-        \`supplierId\` char(36) NOT NULL,
-        \`sourceReturnId\` char(36) NULL,
+        \`id\` varchar(36) NOT NULL,
+        \`supplierId\` varchar(36) NOT NULL,
+        \`sourceReturnId\` varchar(36) NULL,
         \`amount\` decimal(15,2) NOT NULL,
         \`balance\` decimal(15,2) NOT NULL,
         \`status\` enum('ACTIVE','SPENT','VOIDED') NOT NULL DEFAULT 'ACTIVE',
         \`notes\` text NULL,
-        \`userId\` char(36) NOT NULL,
+        \`userId\` varchar(36) NOT NULL,
         \`createdAt\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
         \`updatedAt\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
         PRIMARY KEY (\`id\`),
@@ -160,9 +160,9 @@ export class Round9BugfixesBundle_1779900000000 implements MigrationInterface {
     // ---------- 7. PurchaseCreditApplication ----------
     await queryRunner.query(`
       CREATE TABLE \`purchase_credit_applications\` (
-        \`id\` char(36) NOT NULL,
-        \`purchaseEntryId\` char(36) NOT NULL,
-        \`supplierCreditId\` char(36) NOT NULL,
+        \`id\` varchar(36) NOT NULL,
+        \`purchaseEntryId\` varchar(36) NOT NULL,
+        \`supplierCreditId\` varchar(36) NOT NULL,
         \`amount\` decimal(15,2) NOT NULL,
         \`createdAt\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
         PRIMARY KEY (\`id\`),
@@ -177,7 +177,7 @@ export class Round9BugfixesBundle_1779900000000 implements MigrationInterface {
     await queryRunner.query(`
       ALTER TABLE \`returns\`
         ADD COLUMN \`refundMode\` enum('MONEY','CREDIT','EXCHANGE') NOT NULL DEFAULT 'MONEY' AFTER \`paymentMethod\`,
-        ADD COLUMN \`supplierCreditId\` char(36) NULL,
+        ADD COLUMN \`supplierCreditId\` varchar(36) NULL,
         ADD COLUMN \`exchangeDifference\` decimal(15,2) NOT NULL DEFAULT 0,
         ADD CONSTRAINT \`fk_returns_supplier_credit\` FOREIGN KEY (\`supplierCreditId\`) REFERENCES \`supplier_credits\`(\`id\`) ON DELETE SET NULL
     `);
@@ -185,9 +185,9 @@ export class Round9BugfixesBundle_1779900000000 implements MigrationInterface {
     // ---------- 9. ReturnReplacementItem ----------
     await queryRunner.query(`
       CREATE TABLE \`return_replacement_items\` (
-        \`id\` char(36) NOT NULL,
-        \`returnId\` char(36) NOT NULL,
-        \`productId\` char(36) NOT NULL,
+        \`id\` varchar(36) NOT NULL,
+        \`returnId\` varchar(36) NOT NULL,
+        \`productId\` varchar(36) NOT NULL,
         \`qty\` int NOT NULL,
         \`unitPrice\` decimal(15,2) NOT NULL,
         \`unitCost\` decimal(15,2) NOT NULL DEFAULT 0,
@@ -221,7 +221,7 @@ export class Round9BugfixesBundle_1779900000000 implements MigrationInterface {
     });
     await queryRunner.query(`
       ALTER TABLE \`quotation_items\`
-        MODIFY COLUMN \`productId\` char(36) NULL,
+        MODIFY COLUMN \`productId\` varchar(36) NULL,
         ADD COLUMN \`tempProductName\` varchar(200) NULL,
         ADD COLUMN \`tempProductSku\` varchar(60) NULL,
         ADD COLUMN \`tempProductPartNumber\` varchar(80) NULL,
@@ -245,7 +245,7 @@ export class Round9BugfixesBundle_1779900000000 implements MigrationInterface {
         DROP COLUMN \`tempProductName\`,
         DROP COLUMN \`tempProductSku\`,
         DROP COLUMN \`tempProductPartNumber\`,
-        MODIFY COLUMN \`productId\` char(36) NOT NULL,
+        MODIFY COLUMN \`productId\` varchar(36) NOT NULL,
         ADD CONSTRAINT \`fk_quotation_items_product\` FOREIGN KEY (\`productId\`) REFERENCES \`products\`(\`id\`) ON DELETE RESTRICT
     `);
 
