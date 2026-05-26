@@ -1,4 +1,6 @@
 /** @type {import('next').NextConfig} */
+const BACKEND_URL = process.env.BACKEND_URL ?? 'http://localhost:4000';
+
 const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ['@inventory/shared'],
@@ -17,6 +19,21 @@ const nextConfig = {
         hostname: 'res.cloudinary.com',
       },
     ],
+  },
+  // Proxy `/api/*` al backend. Esto evita el problema de cookies cross-site:
+  // el browser ve un único dominio (el de Vercel) y las cookies se setean
+  // como first-party. SSR (`cookies()` de next/headers) también las puede
+  // leer porque ya no son de otro dominio.
+  //
+  // En dev local, BACKEND_URL apunta a http://localhost:4000 (default) y
+  // el rewrite reenvía al backend NestJS local — no cambia tu flujo de dev.
+  async rewrites() {
+    return [
+      {
+        source: '/api/:path*',
+        destination: `${BACKEND_URL}/api/:path*`,
+      },
+    ];
   },
 };
 

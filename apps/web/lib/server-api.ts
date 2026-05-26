@@ -1,6 +1,25 @@
 import { cookies } from 'next/headers';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
+/**
+ * Resolución del endpoint del backend para Server Components.
+ *
+ * - Dev local: `NEXT_PUBLIC_API_URL=http://localhost:4000/api` (absoluto).
+ *   El SSR hace fetch directo al backend.
+ * - Prod Vercel: `NEXT_PUBLIC_API_URL=/api` (relativo, usado por axios en
+ *   client). Para SSR necesitamos URL absoluta — caemos a `BACKEND_URL`
+ *   (env var server-only).
+ */
+function resolveServerApiBase(): string {
+  const fromPublic = process.env.NEXT_PUBLIC_API_URL ?? '/api';
+  if (fromPublic.startsWith('http://') || fromPublic.startsWith('https://')) {
+    return fromPublic;
+  }
+  const backend = process.env.BACKEND_URL ?? 'http://localhost:4000';
+  // Si NEXT_PUBLIC_API_URL es `/api`, lo concatenamos al backend.
+  return `${backend.replace(/\/$/, '')}${fromPublic.startsWith('/') ? fromPublic : `/${fromPublic}`}`;
+}
+
+const API_BASE = resolveServerApiBase();
 
 // Helper para Server Components: forwarda las cookies del request entrante
 // al backend. No intenta refresh — el layout protegido se encarga del redirect.
