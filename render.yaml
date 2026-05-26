@@ -1,0 +1,24 @@
+# Render Blueprint para el backend NestJS.
+# Documentación: https://render.com/docs/blueprint-spec
+#
+# El frontend va en Vercel (NO se define aquí).
+# La DB es externa (TiDB Cloud) — no provisionamos MySQL en Render.
+
+services:
+  - type: web
+    name: inventory-chile-api
+    runtime: node
+    plan: free
+    region: oregon # Cerca de TiDB Cloud us-west-2 para baja latencia DB
+    rootDir: . # Repo entero (monorepo pnpm)
+    buildCommand: corepack enable && corepack prepare pnpm@9.12.0 --activate && pnpm install --frozen-lockfile && pnpm --filter @inventory/shared build && pnpm --filter @inventory/api build
+    startCommand: pnpm --filter @inventory/api run start:prod
+    healthCheckPath: /api/health
+    autoDeploy: true
+    branch: main
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Render asigna PORT automáticamente — el código ya lo respeta (process.env.PORT).
+      # Las demás variables (DB_*, JWT_*, CLOUDINARY_*, RESEND_*, etc.) se pegan
+      # en la UI de Render — están documentadas en DEPLOY.md.

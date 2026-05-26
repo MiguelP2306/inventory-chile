@@ -1,4 +1,4 @@
-# DEPLOY — Fase 12 (Railway + Vercel + Resend + TiDB Cloud + Cloudinary)
+# DEPLOY — Fase 12 (Render + Vercel + Resend + TiDB Cloud + Cloudinary)
 
 Guía paso a paso para subir el sistema a producción **de forma gratuita** para
 que el jefe lo testee. Tiempo total estimado: **45-60 min** la primera vez.
@@ -12,14 +12,18 @@ que el jefe lo testee. Tiempo total estimado: **45-60 min** la primera vez.
         │
         ├──► https://inventory-chile.vercel.app  ← Next.js (Vercel)
         │
-        └──► https://inventory-chile-api.up.railway.app/api  ← NestJS (Railway)
+        └──► https://inventory-chile-api.onrender.com/api  ← NestJS (Render)
                        │
                        ├──► TiDB Cloud Serverless (MySQL, 5 GB gratis)
                        ├──► Cloudinary (fotos producto + facturas PDF, 25 GB gratis)
                        └──► Resend (email cotizaciones, modo dev → a.eduardoperez.fp2019@gmail.com)
 ```
 
-Costo: **$0/mes** mientras no se supere ningún tier gratuito.
+Costo: **$0/mes** indefinido. Sin tarjeta requerida en ningún servicio.
+
+**Trade-off de Render Free**: el servicio entra en "sleep" después de 15 min
+sin tráfico. La primera request después del sleep tarda ~30 segundos en
+despertar. Para una demo donde el jefe entra ocasionalmente esto es aceptable.
 
 ---
 
@@ -28,6 +32,13 @@ Costo: **$0/mes** mientras no se supere ningún tier gratuito.
 - Repo en GitHub al día (push del branch `main` con los cambios de Fase 12).
 - Tarjeta NO requerida en ningún proveedor de esta guía.
 - Acceso al email `a.eduardoperez.fp2019@gmail.com` (para Resend).
+
+## Estructura de archivos de deploy en el repo
+
+- [render.yaml](render.yaml) — Blueprint de Render (backend).
+- [vercel.json](vercel.json) — Configuración de Vercel (frontend).
+- [apps/api/.env.example](apps/api/.env.example) — Plantilla de variables del backend.
+- [apps/web/.env.example](apps/web/.env.example) — Plantilla de variables del frontend.
 
 ---
 
@@ -80,85 +91,98 @@ Costo: **$0/mes** mientras no se supere ningún tier gratuito.
 
 ---
 
-## Paso 4 — Railway (backend NestJS)
+## Paso 4 — Render (backend NestJS)
 
-### 4.1 Crear cuenta y proyecto
+### 4.1 Crear la base de datos en TiDB
 
-1. Ir a <https://railway.com> → **Login with GitHub**.
-2. Autorizar Railway en GitHub (solo lectura del repo `inventory-chile`).
-3. En el dashboard, click **+ New Project** → **Deploy from GitHub repo**.
-4. Buscar y seleccionar `MiguelP2306/inventory-chile`.
-5. Railway detecta el `railway.json` y `nixpacks.toml` automáticamente. Aparece
-   un primer deploy que VA A FALLAR (faltan las env vars) — **no te preocupes**.
+Antes del deploy del backend, hay que crear la database vacía `inventory` en
+TiDB Cloud (el cluster crea una llamada `sys` por default, que es de sistema):
 
-### 4.2 Configurar variables de entorno
+1. En TiDB Cloud → cluster → click **Connect** → método **SQL Editor**.
+2. Ejecutá:
+   ```sql
+   CREATE DATABASE inventory CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+   ```
 
-Click en el servicio → tab **Variables** → **Raw editor** → pegá todo esto:
+### 4.2 Crear el servicio en Render
+
+1. Ir a <https://render.com> → **Sign up with GitHub** (no pide tarjeta).
+2. Autorizar Render en GitHub para el repo `MiguelP2306/inventory-chile`.
+3. En el dashboard, click **+ New** → **Web Service**.
+4. Seleccionar el repo `inventory-chile`.
+5. Render detecta el `render.yaml` y propone la configuración. Confirmar:
+   - **Name**: `inventory-chile-api`
+   - **Region**: `Oregon (US West)` — más cerca de TiDB Cloud us-west-2
+   - **Branch**: `main`
+   - **Runtime**: `Node`
+   - **Plan**: **Free**
+6. Click **Create Web Service**. El primer deploy va a fallar (faltan env vars) — no pasa nada.
+
+### 4.3 Configurar variables de entorno
+
+En el servicio recién creado → tab **Environment** → click **+ Add Environment Variable** y agregar uno por uno (o usar **Add from .env** y pegar todo el bloque de abajo):
 
 ```
 NODE_ENV=production
-PORT=4000
+
 CORS_ORIGIN=https://inventory-chile.vercel.app,https://*.vercel.app
 
-DB_HOST=<host de TiDB Cloud>
+DB_HOST=gateway01.us-west-2.prod.aws.tidbcloud.com
 DB_PORT=4000
-DB_USERNAME=<user de TiDB Cloud>
-DB_PASSWORD=<password de TiDB Cloud>
+DB_USERNAME=3PU4bb8dioDGbU9.root
+DB_PASSWORD=5K9ftK4Mw9pPKkTq
 DB_DATABASE=inventory
 DB_SSL=true
 DB_LOGGING=false
 
-JWT_SECRET=<generar con: openssl rand -hex 64>
-JWT_REFRESH_SECRET=<generar con: openssl rand -hex 64>
+JWT_SECRET=GENERAR_64_CHARS_HEX
+JWT_REFRESH_SECRET=GENERAR_OTROS_64_CHARS_HEX
 JWT_EXPIRES_IN=15m
 JWT_REFRESH_EXPIRES_IN=7d
 
 STORAGE_DRIVER=cloudinary
-CLOUDINARY_CLOUD_NAME=<de Cloudinary>
-CLOUDINARY_API_KEY=<de Cloudinary>
-CLOUDINARY_API_SECRET=<de Cloudinary>
+CLOUDINARY_CLOUD_NAME=dlqnie9eq
+CLOUDINARY_API_KEY=754461635753731
+CLOUDINARY_API_SECRET=PEsA30J2vCS_XkdfAdVbUM-NhwY
 
-RESEND_API_KEY=<re_xxx de Resend>
+RESEND_API_KEY=re_GZmU88DH_AAmStfsyry7ygLHvjnrgtq6M
 RESEND_FROM_EMAIL=onboarding@resend.dev
 EMAIL_FROM=onboarding@resend.dev
 
-PUBLIC_API_URL=https://<tu-backend>.up.railway.app
+PUBLIC_API_URL=https://inventory-chile-api.onrender.com
 PUBLIC_BASE_URL=https://inventory-chile.vercel.app
 
 SEED_ADMIN_EMAIL=a.eduardoperez.fp2019@gmail.com
-SEED_ADMIN_PASSWORD=<generar 20 chars seguros>
+SEED_ADMIN_PASSWORD=GENERAR_20_CHARS_FUERTES
 ```
 
-> **Generar secrets seguros**: en cualquier terminal `openssl rand -hex 64`. Si
-> no tenés openssl a mano, usá <https://passwords-generator.org/> con 64 chars
-> alfanuméricos.
+> **Generar secrets seguros**:
+> - **PowerShell**: `[Convert]::ToHexString((1..64 | ForEach-Object { Get-Random -Maximum 256 }))`
+> - **Online**: <https://passwords-generator.org/> → 64 chars alfanuméricos
+> - **Git Bash / WSL**: `openssl rand -hex 64`
 
-> **CORS_ORIGIN**: dejá `https://*.vercel.app` para aceptar los preview
-> deployments de PRs. Si querés ser estricto, dejá solo el dominio final.
-
-### 4.3 Crear la base de datos en TiDB
-
-Antes del próximo deploy, hay que crear la database vacía `inventory`:
-
-1. En TiDB Cloud → cluster → tab **SQL Editor** (o conectarte por el CLI).
-2. Ejecutá: `CREATE DATABASE inventory CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`
+> **`PUBLIC_API_URL`**: la URL real te la da Render después del primer deploy
+> exitoso. Si tu servicio se llama `inventory-chile-api`, por convención queda
+> `https://inventory-chile-api.onrender.com`. Render te muestra la URL exacta
+> en la cabecera del servicio — ajustá si es distinta.
 
 ### 4.4 Re-deploy
 
-1. Volver a Railway → tab **Deployments** → click **Redeploy** en el último deploy fallido.
-2. Mirar los logs en vivo. Deberías ver:
+1. Una vez agregadas las env vars, Render redeploya automáticamente.
+2. Tab **Logs** → mirá el deploy en vivo. Deberías ver:
    ```
    [migrations] Aplicadas N: ...
    [seed] Admin creado: a.eduardoperez.fp2019@gmail.com / ...
    [seed] 346 comunas insertadas
-   [api] listening on port 4000 (prefix /api)
+   [api] listening on port 10000 (prefix /api)
    ```
-3. Settings → **Networking** → **Generate Domain** → te da una URL pública tipo
-   `inventory-chile-api-production.up.railway.app`. **Copiala**.
-4. **Actualizá** la env var `PUBLIC_API_URL` con esa URL exacta (https://...) →
-   Railway redeploya solo.
-5. Probá: <https://TU-BACKEND.up.railway.app/api/health> → debe devolver
-   `{"status":"ok",...}`.
+3. El **healthcheck** debería pasar (Render hace ping a `/api/health` cada cierto rato).
+4. Probá en el browser: `https://inventory-chile-api.onrender.com/api/health`
+   → debe devolver `{"status":"ok",...}`. La primera vez tarda ~30 seg (cold start).
+
+> **Si la URL real no es `inventory-chile-api.onrender.com`**: copiala del
+> dashboard de Render y actualizá `PUBLIC_API_URL` con la correcta. Render
+> redeploya solo. También vas a usarla en el Paso 5 para `NEXT_PUBLIC_API_URL`.
 
 ---
 
@@ -185,7 +209,7 @@ Antes del próximo deploy, hay que crear la database vacía `inventory`:
 En el wizard de import o después en Settings → Environment Variables:
 
 ```
-NEXT_PUBLIC_API_URL=https://TU-BACKEND.up.railway.app/api
+NEXT_PUBLIC_API_URL=https://inventory-chile-api.onrender.com/api
 ```
 
 **Importante el `/api` al final.**
@@ -194,10 +218,11 @@ NEXT_PUBLIC_API_URL=https://TU-BACKEND.up.railway.app/api
 
 1. Click **Deploy**. Tarda ~2 minutos.
 2. Te da una URL tipo `inventory-chile.vercel.app`.
-3. **Volver a Railway** y actualizar:
+3. **Volver a Render** → tab **Environment** y actualizar (si los valores
+   anteriores eran placeholder):
    - `CORS_ORIGIN=https://inventory-chile.vercel.app,https://*.vercel.app`
    - `PUBLIC_BASE_URL=https://inventory-chile.vercel.app`
-4. Railway redeploya solo.
+4. Render redeploya solo al guardar.
 
 ---
 
@@ -229,20 +254,22 @@ Desde un browser (Incógnito ayuda para no arrastrar cookies viejas):
 
 | Síntoma | Causa probable | Fix |
 | --- | --- | --- |
-| Build falla en Railway con "Cannot find module @inventory/shared" | El build de shared no corrió antes que api | Verificá `buildCommand` en `railway.json` |
-| 401 en todos los endpoints después de login | Cookies no se setean cross-site | Verificá que el deploy de Railway tenga `NODE_ENV=production` y que el frontend mande `withCredentials: true` (ya lo hace) |
-| "CORS error" en consola del browser | `CORS_ORIGIN` no incluye el dominio Vercel | Actualizar var en Railway y redeploy |
+| Build falla en Render con "Cannot find module @inventory/shared" | El build de shared no corrió antes que api | Verificá `buildCommand` en `render.yaml` |
+| 401 en todos los endpoints después de login | Cookies no se setean cross-site | Verificá que el deploy de Render tenga `NODE_ENV=production` y que el frontend mande `withCredentials: true` (ya lo hace) |
+| "CORS error" en consola del browser | `CORS_ORIGIN` no incluye el dominio Vercel | Actualizar var en Render Environment y redeploy |
 | Email no llega | API key de Resend mal o destinatario != email de la cuenta Resend | Solo podés enviar al email dueño en modo dev |
-| Imagen de producto se ve rota | `STORAGE_DRIVER` no es `cloudinary` o falta una de las 3 credenciales | Revisar logs de Railway al boot: "StorageService driver=..." |
-| Healthcheck timeout en Railway | Migraciones tardan más de 60s la primera vez | Subir `healthcheckTimeout` a 300 en `railway.json`, redeploy |
+| Imagen de producto se ve rota | `STORAGE_DRIVER` no es `cloudinary` o falta una de las 3 credenciales | Revisar logs de Render al boot: "StorageService driver=..." |
+| Healthcheck timeout en Render | Migraciones tardan más de lo permitido la primera vez | Esperar y refrescar — Render reintenta. Si insiste, subir el plan o partir el seed a un job aparte |
 | "ER_ACCESS_DENIED" en TiDB | Password mal copiada o falta `DB_SSL=true` | Re-copiar password (sin espacios), confirmar SSL |
+| Primera carga de la app tarda 30+ seg | Cold start de Render Free (sleep tras 15 min) | Esperar. Si el jefe va a usar seguido, considerar plan Starter ($7/mes) sin sleep |
+| "DATABASE 'inventory' doesn't exist" | No creaste la database en TiDB antes del deploy | Ejecutar el `CREATE DATABASE` del Paso 4.1 en el SQL Editor de TiDB |
 
 ---
 
 ## Limpieza si algo sale mal
 
-- **Railway**: Settings → Danger → Delete service / project. Sin costos pendientes.
-- **Vercel**: Settings → Advanced → Delete project. Idem.
+- **Render**: dashboard → service → Settings → Danger Zone → Delete service.
+- **Vercel**: Settings → Advanced → Delete project.
 - **TiDB Cloud**: cluster → Settings → Delete cluster.
 - **Cloudinary** y **Resend**: dejá las cuentas — son gratis y reusables.
 
