@@ -538,6 +538,10 @@ export class DashboardService {
    *
    * Solo devuelve clientes que tienen al menos una cotización SENT/APPROVED
    * — sin eso, el card del dashboard no tiene quoteNumber/amount que mostrar.
+   *
+   * Implementación con CTE + ROW_NUMBER() en lugar de subquery en ON.
+   * TiDB rechaza "ON condition doesn't support subqueries yet" pero soporta
+   * window functions y CTEs sin problema.
    */
   private async urgentFollowUps(limit: number): Promise<DashboardFollowUpDto[]> {
     const rows: Array<{
@@ -551,7 +555,19 @@ export class DashboardService {
       quoteNumber: string;
       amount: string;
     }> = await this.ds.query(
-      `SELECT c.id AS customerId,
+      `WITH ranked_quotes AS (
+         SELECT q.id,
+                q.customerId,
+                q.number,
+                q.total,
+                ROW_NUMBER() OVER (
+                  PARTITION BY q.customerId
+                  ORDER BY q.date DESC
+                ) AS rn
+         FROM quotations q
+         WHERE q.status IN (?, ?)
+       )
+       SELECT c.id AS customerId,
               c.name AS customerName,
               c.whatsappPhone AS whatsappPhone,
               c.phone AS phone,
@@ -561,14 +577,8 @@ export class DashboardService {
               q.number AS quoteNumber,
               q.total AS amount
        FROM customers c
-       INNER JOIN quotations q
-         ON q.id = (
-           SELECT q2.id FROM quotations q2
-           WHERE q2.customerId = c.id
-             AND q2.status IN (?, ?)
-           ORDER BY q2.date DESC
-           LIMIT 1
-         )
+       INNER JOIN ranked_quotes q
+         ON q.customerId = c.id AND q.rn = 1
        WHERE c.lifecycleStatus IN (?, ?)
        ORDER BY c.nextFollowUpAt IS NULL, c.nextFollowUpAt ASC
        LIMIT ?`,
