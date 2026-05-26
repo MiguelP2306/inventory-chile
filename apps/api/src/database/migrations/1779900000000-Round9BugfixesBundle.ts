@@ -174,11 +174,17 @@ export class Round9BugfixesBundle_1779900000000 implements MigrationInterface {
     `);
 
     // ---------- 8. Return.refundMode + supplierCreditId ----------
+    // TiDB no soporta ADD COLUMN + ADD CONSTRAINT que referencie esa columna en
+    // la misma sentencia (en MySQL funciona porque procesa columns antes).
+    // Separamos en dos ALTER.
     await queryRunner.query(`
       ALTER TABLE \`returns\`
         ADD COLUMN \`refundMode\` enum('MONEY','CREDIT','EXCHANGE') NOT NULL DEFAULT 'MONEY' AFTER \`paymentMethod\`,
         ADD COLUMN \`supplierCreditId\` varchar(36) NULL,
-        ADD COLUMN \`exchangeDifference\` decimal(15,2) NOT NULL DEFAULT 0,
+        ADD COLUMN \`exchangeDifference\` decimal(15,2) NOT NULL DEFAULT 0
+    `);
+    await queryRunner.query(`
+      ALTER TABLE \`returns\`
         ADD CONSTRAINT \`fk_returns_supplier_credit\` FOREIGN KEY (\`supplierCreditId\`) REFERENCES \`supplier_credits\`(\`id\`) ON DELETE SET NULL
     `);
 
@@ -219,12 +225,16 @@ export class Round9BugfixesBundle_1779900000000 implements MigrationInterface {
         );
       }
     });
+    // Separamos MODIFY + ADD COLUMN del ADD CONSTRAINT por compatibilidad con TiDB.
     await queryRunner.query(`
       ALTER TABLE \`quotation_items\`
         MODIFY COLUMN \`productId\` varchar(36) NULL,
         ADD COLUMN \`tempProductName\` varchar(200) NULL,
         ADD COLUMN \`tempProductSku\` varchar(60) NULL,
-        ADD COLUMN \`tempProductPartNumber\` varchar(80) NULL,
+        ADD COLUMN \`tempProductPartNumber\` varchar(80) NULL
+    `);
+    await queryRunner.query(`
+      ALTER TABLE \`quotation_items\`
         ADD CONSTRAINT \`fk_quotation_items_product\` FOREIGN KEY (\`productId\`) REFERENCES \`products\`(\`id\`) ON DELETE RESTRICT
     `);
   }
@@ -245,7 +255,10 @@ export class Round9BugfixesBundle_1779900000000 implements MigrationInterface {
         DROP COLUMN \`tempProductName\`,
         DROP COLUMN \`tempProductSku\`,
         DROP COLUMN \`tempProductPartNumber\`,
-        MODIFY COLUMN \`productId\` varchar(36) NOT NULL,
+        MODIFY COLUMN \`productId\` varchar(36) NOT NULL
+    `);
+    await queryRunner.query(`
+      ALTER TABLE \`quotation_items\`
         ADD CONSTRAINT \`fk_quotation_items_product\` FOREIGN KEY (\`productId\`) REFERENCES \`products\`(\`id\`) ON DELETE RESTRICT
     `);
 
