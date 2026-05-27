@@ -85,6 +85,11 @@ export const CashTransactionSource = {
   // original, sino devoluciones parciales o totales con su propio registro de caja).
   SALE_RETURN: 'SALE_RETURN',
   PURCHASE_RETURN: 'PURCHASE_RETURN',
+  // Fase 12 — capital inicial. Una sola transacción de tipo INCOME que se
+  // registra antes de cualquier otro movimiento para reflejar el saldo de
+  // arranque de la empresa. Solo es editable mientras no haya otros
+  // movimientos (ventas, compras, gastos manuales, etc.).
+  OPENING: 'OPENING',
 } as const;
 export type CashTransactionSource =
   (typeof CashTransactionSource)[keyof typeof CashTransactionSource];

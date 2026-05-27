@@ -1,5 +1,15 @@
-import { Controller, Get, Query, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Post,
+  Query,
+  Res,
+} from '@nestjs/common';
 import type { Response } from 'express';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { JwtPayload } from '../auth/types';
 import {
   fetchAllPages,
   MONEY_FMT,
@@ -7,7 +17,7 @@ import {
   stylizeSheet,
 } from '../common/xlsx-export';
 import { CashboxService } from './cashbox.service';
-import { ListCashTransactionsQueryDto } from './dto';
+import { ListCashTransactionsQueryDto, SetOpeningBalanceDto } from './dto';
 
 const TYPE_LABEL: Record<string, string> = {
   INCOME: 'Ingreso',
@@ -18,6 +28,9 @@ const SOURCE_LABEL: Record<string, string> = {
   SALE: 'Venta',
   PURCHASE: 'Compra',
   MANUAL: 'Manual',
+  SALE_RETURN: 'Devolución venta',
+  PURCHASE_RETURN: 'Devolución compra',
+  OPENING: 'Capital inicial',
 };
 
 const PAYMENT_LABEL: Record<string, string> = {
@@ -93,5 +106,28 @@ export class CashboxController {
   @Get('balance')
   balance() {
     return this.svc.balance();
+  }
+
+  // ============================================================
+  // Fase 12 — Capital inicial
+  // ============================================================
+
+  @Get('opening-balance')
+  async getOpeningBalance() {
+    const tx = await this.svc.getOpeningBalance();
+    return { transaction: tx };
+  }
+
+  @Post('opening-balance')
+  setOpeningBalance(
+    @Body() dto: SetOpeningBalanceDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.svc.setOpeningBalance(dto, user.sub);
+  }
+
+  @Delete('opening-balance')
+  deleteOpeningBalance() {
+    return this.svc.deleteOpeningBalance();
   }
 }

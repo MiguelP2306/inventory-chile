@@ -1,7 +1,15 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { ArrowDownToLine, ArrowUpToLine, FileDown, Wallet } from 'lucide-react';
+import {
+  ArrowDownToLine,
+  ArrowUpToLine,
+  FileDown,
+  Sparkles,
+  Wallet,
+} from 'lucide-react';
+import { useState } from 'react';
+import { OpeningBalanceDialog } from '@/components/forms/opening-balance-form';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,6 +32,7 @@ import {
 import { apiAbsoluteUrl } from '@/lib/api';
 import {
   getCashboxBalance,
+  getOpeningBalance,
   listCashTransactions,
   listExpenseCategories,
 } from '@/lib/cashbox-api';
@@ -50,6 +59,9 @@ const SOURCE_LABEL: Record<CashTransactionSourceDto, string> = {
   SALE: 'Venta',
   PURCHASE: 'Compra',
   MANUAL: 'Manual',
+  SALE_RETURN: 'Devolución venta',
+  PURCHASE_RETURN: 'Devolución compra',
+  OPENING: 'Capital inicial',
 };
 
 export default function CajaPage() {
@@ -81,10 +93,18 @@ export default function CajaPage() {
     dateTo !== '' ||
     includeVoided;
 
+  const [openingDialogOpen, setOpeningDialogOpen] = useState(false);
+
   const balance = useQuery({
     queryKey: ['cashbox-balance'],
     queryFn: getCashboxBalance,
   });
+
+  const opening = useQuery({
+    queryKey: ['cashbox-opening-balance'],
+    queryFn: getOpeningBalance,
+  });
+  const openingTx = opening.data?.transaction ?? null;
 
   const categories = useQuery({
     queryKey: ['expense-categories'],
@@ -127,26 +147,37 @@ export default function CajaPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-semibold">Libro de caja</h1>
-        <Button asChild variant="outline" size="sm">
-          <a
-            href={apiAbsoluteUrl(
-              `cashbox/transactions.xlsx${buildCajaExportQuery({
-                type: type === ALL ? undefined : type,
-                source: source === ALL ? undefined : source,
-                paymentMethod: methodVal === ALL ? undefined : methodVal,
-                expenseCategoryId: category === ALL ? undefined : category,
-                dateFrom: dateFrom || undefined,
-                dateTo: dateTo || undefined,
-                includeVoided: includeVoided ? '1' : undefined,
-              })}`,
-            )}
-            target="_blank"
-            rel="noopener noreferrer"
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setOpeningDialogOpen(true)}
+            disabled={opening.isLoading}
           >
-            <FileDown className="h-4 w-4" />
-            Exportar Excel
-          </a>
-        </Button>
+            <Sparkles className="h-4 w-4" />
+            {openingTx ? 'Capital inicial' : 'Registrar capital inicial'}
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <a
+              href={apiAbsoluteUrl(
+                `cashbox/transactions.xlsx${buildCajaExportQuery({
+                  type: type === ALL ? undefined : type,
+                  source: source === ALL ? undefined : source,
+                  paymentMethod: methodVal === ALL ? undefined : methodVal,
+                  expenseCategoryId: category === ALL ? undefined : category,
+                  dateFrom: dateFrom || undefined,
+                  dateTo: dateTo || undefined,
+                  includeVoided: includeVoided ? '1' : undefined,
+                })}`,
+              )}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <FileDown className="h-4 w-4" />
+              Exportar Excel
+            </a>
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
@@ -205,6 +236,7 @@ export default function CajaPage() {
             <SelectItem value="SALE">Venta</SelectItem>
             <SelectItem value="PURCHASE">Compra</SelectItem>
             <SelectItem value="MANUAL">Manual (gasto/ingreso)</SelectItem>
+            <SelectItem value="OPENING">Capital inicial</SelectItem>
           </SelectContent>
         </Select>
         <Select
@@ -321,7 +353,11 @@ export default function CajaPage() {
                   })}
                 </TableCell>
                 <TableCell>
-                  {t.type === 'INCOME' ? (
+                  {t.source === 'OPENING' ? (
+                    <Badge className="bg-primary/15 text-primary border-transparent">
+                      <Sparkles className="h-3 w-3" /> Capital inicial
+                    </Badge>
+                  ) : t.type === 'INCOME' ? (
                     <Badge className="bg-stock-ok/15 text-stock-ok border-transparent">
                       <ArrowUpToLine className="h-3 w-3" /> Ingreso
                     </Badge>
@@ -392,6 +428,12 @@ export default function CajaPage() {
           </div>
         )}
       </div>
+
+      <OpeningBalanceDialog
+        open={openingDialogOpen}
+        existing={openingTx}
+        onClose={() => setOpeningDialogOpen(false)}
+      />
     </div>
   );
 }

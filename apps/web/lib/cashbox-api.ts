@@ -36,6 +36,31 @@ export const listCashTransactions = (params: ListCashTransactionsParams = {}) =>
 export const getCashboxBalance = () =>
   api.get<CashboxBalanceDto>('/cashbox/balance').then((r) => r.data);
 
+// ---------- Capital inicial (Fase 12) ----------
+
+export interface OpeningBalanceResponse {
+  transaction: CashTransactionDto | null;
+}
+
+export interface SetOpeningBalanceInput {
+  amount: string;
+  paymentMethod: PaymentMethodDto;
+  date?: string;
+}
+
+export const getOpeningBalance = () =>
+  api.get<OpeningBalanceResponse>('/cashbox/opening-balance').then((r) => r.data);
+
+export const setOpeningBalance = (input: SetOpeningBalanceInput) =>
+  api
+    .post<CashTransactionDto>('/cashbox/opening-balance', input)
+    .then((r) => r.data);
+
+export const deleteOpeningBalance = () =>
+  api
+    .delete<{ deleted: boolean }>('/cashbox/opening-balance')
+    .then((r) => r.data);
+
 // ---------- Expense categories ----------
 
 export const listExpenseCategories = (q?: string) =>

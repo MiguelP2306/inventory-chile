@@ -603,7 +603,14 @@ export type PaymentMethodDto =
   | 'CARD_CREDIT'
   | 'PAYMENT_LINK';
 export type CashTransactionTypeDto = 'INCOME' | 'EXPENSE';
-export type CashTransactionSourceDto = 'SALE' | 'PURCHASE' | 'MANUAL';
+export type CashTransactionSourceDto =
+  | 'SALE'
+  | 'PURCHASE'
+  | 'MANUAL'
+  | 'SALE_RETURN'
+  | 'PURCHASE_RETURN'
+  // Fase 12 — capital inicial de la empresa (registrado una sola vez).
+  | 'OPENING';
 
 export interface ExpenseCategoryDto {
   id: string;
@@ -783,7 +790,8 @@ export type CashFlowSourceDto =
   | 'PURCHASE'
   | 'MANUAL'
   | 'SALE_RETURN'
-  | 'PURCHASE_RETURN';
+  | 'PURCHASE_RETURN'
+  | 'OPENING';
 
 export interface ReportCashFlowRowDto {
   id: string;
