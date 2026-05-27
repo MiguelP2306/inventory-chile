@@ -32,7 +32,6 @@ import {
 import { apiAbsoluteUrl } from '@/lib/api';
 import {
   getCashboxBalance,
-  getOpeningBalance,
   listCashTransactions,
   listExpenseCategories,
 } from '@/lib/cashbox-api';
@@ -100,12 +99,6 @@ export default function CajaPage() {
     queryFn: getCashboxBalance,
   });
 
-  const opening = useQuery({
-    queryKey: ['cashbox-opening-balance'],
-    queryFn: getOpeningBalance,
-  });
-  const openingTx = opening.data?.transaction ?? null;
-
   const categories = useQuery({
     queryKey: ['expense-categories'],
     queryFn: () => listExpenseCategories(),
@@ -152,10 +145,9 @@ export default function CajaPage() {
             variant="outline"
             size="sm"
             onClick={() => setOpeningDialogOpen(true)}
-            disabled={opening.isLoading}
           >
             <Sparkles className="h-4 w-4" />
-            {openingTx ? 'Capital inicial' : 'Registrar capital inicial'}
+            Capitales iniciales
           </Button>
           <Button asChild variant="outline" size="sm">
             <a
@@ -431,7 +423,6 @@ export default function CajaPage() {
 
       <OpeningBalanceDialog
         open={openingDialogOpen}
-        existing={openingTx}
         onClose={() => setOpeningDialogOpen(false)}
       />
     </div>

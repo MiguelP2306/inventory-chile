@@ -3,6 +3,9 @@ import {
   Controller,
   Delete,
   Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   Res,
@@ -109,25 +112,33 @@ export class CashboxController {
   }
 
   // ============================================================
-  // Fase 12 — Capital inicial
+  // Fase 12 — Capital inicial (múltiples)
   // ============================================================
 
   @Get('opening-balance')
-  async getOpeningBalance() {
-    const tx = await this.svc.getOpeningBalance();
-    return { transaction: tx };
+  async listOpeningBalances() {
+    const transactions = await this.svc.listOpeningBalances();
+    return { transactions };
   }
 
   @Post('opening-balance')
-  setOpeningBalance(
+  createOpeningBalance(
     @Body() dto: SetOpeningBalanceDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.svc.setOpeningBalance(dto, user.sub);
+    return this.svc.createOpeningBalance(dto, user.sub);
   }
 
-  @Delete('opening-balance')
-  deleteOpeningBalance() {
-    return this.svc.deleteOpeningBalance();
+  @Patch('opening-balance/:id')
+  updateOpeningBalance(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: SetOpeningBalanceDto,
+  ) {
+    return this.svc.updateOpeningBalance(id, dto);
+  }
+
+  @Delete('opening-balance/:id')
+  deleteOpeningBalance(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.svc.deleteOpeningBalance(id);
   }
 }

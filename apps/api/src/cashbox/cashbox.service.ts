@@ -9,7 +9,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, EntityManager, Not, Repository } from 'typeorm';
+import { Brackets, EntityManager, Repository } from 'typeorm';
 import { dayRange } from '../common/date-range';
 import { CashTransaction } from '../database/entities';
 import { ListCashTransactionsQueryDto, SetOpeningBalanceDto } from './dto';
@@ -209,38 +209,32 @@ export class CashboxService {
   // Fase 12 — Capital inicial
   // ============================================================
   //
-  // El capital inicial se persiste como una sola transacción con
-  // source=OPENING y type=INCOME. Reusa la misma infraestructura del libro
-  // de caja: aparece en listados, exports, y se suma en `balance()` como
-  // cualquier ingreso. La restricción "una sola" se asegura por código
-  // (no por un UNIQUE en DB, porque la columna source admite múltiples
-  // valores). El editar/borrar solo se permite si NO existen otros
-  // movimientos en el libro — una vez que hay actividad, queda inmutable
-  // y cualquier corrección debe ser un ingreso o egreso manual.
+  // Cada capital inicial se persiste como una transacción con
+  // source=OPENING y type=INCOME. Reusa la infraestructura del libro de
+  // caja: aparece en listados, exports, y se suma en `balance()` como
+  // cualquier ingreso. El cliente puede cargar tantos como necesite (ej.
+  // capital propio + aporte de socio + crédito bancario) y gestionarlos
+  // individualmente. Sin restricciones de movimientos previos: el operador
+  // es responsable del impacto sobre el balance histórico.
 
   /**
-   * Devuelve la transacción OPENING activa, si existe. Filtramos por
+   * Lista todos los capitales iniciales activos. Filtramos por
    * `type=INCOME` para ignorar eventuales compensaciones generadas por
    * anulación (que tendrían `source=OPENING` + `type=EXPENSE`).
    */
-  async getOpeningBalance(): Promise<CashTransaction | null> {
-    return this.txRepo.findOne({
+  async listOpeningBalances(): Promise<CashTransaction[]> {
+    return this.txRepo.find({
       where: {
         source: CashTransactionSource.OPENING,
         type: CashTransactionType.INCOME,
         isVoided: false,
       },
-      order: { createdAt: 'ASC' },
+      order: { date: 'DESC', createdAt: 'DESC' },
     });
   }
 
-  /**
-   * Crea (o reemplaza, si todavía no hay otros movimientos) la transacción
-   * de capital inicial. Lanza 400 si:
-   *  - el monto no es > 0
-   *  - ya existen movimientos distintos de OPENING (no se permite recargar)
-   */
-  async setOpeningBalance(
+  /** Crea un nuevo capital inicial. Solo valida monto > 0 y formato. */
+  async createOpeningBalance(
     input: SetOpeningBalanceDto,
     userId: string,
   ): Promise<CashTransaction> {
@@ -248,24 +242,6 @@ export class CashboxService {
     if (!isFinite(amount) || amount <= 0) {
       throw new BadRequestException('El monto debe ser mayor que 0.');
     }
-
-    // Si ya hay movimientos no-OPENING (vivos o anulados), el saldo inicial
-    // queda bloqueado. Esto protege la integridad histórica del balance.
-    const otherCount = await this.txRepo.count({
-      where: { source: Not(CashTransactionSource.OPENING) },
-    });
-    if (otherCount > 0) {
-      throw new BadRequestException(
-        'No se puede modificar el capital inicial porque ya existen otros movimientos. ' +
-          'Registrá la diferencia como un ingreso o egreso manual.',
-      );
-    }
-
-    // Reemplazar cualquier registro previo de OPENING (todavía no hay
-    // actividad real). Borrado en bulk para cubrir tanto el caso normal
-    // (1 fila) como cualquier compensación residual de un void anterior.
-    await this.txRepo.delete({ source: CashTransactionSource.OPENING });
-
     const tx = this.txRepo.create({
       date: input.date ? new Date(input.date) : new Date(),
       type: CashTransactionType.INCOME,
@@ -281,13 +257,35 @@ export class CashboxService {
     return this.txRepo.save(tx);
   }
 
+  /** Edita un capital inicial existente por id. 404 si no existe. */
+  async updateOpeningBalance(
+    id: string,
+    input: SetOpeningBalanceDto,
+  ): Promise<CashTransaction> {
+    const amount = Number(input.amount);
+    if (!isFinite(amount) || amount <= 0) {
+      throw new BadRequestException('El monto debe ser mayor que 0.');
+    }
+    const existing = await this.txRepo.findOne({
+      where: { id, source: CashTransactionSource.OPENING },
+    });
+    if (!existing) {
+      throw new NotFoundException('Capital inicial no encontrado.');
+    }
+    existing.amount = input.amount;
+    existing.paymentMethod = input.paymentMethod;
+    if (input.date) existing.date = new Date(input.date);
+    return this.txRepo.save(existing);
+  }
+
   /**
-   * Borra la transacción de capital inicial. No valida: si no existe no
-   * pasa nada, y si hay otros movimientos también se permite (decisión
-   * del cliente: el operador es responsable del impacto en el balance).
+   * Borra un capital inicial por id. No valida: si no existe devuelve
+   * `{ deleted: false }` sin error. Sin restricciones sobre movimientos
+   * previos (decisión del cliente).
    */
-  async deleteOpeningBalance(): Promise<{ deleted: boolean }> {
+  async deleteOpeningBalance(id: string): Promise<{ deleted: boolean }> {
     const result = await this.txRepo.delete({
+      id,
       source: CashTransactionSource.OPENING,
     });
     return { deleted: (result.affected ?? 0) > 0 };

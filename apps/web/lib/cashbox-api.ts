@@ -36,29 +36,36 @@ export const listCashTransactions = (params: ListCashTransactionsParams = {}) =>
 export const getCashboxBalance = () =>
   api.get<CashboxBalanceDto>('/cashbox/balance').then((r) => r.data);
 
-// ---------- Capital inicial (Fase 12) ----------
+// ---------- Capital inicial (Fase 12 — múltiples) ----------
 
-export interface OpeningBalanceResponse {
-  transaction: CashTransactionDto | null;
+export interface OpeningBalanceListResponse {
+  transactions: CashTransactionDto[];
 }
 
-export interface SetOpeningBalanceInput {
+export interface OpeningBalanceInput {
   amount: string;
   paymentMethod: PaymentMethodDto;
   date?: string;
 }
 
-export const getOpeningBalance = () =>
-  api.get<OpeningBalanceResponse>('/cashbox/opening-balance').then((r) => r.data);
+export const listOpeningBalances = () =>
+  api
+    .get<OpeningBalanceListResponse>('/cashbox/opening-balance')
+    .then((r) => r.data);
 
-export const setOpeningBalance = (input: SetOpeningBalanceInput) =>
+export const createOpeningBalance = (input: OpeningBalanceInput) =>
   api
     .post<CashTransactionDto>('/cashbox/opening-balance', input)
     .then((r) => r.data);
 
-export const deleteOpeningBalance = () =>
+export const updateOpeningBalance = (id: string, input: OpeningBalanceInput) =>
   api
-    .delete<{ deleted: boolean }>('/cashbox/opening-balance')
+    .patch<CashTransactionDto>(`/cashbox/opening-balance/${id}`, input)
+    .then((r) => r.data);
+
+export const deleteOpeningBalance = (id: string) =>
+  api
+    .delete<{ deleted: boolean }>(`/cashbox/opening-balance/${id}`)
     .then((r) => r.data);
 
 // ---------- Expense categories ----------
