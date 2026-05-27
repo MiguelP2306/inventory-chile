@@ -282,24 +282,14 @@ export class CashboxService {
   }
 
   /**
-   * Borra la transacción de capital inicial. Solo permitido si no hay otros
-   * movimientos en el libro de caja (mismo criterio que `setOpeningBalance`).
+   * Borra la transacción de capital inicial. No valida: si no existe no
+   * pasa nada, y si hay otros movimientos también se permite (decisión
+   * del cliente: el operador es responsable del impacto en el balance).
    */
   async deleteOpeningBalance(): Promise<{ deleted: boolean }> {
-    const otherCount = await this.txRepo.count({
-      where: { source: Not(CashTransactionSource.OPENING) },
-    });
-    if (otherCount > 0) {
-      throw new BadRequestException(
-        'No se puede borrar el capital inicial porque ya existen otros movimientos.',
-      );
-    }
     const result = await this.txRepo.delete({
       source: CashTransactionSource.OPENING,
     });
-    if (!result.affected) {
-      throw new NotFoundException('No hay capital inicial cargado.');
-    }
-    return { deleted: true };
+    return { deleted: (result.affected ?? 0) > 0 };
   }
 }
