@@ -29,8 +29,8 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 | — | **Ronda 4** (transversal antes de Fase 9): responsive móvil — sidebar drawer + tablas optimizadas + revisión de forms en mobile | ✅ |
 | 9 | Dashboard mobile-first con KPIs **clicables** del día + alertas (iteración 9.1; gráficos 9.2 pendiente) | ✅ |
 | 10 | **Carga masiva Excel + exports masivos** — importers UPSERT (productos por SKU + auto-create cat/marcas, clientes y proveedores por RUT, todos con partial success) + 10 exports XLSX masivos que respetan filtros e ignoran paginación. Parser robusto contra Google Sheets / Numbers / fórmulas / formato chileno. | ✅ |
-| 11 | **Códigos de barras + etiquetas térmicas + barcode en guía de despacho** — `<CameraScanner>` con `@zxing/browser` integrado en ProductPicker, Cmd+K y pantalla `/escanear`. Endpoint `/products/lookup?code=` para escáner USB (Enter → lookup exacto). Etiquetas 50×30mm con CODE128 (`bwip-js`) + dialog de cantidad en el detalle del producto. Barcode CODE128 del número de guía en el PDF de despacho. Detalle en [PHASE-11.md](PHASE-11.md). | ✅ |
-| 12 | Deploy (Railway + Vercel + Resend) | pendiente |
+| 11 | ~~Códigos de barras + etiquetas térmicas + barcode en guía~~ — **descartada por el cliente** (mayo 2026). UI removida del sidebar y del detalle de producto; el código backend (`@zxing/browser`, `bwip-js`, endpoint `/products/lookup`) permanece en el repo por si se reactiva. Doc histórico: [PHASE-11.md](PHASE-11.md). | 🚫 |
+| 12 | **Deploy productivo** — Frontend en Vercel (`inventory-chile.vercel.app`), backend NestJS en Render Free (`inventory-chile-api.onrender.com`), DB MySQL en TiDB Cloud Serverless (5 GB gratis), archivos en Cloudinary, email transaccional via Resend. Cero costo. Detalle en [DEPLOY.md](DEPLOY.md). | ✅ |
 | 13 | HubSpot refinamientos post-MVP (webhook inverso + Deals + sync histórico) — base ya en Fase 8.5 | pendiente |
 | 14 | Manual + video + soporte post-entrega | pendiente |
 
@@ -1566,6 +1566,14 @@ Una compra creada era inmutable; no se podía adjuntar la factura después.
 
 ## Fase 11 — Códigos de barras, etiquetas y refinamiento de plantillas
 
+> 🚫 **Descartada por el cliente — mayo 2026**. El cliente confirmó que su operación no incluye scanner físico ni etiquetado, así que removimos la UI (item `/escanear` del sidebar + botón "Imprimir etiqueta" del detalle de producto). El código backend y los componentes siguen en el repo por si se reactiva en una etapa futura — están funcionales y no estorban.
+>
+> Lo que queda activo:
+> - Endpoint `GET /api/products/lookup?code=` (puede usarse para integraciones futuras).
+> - Endpoint `GET /api/products/:id/label` (genera el PDF si se invoca por URL directa).
+> - Helper `renderBarcodePng()` reusado por la guía de despacho (el barcode CODE128 del número de guía sigue apareciendo en el PDF, **eso no se descartó**).
+> - Dependencias `bwip-js` (backend), `@zxing/browser` y `@zxing/library` (frontend) siguen instaladas.
+>
 > **Documentación exhaustiva en [PHASE-11.md](PHASE-11.md)** — contexto completo, decisiones, arquitectura, endpoints, UI y plan detallado de tests E2E. Este resumen es para tener una referencia rápida desde el README general.
 
 ### Qué incluye
@@ -1618,6 +1626,92 @@ apps/web/
 ### Cómo testear
 
 Ver [PHASE-11.md → Plan de tests end-to-end](PHASE-11.md#plan-de-tests-end-to-end) — 7 secciones de verificación que cubren lookup vía API, etiquetas desde UI, URL directa del label, scanner USB, scanner cámara (desktop y mobile), barcode en guía de despacho, y regression de funcionalidad previa.
+
+---
+
+## Fase 12 — Deploy productivo (Render + Vercel + TiDB Cloud + Cloudinary + Resend)
+
+> **Guía paso a paso completa en [DEPLOY.md](DEPLOY.md)** — incluye creación de cuentas, copy-paste de env vars, troubleshooting y verificación end-to-end. Esta sección resume **qué se construyó, por qué** y los bugfixes pre-deploy aplicados.
+
+### URLs productivas
+
+| Servicio | URL | Plan |
+| --- | --- | --- |
+| Frontend (Next.js) | <https://inventory-chile.vercel.app> | Vercel Hobby (gratis) |
+| Backend (NestJS) | <https://inventory-chile-api.onrender.com> | Render Free (gratis, sleep tras 15 min sin tráfico) |
+| Base de datos | TiDB Cloud Serverless `gateway01.us-west-2...:4000` | 5 GB gratis indefinido |
+| Storage de archivos | Cloudinary `dlqnie9eq` | 25 GB free tier |
+| Email transaccional | Resend (modo dev: `onboarding@resend.dev`) | 3.000 emails/mes gratis |
+
+**Costo total**: $0/mes mientras no se supere ningún tier. Cero tarjetas requeridas.
+
+### Por qué Render en lugar de Railway (lo que decía PLAN.md)
+
+Railway eliminó su free tier real en 2024 (ahora da $5 USD de crédito mensual y exige tarjeta). El cliente no podía registrar otra cuenta de Google. Render Free es el equivalente más cercano sin tarjeta — el único trade-off es el cold start de ~30 seg después de 15 min de inactividad, aceptable para una demo donde el jefe entra ocasionalmente.
+
+### Por qué TiDB Cloud en lugar de MySQL gestionado de Railway
+
+Misma razón (free tier real sin tarjeta) + TiDB es wire-compatible con MySQL — el código existente funcionó sin cambios excepto los bugfixes documentados abajo. PlanetScale también murió su free tier de MySQL, así que TiDB Cloud Serverless quedó como la única opción gratis 100% MySQL-compatible.
+
+### Stack del deploy
+
+```
+   Browser (jefe)
+        │
+        ├──► https://inventory-chile.vercel.app  (Next.js, Vercel)
+        │
+        └──► /api/* (rewrite proxy del propio Vercel)
+                 │
+                 └──► https://inventory-chile-api.onrender.com/api/*  (NestJS, Render)
+                           │
+                           ├──► TiDB Cloud Serverless (MySQL, TLS obligatorio)
+                           ├──► Cloudinary (fotos producto + facturas PDF + comprobantes)
+                           └──► Resend (cotizaciones por email)
+```
+
+### Cambios de código que habilitaron el deploy
+
+| Cambio | Archivo | Por qué |
+| --- | --- | --- |
+| **Storage abstracto local↔cloudinary** | [`apps/api/src/uploads/storage.service.ts`](apps/api/src/uploads/storage.service.ts) | El filesystem de Render es efímero (se borra en cada redeploy). `StorageService` con driver `local` (dev) y `cloudinary` (prod) seleccionable vía `STORAGE_DRIVER` env. |
+| **Multer `memoryStorage()` siempre** | [`apps/api/src/uploads/upload-config.ts`](apps/api/src/uploads/upload-config.ts) | Unifica el path de código: multer recibe el buffer en memoria y `StorageService` decide dónde persiste. |
+| **Cookies cross-site en prod** | [`apps/api/src/auth/auth.controller.ts`](apps/api/src/auth/auth.controller.ts) | `SameSite=None; Secure` cuando `NODE_ENV=production` para que el browser permita las cookies del backend desde otro dominio. |
+| **CORS multi-origen + `trust proxy`** | [`apps/api/src/main.ts`](apps/api/src/main.ts) | `CORS_ORIGIN` admite lista separada por comas y wildcards (`https://*.vercel.app` para preview deploys). `app.set('trust proxy', 1)` para que Express vea HTTPS detrás del proxy de Render. |
+| **`start:prod` con migraciones automáticas** | [`apps/api/src/database/run-migrations.ts`](apps/api/src/database/run-migrations.ts) + [`apps/api/package.json`](apps/api/package.json) | Cada boot corre `migrate → seed → main`. Idempotente (no rompe si la DB ya está al día). |
+| **TLS para TiDB en data-source** | [`apps/api/src/database/data-source.ts`](apps/api/src/database/data-source.ts) | `DB_SSL=true` activa `{ minVersion: 'TLSv1.2' }` para mysql2. |
+| **Vercel rewrites como proxy** | [`apps/web/next.config.mjs`](apps/web/next.config.mjs) | `/api/*` se proxea al backend de Render. Las cookies viven en el dominio del frontend (first-party) → SSR (`next/headers cookies()`) las puede leer. Resuelve el redirect loop a `/login` después del login exitoso. |
+| **Server API con `BACKEND_URL`** | [`apps/web/lib/server-api.ts`](apps/web/lib/server-api.ts) | Cuando `NEXT_PUBLIC_API_URL=/api` (path relativo del rewrite), el SSR necesita URL absoluta para `fetch` — la arma desde `BACKEND_URL`. |
+
+### Bugfixes específicos de TiDB Cloud (vs MySQL local)
+
+TiDB tiene diferencias estrictas respecto a MySQL local. Los siguientes 3 puntos rompieron en el primer deploy y requirieron fix:
+
+1. **FK con tipo incompatible** (`char(36)` vs `varchar(36)`). TiDB exige que las columnas de una FK coincidan exactamente. 90 ocurrencias reemplazadas en 13 migraciones para unificar todos los UUIDs como `varchar(36)`. Local MySQL toleraba la mezcla; TiDB no.
+2. **`ADD COLUMN` + `ADD CONSTRAINT` en una sola sentencia**. TiDB no procesa columns antes de constraints en un mismo `ALTER TABLE`, falla con `Key column doesn't exist in table`. Separado en dos `ALTER` en [migración Round9](apps/api/src/database/migrations/1779900000000-Round9BugfixesBundle.ts).
+3. **Subquery en `ON` de un JOIN**. TiDB rechaza con `ON condition doesn't support subqueries yet`. La query de `urgentFollowUps` del dashboard se reescribió usando CTE con `ROW_NUMBER() OVER (PARTITION BY customerId ORDER BY date DESC)`. Mismo resultado, más eficiente (una pasada vs N subqueries). Detalle en [`apps/api/src/dashboard/dashboard.service.ts`](apps/api/src/dashboard/dashboard.service.ts).
+
+Otros fixes menores:
+- **`moduleResolution: "node"` → `"Node10"`** en tsconfigs de `apps/api` y `packages/shared`. TypeScript 5.9 (el que instala Render) marca el alias `"node"` como error fatal por deprecation; el nombre canónico `"Node10"` mantiene el mismo comportamiento sin warning.
+- **`next.config.mjs eslint.ignoreDuringBuilds: true`** porque Next 13+ corre ESLint en `next build` por default y había warnings pre-existentes (rules-of-hooks, no-html-link-for-pages) que rompían el deploy. Estos warnings se siguen mostrando con `pnpm lint` local.
+- **Fix de `noUncheckedIndexedAccess`** en 3 archivos (`inventario/movimientos/page.tsx`, `productos/page.tsx`, `product-form.tsx`) — errores de TypeScript estricto que rompían `next build` pero no se notaban en dev.
+
+### Variables de entorno productivas (referencia)
+
+Las **24 env vars** del backend en Render están documentadas en [DEPLOY.md → Paso 4.3](DEPLOY.md). La única env var del frontend en Vercel es `NEXT_PUBLIC_API_URL=/api` + `BACKEND_URL=https://inventory-chile-api.onrender.com` (esta última solo para el SSR).
+
+### Limitaciones conocidas
+
+- **Cold start ~30 seg** en Render Free después de 15 min sin tráfico. Upgrade a Render Starter ($7/mes) lo elimina.
+- **Email solo a `a.eduardoperez.fp2019@gmail.com`** (la cuenta dueña de Resend). En modo dev de Resend solo se puede enviar a esa dirección. Para enviar a clientes reales, hay que verificar un dominio propio en Resend.
+- **Sin custom domain** — usa subdominios gratis de Vercel/Render.
+
+### Próximos pasos sugeridos post-MVP
+
+1. Verificar dominio propio en Resend para enviar cotizaciones desde `cotizaciones@dominiocliente.cl`.
+2. Migrar a Render Starter ($7/mes) si el uso pasa de demo a producción real (elimina cold starts + más RAM).
+3. Configurar backups automáticos diarios de TiDB (panel de TiDB → Backups).
+4. Agregar Sentry / Logtail para observabilidad.
+5. Rate limiting con `@nestjs/throttler` en endpoints críticos (`/auth/login`, exports masivos).
 
 ---
 

@@ -20,7 +20,6 @@ import {
   Pin,
   Receipt,
   RotateCcw,
-  ScanLine,
   Settings,
   ShieldAlert,
   ShoppingCart,
@@ -80,12 +79,6 @@ const SECTIONS: NavSection[] = [
         label: 'Movimientos',
         icon: ArrowDownToLine,
         matchPrefix: ['/inventario/movimientos'],
-      },
-      {
-        href: '/escanear',
-        label: 'Escanear',
-        icon: ScanLine,
-        matchPrefix: ['/escanear'],
       },
       {
         href: '/almacenes',

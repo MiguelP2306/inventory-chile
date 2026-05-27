@@ -659,11 +659,19 @@ Fase 10 cubre dos capacidades complementarias para mover datos en bulk entre Exc
    - Formato monetario `#,##0` para CLP (sin decimales).
    - Nombre de archivo `<recurso>-<YYYY-MM-DD>.xlsx`.
 
-### Fase 11 — Códigos de barras y refinamiento de plantillas ✅
+### Fase 11 — Códigos de barras y refinamiento de plantillas 🚫 descartada
 
-> Documentación exhaustiva en [PHASE-11.md](PHASE-11.md). Cubre los 3 lados
-> del problema: entrada por scanner (USB y cámara), salida por etiqueta
-> térmica y barcode CODE128 en el PDF de guía de despacho.
+> **Descartada por el cliente — mayo 2026**. El cliente confirmó que su
+> operación no usa scanner físico ni etiquetado térmico, así que la UI fue
+> removida (item `/escanear` del sidebar + botón "Imprimir etiqueta" del
+> detalle de producto). El código backend (`@zxing/browser`, `bwip-js`,
+> endpoint `/products/lookup`) permanece en el repo por si se reactiva.
+>
+> **El barcode CODE128 del número de guía en el PDF de despacho NO se
+> descartó** — sigue activo porque es parte de la guía como documento.
+>
+> Documentación histórica de la implementación en
+> [PHASE-11.md](PHASE-11.md).
 
 1. **Lector USB:** input `autoFocus` + handler `onKeyDown Enter` que dispara
    `lookupProductByCode` exacto. Aplicado en `<ProductPicker>`, `<QuickSearch>`
@@ -699,14 +707,22 @@ embeber en PDFs) + `@zxing/browser` + `@zxing/library` en `apps/web`
 (decodea el video de la cámara). Helper compartido `apps/api/src/common/barcode.ts`
 con `renderBarcodePng()` reusado por `LabelService` y `PdfService`.
 
-### Fase 12 — Deploy
+### Fase 12 — Deploy productivo ✅
 
-1. **Backend:** Railway con MySQL gestionado, env vars, migraciones automáticas.
-2. **Frontend:** Vercel apuntando a `apps/web`, `NEXT_PUBLIC_API_URL`.
-3. CORS, rate limiting (`@nestjs/throttler`), logs estructurados.
-4. Backup automático diario de MySQL.
-5. Dominio + HTTPS.
-6. Configurar Resend (dominio verificado para email).
+> Stack final difiere del plan original. Railway dejó de tener free tier real (sólo $5 USD/mes de crédito con tarjeta) y el cliente no podía registrar otra cuenta. Cambio de proveedores documentado en [DEPLOY.md](DEPLOY.md) y resumen en [README.md → Fase 12](README.md#fase-12--deploy-productivo-render--vercel--tidb-cloud--cloudinary--resend).
+
+1. **Backend:** ~~Railway~~ → **Render Free** (`inventory-chile-api.onrender.com`). Sleep tras 15 min, cold start ~30 seg, aceptable para demo.
+2. **Base de datos:** ~~Railway MySQL~~ → **TiDB Cloud Serverless** (5 GB gratis, wire-compatible MySQL, TLS obligatorio).
+3. **Almacenamiento de archivos:** ~~disco local~~ → **Cloudinary** (25 GB free tier) — el filesystem de Render es efímero. Implementado vía `StorageService` con drivers `local` (dev) y `cloudinary` (prod), seleccionables por `STORAGE_DRIVER` env.
+4. **Frontend:** **Vercel Hobby** (`inventory-chile.vercel.app`) apuntando a `apps/web`. Rewrite proxy `/api/*` → backend para evitar cross-domain cookies.
+5. **Email:** **Resend en modo dev** (`onboarding@resend.dev`) — solo envía al email dueño de la cuenta. Dominio verificado queda como evolución post-MVP.
+6. **Bugfixes específicos de TiDB aplicados:**
+   - Unificación de PK/FK como `varchar(36)` (90 ocurrencias en 13 migraciones).
+   - Separación de `ADD COLUMN` + `ADD CONSTRAINT` en migración Round9.
+   - Reescritura de subquery en `ON` del dashboard (`urgentFollowUps`) usando CTE + `ROW_NUMBER()`.
+7. **CORS multi-origen con wildcards + `trust proxy`** para Render. Cookies `SameSite=None; Secure` en producción.
+8. **Migraciones automáticas en deploy:** script `start:prod` corre `node dist/database/run-migrations.js && node dist/database/seeds/run-seeds.js && node dist/main.js`.
+9. **Pendientes post-MVP (no bloqueantes):** rate limiting con `@nestjs/throttler`, backups automáticos diarios, dominio custom + verificación Resend, upgrade a plan pago para eliminar cold starts.
 
 ### Fase 13 — HubSpot refinamientos (post-MVP)
 

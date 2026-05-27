@@ -15,7 +15,6 @@ import {
   Info,
   Package,
   Plus,
-  Printer,
   Star,
   Trash2,
   Upload,
@@ -36,7 +35,6 @@ import {
 } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
-import { PrintLabelDialog } from '@/components/print-label-dialog';
 import { ProductImageGallery } from '@/components/product-image-gallery';
 import { Button } from '@/components/ui/button';
 import {
@@ -203,7 +201,6 @@ export function ProductForm({ product }: Props) {
   const router = useRouter();
   const qc = useQueryClient();
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [printLabelOpen, setPrintLabelOpen] = useState(false);
   // Solo se usa en modo "nuevo": archivos cargados antes de que exista el productId.
   const [pendingImages, setPendingImages] = useState<File[]>([]);
   const [activeTab, setActiveTab] = useState<TabKey>('datos');
@@ -447,16 +444,6 @@ export function ProductForm({ product }: Props) {
         <div className="flex items-center gap-2">
           {product && (
             <>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setPrintLabelOpen(true)}
-                disabled={submitting}
-                title="Imprimir etiqueta térmica 50×30mm con barcode CODE128"
-              >
-                <Printer className="h-4 w-4" />
-                Imprimir etiqueta
-              </Button>
               <Button
                 type="button"
                 variant="outline"
@@ -1109,16 +1096,6 @@ export function ProductForm({ product }: Props) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Fase 11 — Imprimir etiqueta térmica 50×30mm con barcode CODE128. */}
-      {product && (
-        <PrintLabelDialog
-          open={printLabelOpen}
-          onOpenChange={setPrintLabelOpen}
-          productId={product.id}
-          productName={product.name}
-        />
-      )}
     </form>
   );
 }
