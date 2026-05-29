@@ -2,9 +2,9 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { Camera, Search } from 'lucide-react';
-import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
+import { AddToBagDialog } from '@/components/add-to-bag-dialog';
 import { CameraScanner } from '@/components/camera-scanner';
 import {
   CommandDialog,
@@ -25,23 +25,26 @@ function isMac() {
 }
 
 export function QuickSearch() {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
   const [mac, setMac] = useState(false);
+  // Producto seleccionado para abrir el dialog "Agregar al bolso". Reemplaza
+  // el comportamiento previo (navegar a /productos/[id] para editar).
+  const [bagTarget, setBagTarget] = useState<string | null>(null);
 
-  // Fase 11 — al escanear (cámara o tecleado por el USB), hacemos lookup
-  // exacto y si hay match navegamos directo al detalle. Si no, dejamos el
-  // texto en el input para que el operador vea matches LIKE.
+  // Al escanear (cámara o tecleado por el USB), hacemos lookup exacto y si
+  // hay match abrimos directo el dialog del bolso con el producto cargado.
+  // Si no hay match, dejamos el texto en el input para que el operador vea
+  // matches LIKE.
   const handleScannedCode = async (code: string) => {
     try {
       const match = await lookupProductByCode(code);
       if (match) {
         setOpen(false);
         setQuery('');
-        router.push(`/productos/${match.id}`);
+        setBagTarget(match.id);
       } else {
         setQuery(code);
         toast.warning(
@@ -84,7 +87,10 @@ export function QuickSearch() {
   const onSelect = (id: string) => {
     setOpen(false);
     setQuery('');
-    router.push(`/productos/${id}`);
+    // Abre el dialog "Agregar al bolso" con código, descripción, precio,
+    // stock, cantidad y fotos. El operador ya no cae a /productos/[id]
+    // (editar producto) por accidente desde el buscador global.
+    setBagTarget(id);
   };
 
   return (
@@ -155,13 +161,18 @@ export function QuickSearch() {
         </CommandList>
       </CommandDialog>
 
-      {/* Fase 11 — scanner por cámara, reutiliza el mismo componente que
-          ProductPicker. Al detectar un código, lookup exacto → detalle. */}
+      {/* Scanner por cámara — al detectar un código abrimos el dialog del
+          bolso con el producto cargado. */}
       <CameraScanner
         open={scannerOpen}
         onOpenChange={setScannerOpen}
         onDetected={handleScannedCode}
-        hint="Apuntá al código del producto que querés abrir."
+        hint="Apuntá al código del producto que querés agregar al bolso."
+      />
+
+      <AddToBagDialog
+        productId={bagTarget}
+        onClose={() => setBagTarget(null)}
       />
     </>
   );

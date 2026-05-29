@@ -7,8 +7,14 @@ import {
   Customer,
   Product,
   ProductCode,
+  Stock,
   Supplier,
+  VehicleFitment,
+  VehicleMake,
+  VehicleModel,
+  Warehouse,
 } from '../database/entities';
+import { InventoryModule } from '../inventory/inventory.module';
 import { CustomersImportService } from './customers-import.service';
 import { ImportsController } from './imports.controller';
 import { ImportsService } from './imports.service';
@@ -24,7 +30,13 @@ import { SuppliersImportService } from './suppliers-import.service';
       Customer,
       Commune,
       Supplier,
+      Warehouse,
+      Stock,
+      VehicleMake,
+      VehicleModel,
+      VehicleFitment,
     ]),
+    InventoryModule,
   ],
   controllers: [ImportsController],
   providers: [ImportsService, CustomersImportService, SuppliersImportService],

@@ -37,9 +37,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Permission, useCan } from '@/lib/current-user-context';
 import { getActiveDispatchBySale } from '@/lib/dispatch-api';
 import { formatCurrency } from '@/lib/format';
 import { getSale, getSalePdfUrl } from '@/lib/sales-api';
+import { cn } from '@/lib/utils';
 
 const METHOD_LABELS: Record<string, string> = {
   CASH: 'Efectivo',
@@ -57,6 +59,7 @@ export default function VentaDetailPage() {
   const [dispatchOpen, setDispatchOpen] = useState(false);
   // Ronda 9 — dialog multi-item para garantías.
   const [multiWarrantyOpen, setMultiWarrantyOpen] = useState(false);
+  const canSeeBreakdown = useCan(Permission.SALE_VIEW_FINANCIAL_BREAKDOWN);
 
   // Ronda 9 — query params para ops rápidas. Cuando la pantalla se abre
   // con `?return=1` / `?warranty=1` / `?dispatch=1`, dispara el dialog
@@ -244,15 +247,19 @@ export default function VentaDetailPage() {
           </div>
         </div>
         <div className="rounded-md border bg-card p-4 space-y-1">
-          <h2 className="text-sm font-semibold text-muted-foreground">Pago</h2>
+          <h2 className="text-sm font-semibold text-muted-foreground">
+            {canSeeBreakdown ? 'Pago' : 'Detalles'}
+          </h2>
           <div className="text-sm space-y-1 pt-2">
-            <div>
-              <span className="text-muted-foreground">Método: </span>
-              <span className="font-medium">
-                {METHOD_LABELS[s.paymentMethod] ?? s.paymentMethod}
-              </span>
-            </div>
-            {Number(s.commissionAmount) > 0 && (
+            {canSeeBreakdown && s.paymentMethod && (
+              <div>
+                <span className="text-muted-foreground">Método: </span>
+                <span className="font-medium">
+                  {METHOD_LABELS[s.paymentMethod] ?? s.paymentMethod}
+                </span>
+              </div>
+            )}
+            {canSeeBreakdown && Number(s.commissionAmount ?? 0) > 0 && (
               <div className="text-muted-foreground">
                 Comisión tarjeta:{' '}
                 <span className="tabular-nums">
@@ -328,15 +335,24 @@ export default function VentaDetailPage() {
           </div>
         )}
         <div className="ml-auto min-w-[280px] rounded-md border bg-card p-4 space-y-2 text-sm">
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Subtotal neto</span>
-            <span className="tabular-nums">{formatCurrency(s.subtotal)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">IVA</span>
-            <span className="tabular-nums">{formatCurrency(s.taxAmount)}</span>
-          </div>
-          <div className="flex justify-between border-t pt-2 font-semibold">
+          {canSeeBreakdown && s.subtotal != null && (
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Subtotal neto</span>
+              <span className="tabular-nums">{formatCurrency(s.subtotal)}</span>
+            </div>
+          )}
+          {canSeeBreakdown && s.taxAmount != null && (
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">IVA</span>
+              <span className="tabular-nums">{formatCurrency(s.taxAmount)}</span>
+            </div>
+          )}
+          <div
+            className={cn(
+              'flex justify-between font-semibold',
+              canSeeBreakdown && 'border-t pt-2',
+            )}
+          >
             <span>Total</span>
             <span className="tabular-nums">{formatCurrency(s.total)}</span>
           </div>

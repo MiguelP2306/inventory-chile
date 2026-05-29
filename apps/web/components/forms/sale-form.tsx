@@ -45,6 +45,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { getCompanySettings } from '@/lib/cashbox-api';
 import { apiErrorMessage } from '@/lib/catalog-api';
 import { listCustomers } from '@/lib/customers-api';
+import { Permission, useCan } from '@/lib/current-user-context';
 import { formatCurrency } from '@/lib/format';
 import {
   createSale,
@@ -75,6 +76,14 @@ interface ItemRow {
   discountValue: string;
 }
 
+export interface SaleBagItem {
+  productId: string;
+  sku: string | null;
+  name: string;
+  qty: number;
+  unitPrice: string;
+}
+
 interface Props {
   // Si llegan datos de cotización, los usamos para prefill (cliente + items
   // + notas). El `quotationId` viaja al backend en el create para que la
@@ -99,12 +108,23 @@ interface Props {
     }>;
     notes: string | null;
   };
+  /**
+   * Items del bolso para prellenar la venta sin pasar por una cotización.
+   * No traen cliente — el operador lo elige acá.
+   */
+  initialBagItems?: SaleBagItem[];
   onSuccess?: (sale: SaleDto) => void;
   onCancel?: () => void;
 }
 
-export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
+export function SaleForm({
+  prefillFromQuotation,
+  initialBagItems,
+  onSuccess,
+  onCancel,
+}: Props) {
   const qc = useQueryClient();
+  const canSeeBreakdown = useCan(Permission.SALE_VIEW_FINANCIAL_BREAKDOWN);
   // Ronda 10 — tabs simplificadas: cliente + items en una sola vista
   // ('principal'); notas aparte. Las referencias a 'cliente' o 'items' en
   // validaciones se mapean a 'principal' + abrir/cerrar la card del cliente.
@@ -148,8 +168,19 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
     setWarehouseId((principal ?? activeWarehouses[0]!).id);
   }, [warehouseId, activeWarehouses]);
 
-  const [items, setItems] = useState<ItemRow[]>(() =>
-    (prefillFromQuotation?.items ?? []).map((it) => ({
+  const [items, setItems] = useState<ItemRow[]>(() => {
+    if (initialBagItems && initialBagItems.length > 0) {
+      return initialBagItems.map((it) => ({
+        productId: it.productId,
+        sku: it.sku ?? '',
+        name: it.name,
+        qty: it.qty,
+        unitPrice: it.unitPrice,
+        discountKind: '$',
+        discountValue: '0',
+      }));
+    }
+    return (prefillFromQuotation?.items ?? []).map((it) => ({
       productId: it.productId,
       sku: it.sku,
       name: it.name,
@@ -157,8 +188,8 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
       unitPrice: it.unitPrice,
       discountKind: it.discountPercent != null ? '%' : '$',
       discountValue: it.discountPercent ?? it.discount ?? '0',
-    })),
-  );
+    }));
+  });
   const [notes, setNotes] = useState<string>(prefillFromQuotation?.notes ?? '');
 
   const settings = useQuery({
@@ -458,49 +489,51 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
               )}
             </div>
 
-            <div className="space-y-2">
-              <Label>Método de pago</Label>
-              {/* Ronda 9 — 5 opciones: efectivo, transferencia, débito,
-                  crédito, link de pago. Cada tarjeta de pago tiene su propia
-                  comisión configurable en Configuración. */}
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
-                <PaymentOption
-                  selected={paymentMethod === 'CASH'}
-                  onClick={() => setPaymentMethod('CASH')}
-                  icon={<Banknote className="h-5 w-5" />}
-                  label="Efectivo"
-                  hint="Sin comisión"
-                />
-                <PaymentOption
-                  selected={paymentMethod === 'TRANSFER'}
-                  onClick={() => setPaymentMethod('TRANSFER')}
-                  icon={<Send className="h-5 w-5" />}
-                  label="Transferencia"
-                  hint="Sin comisión"
-                />
-                <PaymentOption
-                  selected={paymentMethod === 'CARD_DEBIT'}
-                  onClick={() => setPaymentMethod('CARD_DEBIT')}
-                  icon={<CreditCard className="h-5 w-5" />}
-                  label="Débito"
-                  hint={`Comisión ${(Number(settings.data?.cardDebitCommissionRate ?? '0') * 100).toFixed(2)}%`}
-                />
-                <PaymentOption
-                  selected={paymentMethod === 'CARD_CREDIT'}
-                  onClick={() => setPaymentMethod('CARD_CREDIT')}
-                  icon={<CreditCard className="h-5 w-5" />}
-                  label="Crédito"
-                  hint={`Comisión ${(Number(settings.data?.cardCreditCommissionRate ?? '0') * 100).toFixed(2)}%`}
-                />
-                <PaymentOption
-                  selected={paymentMethod === 'PAYMENT_LINK'}
-                  onClick={() => setPaymentMethod('PAYMENT_LINK')}
-                  icon={<Send className="h-5 w-5" />}
-                  label="Link de pago"
-                  hint={`Comisión ${(Number(settings.data?.paymentLinkCommissionRate ?? '0') * 100).toFixed(2)}%`}
-                />
+            {canSeeBreakdown && (
+              <div className="space-y-2">
+                <Label>Método de pago</Label>
+                {/* Ronda 9 — 5 opciones: efectivo, transferencia, débito,
+                    crédito, link de pago. Cada tarjeta de pago tiene su propia
+                    comisión configurable en Configuración. */}
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                  <PaymentOption
+                    selected={paymentMethod === 'CASH'}
+                    onClick={() => setPaymentMethod('CASH')}
+                    icon={<Banknote className="h-5 w-5" />}
+                    label="Efectivo"
+                    hint="Sin comisión"
+                  />
+                  <PaymentOption
+                    selected={paymentMethod === 'TRANSFER'}
+                    onClick={() => setPaymentMethod('TRANSFER')}
+                    icon={<Send className="h-5 w-5" />}
+                    label="Transferencia"
+                    hint="Sin comisión"
+                  />
+                  <PaymentOption
+                    selected={paymentMethod === 'CARD_DEBIT'}
+                    onClick={() => setPaymentMethod('CARD_DEBIT')}
+                    icon={<CreditCard className="h-5 w-5" />}
+                    label="Débito"
+                    hint={`Comisión ${(Number(settings.data?.cardDebitCommissionRate ?? '0') * 100).toFixed(2)}%`}
+                  />
+                  <PaymentOption
+                    selected={paymentMethod === 'CARD_CREDIT'}
+                    onClick={() => setPaymentMethod('CARD_CREDIT')}
+                    icon={<CreditCard className="h-5 w-5" />}
+                    label="Crédito"
+                    hint={`Comisión ${(Number(settings.data?.cardCreditCommissionRate ?? '0') * 100).toFixed(2)}%`}
+                  />
+                  <PaymentOption
+                    selected={paymentMethod === 'PAYMENT_LINK'}
+                    onClick={() => setPaymentMethod('PAYMENT_LINK')}
+                    icon={<Send className="h-5 w-5" />}
+                    label="Link de pago"
+                    hint={`Comisión ${(Number(settings.data?.paymentLinkCommissionRate ?? '0') * 100).toFixed(2)}%`}
+                  />
+                </div>
               </div>
-            </div>
+            )}
               </div>
             )}
           </div>
@@ -695,21 +728,36 @@ export function SaleForm({ prefillFromQuotation, onSuccess, onCancel }: Props) {
       </Tabs>
 
       <div className="ml-auto max-w-md rounded-md border bg-card p-4 space-y-2 text-sm">
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">Subtotal neto</span>
-          <span className="tabular-nums">{formatCurrency(subtotalNeto.toFixed(2))}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">
-            IVA ({(taxRate * 100).toFixed(0)}%)
-          </span>
-          <span className="tabular-nums">{formatCurrency(taxAmount.toFixed(2))}</span>
-        </div>
-        <div className="flex justify-between border-t pt-2 font-semibold">
+        {canSeeBreakdown && (
+          <>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Subtotal neto</span>
+              <span className="tabular-nums">
+                {formatCurrency(subtotalNeto.toFixed(2))}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">
+                IVA ({(taxRate * 100).toFixed(0)}%)
+              </span>
+              <span className="tabular-nums">
+                {formatCurrency(taxAmount.toFixed(2))}
+              </span>
+            </div>
+          </>
+        )}
+        <div
+          className={cn(
+            'flex justify-between font-semibold',
+            canSeeBreakdown && 'border-t pt-2',
+          )}
+        >
           <span>Total a cobrar</span>
-          <span className="tabular-nums">{formatCurrency(totalBruto.toFixed(2))}</span>
+          <span className="tabular-nums">
+            {formatCurrency(totalBruto.toFixed(2))}
+          </span>
         </div>
-        {chargesCommission && commissionAmount > 0 && (
+        {canSeeBreakdown && chargesCommission && commissionAmount > 0 && (
           <>
             <div className="flex justify-between text-xs text-muted-foreground">
               <span>Comisión ({(commissionRate * 100).toFixed(2)}%)</span>

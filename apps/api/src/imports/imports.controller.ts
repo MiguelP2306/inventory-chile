@@ -10,6 +10,8 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { memoryStorage } from 'multer';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { JwtPayload } from '../auth/types';
 import { CustomersImportService } from './customers-import.service';
 import { ImportsService } from './imports.service';
 import { SuppliersImportService } from './suppliers-import.service';
@@ -61,9 +63,12 @@ export class ImportsController {
       limits: { fileSize: MAX_XLSX_BYTES },
     }),
   )
-  confirmProducts(@UploadedFile() file?: Express.Multer.File) {
+  confirmProducts(
+    @CurrentUser() user: JwtPayload,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
     validateXlsx(file);
-    return this.svc.confirm(file!.buffer);
+    return this.svc.confirm(file!.buffer, user.sub);
   }
 
   @Get('products/template.xlsx')

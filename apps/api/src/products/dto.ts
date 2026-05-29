@@ -90,11 +90,6 @@ export class CreateProductDto {
   minStock?: number;
 
   @IsOptional()
-  @IsInt()
-  @Min(0)
-  maxStock?: number | null;
-
-  @IsOptional()
   @IsString()
   @MaxLength(120)
   location?: string | null;
@@ -102,13 +97,6 @@ export class CreateProductDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
-
-  // Código universal (Fase 4B). Único por producto, opcional. NO único entre
-  // productos — distintos productos pueden compartir el mismo universal.
-  @IsOptional()
-  @IsString()
-  @MaxLength(80)
-  universalCode?: string | null;
 
   // ORIGINAL u ALTERNATIVE. Default ORIGINAL en backend.
   @IsOptional()

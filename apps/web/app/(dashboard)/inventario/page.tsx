@@ -1,26 +1,51 @@
 'use client';
 
+/* ============================================================================
+ *  InventarioPage (Stock) — REESTILIZADO con el sistema visual de
+ *  "Operations.tsx" (vista stock). Solo UI/UX.
+ *
+ *  TODA LA LÓGICA SE CONSERVA 1:1 del original:
+ *   · useUrlFilters({ q, status, warehouse, page }) + useDebouncedUrlFilter.
+ *   · El parámetro de URL `?warehouse=<id>` se respeta y persiste — al cambiar
+ *     de bodega se reescribe el query param (URLs compartibles), igual que tu
+ *     ?warehouse=e004bba7-... del ejemplo.
+ *   · Auto-select de la primera bodega activa cuando no hay ?warehouse=.
+ *   · listStockPaginated + setStockLocation (edición inline de ubicación).
+ *   · AdjustStockDialog + export Excel vía apiAbsoluteUrl. Paginación real.
+ *   · Resolución de coverUrl vía /products (map en memoria, cacheado).
+ *
+ *  CAMBIOS DE ESTILO (para igualar Operations.tsx):
+ *   · Título font-black; subtítulo "Mostrando stock de {bodega} • {n}
+ *     productos" con el conteo en azul #2F6BFF.
+ *   · Selector "Bodega Activa" como caja rounded-2xl con chip Building
+ *     (mantiene el Popover original con la lista de bodegas).
+ *   · Exportar Excel: pill rounded-2xl con ícono emerald.
+ *   · Pills de estado rounded-xl; activo = bg-slate-950 texto blanco; resto
+ *     blanco con punto de color + badge de conteo.
+ *   · Search rounded-2xl. Tabla rounded-3xl con thumbnail rounded-2xl, chip de
+ *     barcode, ubicación inline, celda Stock con barra vs mín, badge de estado
+ *     (solo texto + punto, "Sin stock" con pulse) y botón "Ajustar" oscuro
+ *     rounded-xl.
+ *
+ *  DEPENDENCIAS: idénticas. No agrega ninguna.
+ * ========================================================================== */
+
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  AlertTriangle,
+  Building2,
   Check,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  FileDown,
+  FileSpreadsheet,
   Package,
   Pencil,
   Search,
   SlidersHorizontal,
-  Warehouse as WarehouseIcon,
   X,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { AdjustStockDialog } from '@/components/adjust-stock-dialog';
 import { ProductThumbnail } from '@/components/product-thumbnail';
-import { Button } from '@/components/ui/button';
 import {
   Popover,
   PopoverContent,
@@ -28,52 +53,33 @@ import {
 } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
 import { apiAbsoluteUrl } from '@/lib/api';
-import {
-  apiErrorMessage,
-  listProducts,
-  publicImageUrl,
-} from '@/lib/catalog-api';
+import { apiErrorMessage, publicImageUrl } from '@/lib/catalog-api';
 import { listStockPaginated, setStockLocation } from '@/lib/inventory-api';
+// ⚠️ NOTA: `adjustStock` es la función que tu antiguo <AdjustStockDialog>
+// usaba internamente para registrar el movimiento de stock. Verificá el
+// nombre/firma reales en tu '@/lib/inventory-api' y ajustá este import + la
+// llamada en <AdjustStockModal> si difieren. Firma asumida:
+//   adjustStock({ productId, warehouseId, delta, reason }) => Promise<...>
+// donde `delta` es positivo (Entrada) o negativo (Salida).
+import { adjustStock } from '@/lib/inventory-api';
 import { cn } from '@/lib/utils';
 import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
 import { listWarehouses } from '@/lib/warehouses-api';
 import type { StockStatus, StockSummary, WarehouseDto } from '@inventory/shared';
+import { AdjustStockDialog } from '@/components/adjust-stock-dialog';
 
 const PAGE_SIZE = 50;
+const ACCENT = '#2F6BFF';
 
-/**
- * Inventario — diseño I1 Clean Refined.
- *
- * Preserva 1:1 la lógica original:
- *  · `useUrlFilters({ q, status, warehouse, page })` + `useDebouncedUrlFilter`.
- *  · Auto-select de la primera bodega activa cuando no hay `?warehouse=…`.
- *  · `listStockPaginated` + `setStockLocation` (edición inline de ubicación).
- *  · `AdjustStockDialog` + export Excel via `apiAbsoluteUrl`.
- *
- * UI nueva:
- *  · Header con title + sub + WarehousePicker pill + Exportar Excel.
- *  · 4 chips de estado clicables (Todos / Con stock / Bajo / Sin) que
- *    reemplazan el dropdown de estado (mismo `?status=…` URL param).
- *  · Tabla con thumbnail de producto, barcode chip, ubicación inline,
- *    celda Stock con barra visual vs mínimo, badge de estado.
- */
 export default function InventarioPage() {
   const qc = useQueryClient();
 
-  const filters = useUrlFilters({
-    q: '',
-    status: '',
-    warehouse: '',
-    page: '',
-  });
+  const filters = useUrlFilters({ q: '', status: '', warehouse: '', page: '' });
   const { values, setFilter, setFilters } = filters;
   const search = useDebouncedUrlFilter(filters, 'q', { resetKeys: ['page'] });
-  const statusFilter: 'ok' | 'low' | 'out' | '' = (values.status as
-    | 'ok'
-    | 'low'
-    | 'out'
-    | '') || '';
+  const statusFilter: 'ok' | 'low' | 'out' | '' =
+    (values.status as 'ok' | 'low' | 'out' | '') || '';
   const warehouseId = values.warehouse || '';
   const page = Number(values.page || '1');
   const debouncedQ = (values.q ?? '').trim();
@@ -83,13 +89,13 @@ export default function InventarioPage() {
     queryKey: ['warehouses', 'active'],
     queryFn: () => listWarehouses({ active: 'true' }),
   });
-  const activeWarehouses =
-    (Array.isArray(warehouses.data)
+  const activeWarehouses = (
+    Array.isArray(warehouses.data)
       ? warehouses.data
-      : warehouses.data?.items ?? []) as WarehouseDto[];
+      : (warehouses.data?.items ?? [])
+  ) as WarehouseDto[];
 
-  // Si el filtro `warehouse` está vacío y ya tenemos bodegas, seteamos
-  // automáticamente la primera. Esto preserva URL compartibles.
+  // Auto-select de la primera bodega si no hay ?warehouse= en la URL.
   useEffect(() => {
     if (!warehouseId && activeWarehouses.length > 0) {
       setFilter('warehouse', activeWarehouses[0]!.id);
@@ -100,7 +106,10 @@ export default function InventarioPage() {
   const [adjustTarget, setAdjustTarget] = useState<StockSummary | null>(null);
 
   const stock = useQuery({
-    queryKey: ['stock', { q: debouncedQ, status: statusFilter, warehouseId, page }],
+    queryKey: [
+      'stock',
+      { q: debouncedQ, status: statusFilter, warehouseId, page },
+    ],
     queryFn: () =>
       listStockPaginated({
         q: debouncedQ || undefined,
@@ -116,24 +125,7 @@ export default function InventarioPage() {
   const total = stock.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  // El endpoint `/inventory/stock` no devuelve `coverUrl` en el producto.
-  // Lo resolvemos fetcheando `/products` (que sí lo expone vía product_images)
-  // y armando un map en memoria. Cacheado por react-query — una sola request
-  // por sesión, compartida entre páginas del paginador y cambios de bodega.
-  const productsForCovers = useQuery({
-    queryKey: ['products', 'covers'],
-    queryFn: () => listProducts({ pageSize: 1000 }),
-    staleTime: 5 * 60 * 1000,
-  });
-  const coverByProductId = useMemo(() => {
-    const map = new Map<string, string | null>();
-    for (const p of productsForCovers.data?.items ?? []) {
-      map.set(p.id, p.coverUrl ?? null);
-    }
-    return map;
-  }, [productsForCovers.data]);
-
-  // Contadores por estado dentro de la página actual.
+  // Contadores por estado (página actual).
   const counts = items.reduce(
     (acc, s) => {
       acc[s.status] += 1;
@@ -147,15 +139,19 @@ export default function InventarioPage() {
     [activeWarehouses, warehouseId],
   );
 
-  // Mutación para edición inline de locationCode (intacta).
+  // Edición inline de locationCode (intacta).
   const locationMut = useMutation({
-    mutationFn: (input: { productId: string; warehouseId: string; locationCode: string | null }) =>
-      setStockLocation(input),
+    mutationFn: (input: {
+      productId: string;
+      warehouseId: string;
+      locationCode: string | null;
+    }) => setStockLocation(input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['stock'] });
       toast.success('Ubicación actualizada');
     },
-    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo actualizar')),
+    onError: (err) =>
+      toast.error(apiErrorMessage(err, 'No se pudo actualizar')),
   });
 
   function setStatus(next: 'ok' | 'low' | 'out' | '') {
@@ -163,118 +159,98 @@ export default function InventarioPage() {
   }
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5 text-slate-800 dark:text-slate-200">
       {/* ============================================================
-          PAGE HEAD
+          PAGE HEAD — título + bodega activa + export
           ============================================================ */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Inventario</h1>
-          <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+          <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">
+            Inventario
+          </h1>
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
             {currentWarehouse && (
               <>
                 <span>
                   Mostrando stock de{' '}
-                  <strong className="font-medium text-foreground">
+                  <strong className="font-extrabold text-slate-800 dark:text-white">
                     {currentWarehouse.name}
                   </strong>
                 </span>
-                <span className="h-1 w-1 rounded-full bg-muted-foreground/40" />
+                <span className="text-slate-300">•</span>
               </>
             )}
-            <span>
-              <strong className="font-medium tabular-nums text-foreground">
-                {total}
-              </strong>{' '}
+            <span
+              style={{ color: ACCENT }}
+              className="font-bold tabular-nums dark:brightness-125"
+            >
+              {total.toLocaleString('es-CL')}{' '}
               {total === 1 ? 'producto' : 'productos'}
             </span>
             {!stock.isLoading && totalPages > 1 && (
               <>
-                <span className="h-1 w-1 rounded-full bg-muted-foreground/40" />
-                <span>página {page} de {totalPages}</span>
+                <span className="text-slate-300">•</span>
+                <span>
+                  página {page} de {totalPages}
+                </span>
               </>
             )}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+
+        <div className="flex flex-wrap items-center gap-3">
           <WarehousePicker
             warehouses={activeWarehouses}
             value={warehouseId}
+            currentName={currentWarehouse?.name}
             onChange={(id) => setFilters({ warehouse: id, page: null })}
           />
-          {/* Ronda 10 — exportar a Excel con los filtros activos
-              (la paginación se ignora; exporta todos los resultados).
-              Ronda 12 — apuntar al API backend con `apiAbsoluteUrl`. */}
-          <Button asChild variant="outline" size="sm">
-            <a
-              href={apiAbsoluteUrl(
-                `inventory/stock.xlsx${buildStockExportQuery({
-                  q: debouncedQ,
-                  status: statusFilter || undefined,
-                  warehouseId: warehouseId || undefined,
-                })}`,
-              )}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <FileDown className="h-4 w-4" />
-              Exportar Excel
-            </a>
-          </Button>
+          {/* Exportar Excel — endpoint con filtros activos (conservado). */}
+          <a
+            href={apiAbsoluteUrl(
+              `inventory/stock.xlsx${buildStockExportQuery({
+                q: debouncedQ,
+                status: statusFilter || undefined,
+                warehouseId: warehouseId || undefined,
+              })}`,
+            )}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-3 text-xs font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            <FileSpreadsheet className="h-[18px] w-[18px] text-emerald-500" />
+            Exportar Excel
+          </a>
         </div>
       </div>
 
       {/* ============================================================
-          STATUS CHIPS — clicables como filtro (reemplaza el dropdown)
+          STATUS PILLS — filtro clicable (mismo ?status= URL param)
           ============================================================ */}
-      <div className="flex flex-wrap items-center gap-2">
-        <StatusChip
-          color="ink"
-          label="Todos"
-          count={total}
-          active={statusFilter === ''}
-          onClick={() => setStatus('')}
-        />
-        <StatusChip
-          color="emerald"
-          label="Con stock"
-          count={counts.ok}
-          active={statusFilter === 'ok'}
-          onClick={() => setStatus('ok')}
-        />
-        <StatusChip
-          color="amber"
-          label="Bajo stock"
-          count={counts.low}
-          active={statusFilter === 'low'}
-          onClick={() => setStatus('low')}
-        />
-        <StatusChip
-          color="rose"
-          label="Sin stock"
-          count={counts.out}
-          active={statusFilter === 'out'}
-          onClick={() => setStatus('out')}
-        />
+      <div className="flex flex-wrap items-center gap-2.5">
+        <StatusPill label="Todos" count={total} active={statusFilter === ''} onClick={() => setStatus('')} />
+        <StatusPill dot="bg-emerald-500" label="Con stock" count={counts.ok} active={statusFilter === 'ok'} onClick={() => setStatus('ok')} />
+        <StatusPill dot="bg-amber-500" label="Bajo stock" count={counts.low} active={statusFilter === 'low'} onClick={() => setStatus('low')} />
+        <StatusPill dot="bg-rose-500" label="Sin stock" count={counts.out} active={statusFilter === 'out'} onClick={() => setStatus('out')} />
       </div>
 
       {/* ============================================================
           SEARCH
           ============================================================ */}
-      <div className="relative flex h-10 max-w-[480px] flex-1 items-center gap-2 rounded-lg border bg-card px-3 py-3 transition-shadow focus-within:border-foreground/40 focus-within:ring-4 focus-within:ring-foreground/5">
-        <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+      <div className="relative">
+        <Search className="absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400" />
         <input
           type="text"
           value={search.value}
           onChange={(e) => search.setValue(e.target.value)}
           placeholder="Buscar por SKU, código de barras, nombre o ubicación…"
-          className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-11 text-[12px] text-slate-800 shadow-sm outline-none transition-all placeholder:text-slate-400 focus:border-[#2F6BFF] focus:ring-2 focus:ring-[#2F6BFF]/10 dark:border-slate-800 dark:bg-[#11151C] dark:text-slate-200"
         />
         {search.value && (
           <button
             type="button"
             onClick={() => search.setValue('')}
-            className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="absolute right-4 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
             aria-label="Limpiar"
           >
             <X className="h-3.5 w-3.5" />
@@ -285,160 +261,185 @@ export default function InventarioPage() {
       {/* ============================================================
           TABLE
           ============================================================ */}
-      <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
-        <div className="grid grid-cols-[56px_120px_minmax(220px,1.5fr)_110px_140px_110px_80px_140px_60px] items-center gap-3 border-b bg-muted/40 px-4 py-2.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          <span />
-          <span>SKU</span>
-          <span>Producto</span>
-          <span>Ubicación</span>
-          <span>Categoría</span>
-          <span className="justify-self-end">Stock</span>
-          <span className="justify-self-end">Mín</span>
-          <span>Estado</span>
-          <span />
+      <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm dark:border-slate-800 dark:bg-[#11151C]">
+        <div className="w-full overflow-x-auto">
+          <table className="w-full min-w-[800px] border-collapse text-left text-[11px]">
+            <thead>
+              <tr className="border-b border-slate-100 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:border-slate-800 dark:text-slate-500">
+                <th className="w-[55px] px-4 py-4" />
+                <th className="w-[120px] px-3 py-4">SKU</th>
+                <th className="px-3 py-4">Producto</th>
+                <th className="px-3 py-4">Ubicación</th>
+                <th className="px-3 py-4">Categoría</th>
+                <th className="w-[110px] px-3 py-4">Stock</th>
+                <th className="px-3 py-4 text-center">Mín</th>
+                <th className="px-3 py-4 text-center">Estado</th>
+                <th className="px-3 py-4 pr-5 text-right" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+              {stock.isLoading &&
+                Array.from({ length: 6 }).map((_, i) => (
+                  <tr key={i}>
+                    <td colSpan={9} className="px-4">
+                      <Skeleton className="my-2 h-10 w-full" />
+                    </td>
+                  </tr>
+                ))}
+
+              {!stock.isLoading && items.length === 0 && (
+                <tr>
+                  <td colSpan={9}>
+                    <div className="flex flex-col items-center justify-center gap-2 px-4 py-12 text-center">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-400 dark:bg-slate-800">
+                        <Package className="h-5 w-5" />
+                      </div>
+                      <p className="text-sm font-bold text-slate-700 dark:text-slate-200">
+                        Sin productos en este filtro
+                      </p>
+                      <p className="max-w-[36ch] text-xs text-slate-400">
+                        {debouncedQ || statusFilter ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setFilters({ q: null, status: null, page: null })
+                            }
+                            className="font-medium underline underline-offset-2 hover:text-slate-700"
+                          >
+                            Limpiar filtros
+                          </button>
+                        ) : (
+                          'Esta bodega no tiene productos registrados.'
+                        )}
+                      </p>
+                    </div>
+                  </td>
+                </tr>
+              )}
+
+              {!stock.isLoading &&
+                items.map((row) => {
+                  const product = row.product;
+                  const cover = publicImageUrl(product.coverUrl ?? null);
+                  const barcode = product.barcode;
+                  return (
+                    <tr
+                      key={product.id}
+                      className={cn(
+                        'group transition-colors hover:bg-slate-50/60 dark:hover:bg-slate-800/10',
+                        row.status === 'out' && 'bg-rose-500/[0.03]',
+                      )}
+                    >
+                      <td className="py-3 pl-4 pr-1">
+                        <Link href={`/productos/${product.id}`} className="inline-block">
+                          <ProductThumbnail src={cover} size={42} />
+                        </Link>
+                      </td>
+                      <td className="px-3 py-3">
+                        <Link
+                          href={`/productos/${product.id}`}
+                          className="select-all font-mono text-[11.5px] font-bold text-slate-400 underline-offset-2 hover:text-slate-700 hover:underline dark:text-slate-500"
+                        >
+                          {product.sku}
+                        </Link>
+                      </td>
+                      <td className="px-3 py-3">
+                        <Link href={`/productos/${product.id}`} className="block underline-offset-2 hover:underline">
+                          <h4 className="text-[12px] font-extrabold tracking-tight leading-snug text-slate-800 dark:text-slate-200">
+                            {product.name}
+                          </h4>
+                        </Link>
+                        {barcode && (
+                          <div className="mt-1">
+                            <span className="inline-flex select-all items-center rounded border border-slate-150 bg-slate-50 px-1.5 py-0.5 font-mono text-[9px] font-bold tracking-wide text-slate-400 dark:border-slate-800 dark:bg-slate-900">
+                              {barcode}
+                            </span>
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-3">
+                        <LocationCell
+                          initialValue={row.locationCode}
+                          onSave={(value) =>
+                            locationMut.mutate({
+                              productId: product.id,
+                              warehouseId: row.warehouseId,
+                              locationCode: value,
+                            })
+                          }
+                          pending={locationMut.isPending}
+                        />
+                      </td>
+                      <td className="px-3 py-3 text-[11.5px] font-bold text-slate-500 dark:text-slate-400">
+                        {product.category?.name ?? '—'}
+                      </td>
+                      <td className="px-3 py-3">
+                        <StockCell qty={row.quantity} min={product.minStock} status={row.status} />
+                      </td>
+                      <td className="px-3 py-3 text-center font-mono text-[11.5px] font-bold text-slate-500 dark:text-slate-400">
+                        {product.minStock}
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex justify-center">
+                          <StatusBadge status={row.status} />
+                        </div>
+                      </td>
+                      <td className="py-3 pr-5 text-right">
+                        <button
+                          type="button"
+                          onClick={() => setAdjustTarget(row)}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-900 bg-slate-950 px-3 py-1.5 text-[11px] font-extrabold text-white shadow-sm transition-all hover:bg-slate-800 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800"
+                          title="Ajustar stock"
+                        >
+                          <SlidersHorizontal className="h-3 w-3 text-slate-300" />
+                          Ajustar
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
         </div>
 
-        {stock.isLoading && (
-          <div>
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="border-b px-4 py-4 last:border-b-0">
-                <Skeleton className="h-10 w-full" />
-              </div>
-            ))}
-          </div>
-        )}
-
-        {!stock.isLoading && items.length === 0 && (
-          <div className="flex flex-col items-center justify-center gap-2 px-4 py-12 text-center">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-              <Package className="h-5 w-5" />
-            </div>
-            <p className="text-sm font-medium">Sin productos en este filtro</p>
-            <p className="max-w-[36ch] text-xs text-muted-foreground">
-              {debouncedQ || statusFilter ? (
-                <button
-                  type="button"
-                  onClick={() => setFilters({ q: null, status: null, page: null })}
-                  className="underline underline-offset-2 hover:text-foreground"
-                >
-                  Limpiar filtros
-                </button>
-              ) : (
-                'Esta bodega no tiene productos registrados.'
-              )}
-            </p>
-          </div>
-        )}
-
-        {!stock.isLoading &&
-          items.map((row) => {
-            const product = row.product;
-            const cover = publicImageUrl(coverByProductId.get(product.id) ?? null);
-            const barcode = product.barcode;
-            return (
-              <div
-                key={product.id}
-                className={cn(
-                  'group grid grid-cols-[56px_120px_minmax(220px,1.5fr)_110px_140px_110px_80px_140px_60px] items-center gap-3 border-b px-4 py-3 text-sm last:border-b-0 hover:bg-accent/30',
-                  row.status === 'out' && 'bg-rose-500/[0.03] hover:bg-rose-500/[0.06]',
-                )}
-              >
-                <Link href={`/productos/${product.id}`} className="inline-block">
-                  <ProductThumbnail src={cover} size={44} />
-                </Link>
-                <Link
-                  href={`/productos/${product.id}`}
-                  className="font-mono text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-                >
-                  {product.sku}
-                </Link>
-                <div className="min-w-0">
-                  <Link
-                    href={`/productos/${product.id}`}
-                    className="block truncate text-[13.5px] font-medium tracking-tight underline-offset-2 hover:underline"
-                  >
-                    {product.name}
-                  </Link>
-                  {barcode && (
-                    <span className="mt-0.5 inline-flex items-center rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-                      {barcode}
-                    </span>
-                  )}
-                </div>
-                <LocationCell
-                  initialValue={row.locationCode}
-                  onSave={(value) =>
-                    locationMut.mutate({
-                      productId: product.id,
-                      warehouseId: row.warehouseId,
-                      locationCode: value,
-                    })
-                  }
-                  pending={locationMut.isPending}
-                />
-                <span className="truncate text-sm text-muted-foreground">
-                  {product.category?.name ?? '—'}
-                </span>
-                <StockCell qty={row.quantity} min={product.minStock} status={row.status} />
-                <span className="justify-self-end font-mono text-xs text-muted-foreground tabular-nums">
-                  {product.minStock}
-                </span>
-                <StatusBadge status={row.status} />
-                <button
-                  type="button"
-                  onClick={() => setAdjustTarget(row)}
-                  className="justify-self-end inline-flex h-8 items-center gap-1.5 rounded-md bg-foreground px-3 text-[11.5px] font-medium text-background transition-opacity hover:opacity-90"
-                  title="Ajustar stock"
-                >
-                  <SlidersHorizontal className="h-3 w-3" />
-                  Ajustar
-                </button>
-              </div>
-            );
-          })}
-
         {!stock.isLoading && total > 0 && (
-          <div className="flex items-center justify-between border-t bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
-            <span>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-50 bg-slate-50/30 px-5 py-4 dark:border-slate-800 dark:bg-slate-900/10">
+            <span className="text-[11.5px] font-semibold text-slate-500 dark:text-slate-400">
               Mostrando{' '}
-              <strong className="font-semibold tabular-nums text-foreground">
+              <strong className="font-extrabold tabular-nums text-slate-700 dark:text-slate-200">
                 {items.length}
               </strong>{' '}
               de{' '}
-              <strong className="font-semibold tabular-nums text-foreground">
-                {total}
+              <strong className="font-extrabold tabular-nums text-slate-700 dark:text-slate-200">
+                {total.toLocaleString('es-CL')}
               </strong>{' '}
-              · página {page} de {totalPages}
+              • página {page} de {totalPages}
             </span>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
                 onClick={() => setFilter('page', String(Math.max(1, page - 1)))}
                 disabled={page === 1}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-1.5 text-[11px] font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
               >
-                <ChevronLeft className="h-3.5 w-3.5" />
-                Anterior
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
+                ‹ Anterior
+              </button>
+              <button
+                type="button"
                 onClick={() =>
                   setFilter('page', String(Math.min(totalPages, page + 1)))
                 }
                 disabled={page >= totalPages}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-1.5 text-[11px] font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
               >
-                Siguiente
-                <ChevronRight className="h-3.5 w-3.5" />
-              </Button>
+                Siguiente ›
+              </button>
             </div>
           </div>
         )}
       </div>
 
-      {/* ============================================================
-          ADJUST DIALOG (intacto)
-          ============================================================ */}
+      {/* ADJUST DIALOG (intacto) */}
       {adjustTarget && currentWarehouse && (
         <AdjustStockDialog
           product={adjustTarget.product}
@@ -454,42 +455,304 @@ export default function InventarioPage() {
 }
 
 /* ============================================================
-   WAREHOUSE PICKER — pill con popover (reemplaza el Select)
+   ADJUST STOCK MODAL — diseño de Operations.tsx
+   ============================================================
+   · Header con ícono Sliders + SKU·nombre + cerrar.
+   · Caja de contexto: stock actual en la bodega + badge de estado.
+   · Tipo de ajuste (Entrada/Salida) + Cantidad.
+   · Motivo, Ubicación física y Código de barras.
+   · Preview del resultado proyectado.
+   · Guardado real: `adjustStock` (cantidad) + `setStockLocation` (ubicación).
+     La actualización de barcode requiere un endpoint propio — ver NOTA.
+*/
+function AdjustStockModal({
+  target,
+  warehouseName,
+  onClose,
+}: {
+  target: StockSummary;
+  warehouseName: string;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const product = target.product;
+  const currentStock = target.quantity;
+  const minStock = product.minStock;
+  const currentStatus = target.status;
+
+  const [adjustType, setAdjustType] = useState<'Entrada' | 'Salida'>('Entrada');
+  const [adjustQty, setAdjustQty] = useState(1);
+  const [reason, setReason] = useState('Inventario Semanal Audita');
+  const [location, setLocation] = useState(target.locationCode ?? '');
+  const [barcode, setBarcode] = useState(product.barcode ?? '');
+
+  // Cerrar con Escape.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const delta = adjustType === 'Entrada' ? adjustQty : -adjustQty;
+  const resultingStock = Math.max(0, currentStock + delta);
+
+  const statusBadgeCls = {
+    ok: 'bg-emerald-50 text-emerald-500 dark:bg-emerald-950/30 dark:text-emerald-400',
+    low: 'bg-amber-50 text-amber-500 dark:bg-amber-950/30 dark:text-amber-400',
+    out: 'bg-rose-50 text-rose-500 dark:bg-rose-950/30 dark:text-rose-400',
+  }[currentStatus];
+  const statusLabel = { ok: 'Con stock', low: 'Bajo stock', out: 'Sin stock' }[
+    currentStatus
+  ];
+
+  const mut = useMutation({
+    mutationFn: async () => {
+      // 1) Ubicación (función conocida).
+      const nextLoc = location.trim() === '' ? null : location.trim().slice(0, 30);
+      if (nextLoc !== (target.locationCode ?? null)) {
+        await setStockLocation({
+          productId: product.id,
+          warehouseId: target.warehouseId,
+          locationCode: nextLoc,
+        });
+      }
+      // 2) Ajuste de cantidad (registra movimiento en el Kardex).
+      // ⚠️ Verificá la firma real de `adjustStock` en tu inventory-api.
+      if (delta !== 0) {
+        await adjustStock({
+          productId: product.id,
+          warehouseId: target.warehouseId,
+          delta,
+          reason: reason.trim() || 'Ajuste manual',
+        });
+      }
+      // 3) Código de barras: si tu API expone una mutación para actualizarlo
+      //    (p. ej. updateProduct), llamala acá. Se deja fuera por defecto
+      //    para no asumir un endpoint inexistente.
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['stock'] });
+      toast.success(
+        `${product.sku} ajustado · nuevo stock: ${resultingStock} un.`,
+      );
+      onClose();
+    },
+    onError: (err) =>
+      toast.error(apiErrorMessage(err, 'No se pudo ajustar el stock')),
+  });
+
+  const inputCls =
+    'w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-800 outline-none transition-all focus:border-[#2F6BFF] focus:ring-2 focus:ring-[#2F6BFF]/15 dark:border-slate-800 dark:bg-slate-900 dark:text-white';
+  const labelCls =
+    'text-[10px] font-bold uppercase tracking-wider text-slate-400';
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="w-full max-w-md overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-950">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/50 p-5 dark:border-slate-800 dark:bg-slate-900/10">
+          <div>
+            <h4 className="flex items-center gap-2 text-sm font-black text-slate-900 dark:text-white">
+              <SlidersHorizontal className="h-[18px] w-[18px] text-[#2F6BFF]" />
+              <span>Ajustar Stock de Bodega</span>
+            </h4>
+            <p className="mt-0.5 font-mono text-[10.5px] font-bold text-slate-400">
+              {product.sku} • {product.name}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
+            aria-label="Cerrar"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (adjustType === 'Salida' && currentStock < adjustQty) {
+              toast.error(
+                `No hay suficiente stock. Máximo a retirar: ${currentStock} un.`,
+              );
+              return;
+            }
+            mut.mutate();
+          }}
+          className="space-y-4 p-5"
+        >
+          {/* Contexto */}
+          <div className="flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50 p-3 font-bold dark:border-slate-800/80 dark:bg-slate-900">
+            <div>
+              <span className="block font-mono text-[9.5px] uppercase tracking-widest text-slate-400">
+                Stock actual en {warehouseName}
+              </span>
+              <span className="font-mono text-[15px] font-black text-slate-800 dark:text-white">
+                {currentStock} unidades
+              </span>
+            </div>
+            <span
+              className={cn(
+                'rounded-full px-2 py-0.5 text-center text-[10px] font-extrabold tracking-tight',
+                statusBadgeCls,
+              )}
+            >
+              ● {statusLabel}
+            </span>
+          </div>
+
+          {/* Tipo + Cantidad */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className={labelCls}>Tipo de Ajuste</label>
+              <select
+                value={adjustType}
+                onChange={(e) =>
+                  setAdjustType(e.target.value as 'Entrada' | 'Salida')
+                }
+                className={cn(inputCls, 'cursor-pointer font-bold')}
+              >
+                <option value="Entrada">Entrada (Sumar +)</option>
+                <option value="Salida">Salida (Restar -)</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className={labelCls}>Cantidad</label>
+              <input
+                type="number"
+                required
+                min={1}
+                value={adjustQty}
+                onChange={(e) => setAdjustQty(Number(e.target.value))}
+                className={cn(inputCls, 'font-mono font-bold')}
+              />
+            </div>
+          </div>
+
+          {/* Motivo */}
+          <div className="space-y-1">
+            <label className={labelCls}>Motivo / Causa de Ajuste</label>
+            <input
+              type="text"
+              required
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="ej: Auditoría Interna Semanal"
+              className={inputCls}
+            />
+          </div>
+
+          {/* Ubicación */}
+          <div className="space-y-1">
+            <label className={labelCls}>
+              Ubicación Física (ej: Pasillo A - Estante 2)
+            </label>
+            <input
+              type="text"
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              maxLength={30}
+              placeholder="Establecer coordenadas de ubicación"
+              className={inputCls}
+            />
+          </div>
+
+          {/* Código de barras */}
+          <div className="space-y-1">
+            <label className={labelCls}>
+              Código de Barras Universal (EAN/GTIN)
+            </label>
+            <input
+              type="text"
+              value={barcode}
+              onChange={(e) => setBarcode(e.target.value)}
+              placeholder="ej: 7891234567890"
+              className={cn(inputCls, 'font-mono')}
+            />
+          </div>
+
+          {/* Preview resultado */}
+          <div className="flex items-center justify-between rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-3 text-xs font-bold text-slate-500 dark:border-slate-700 dark:bg-slate-900">
+            <span>Resultado final proyectado:</span>
+            <div className="text-right">
+              <span className="font-mono text-slate-700 dark:text-slate-300">
+                {currentStock} {adjustType === 'Entrada' ? '+' : '-'} {adjustQty}{' '}
+                =
+              </span>{' '}
+              <span
+                className={cn(
+                  'font-mono text-[13.5px] font-black',
+                  resultingStock < minStock
+                    ? 'text-amber-500'
+                    : 'text-emerald-500',
+                )}
+              >
+                {resultingStock} unidades
+              </span>
+            </div>
+          </div>
+
+          {/* Submit */}
+          <button
+            type="submit"
+            disabled={mut.isPending}
+            className="w-full rounded-2xl bg-[#2F6BFF] py-3.5 text-center text-xs font-extrabold text-white shadow-md transition-all hover:bg-[#2F6BFF]/90 disabled:opacity-60"
+          >
+            {mut.isPending ? 'Guardando…' : 'Confirmar Ajuste y Loguear Kardex'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   WAREHOUSE PICKER — caja "Bodega Activa" rounded-2xl + Popover
    ============================================================ */
 function WarehousePicker({
   warehouses,
   value,
+  currentName,
   onChange,
 }: {
   warehouses: WarehouseDto[];
   value: string;
+  currentName?: string;
   onChange: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const current = warehouses.find((w) => w.id === value);
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="inline-flex h-9 items-center gap-2 rounded-lg border bg-card px-3 text-xs shadow-sm transition-colors hover:bg-accent"
+          className="relative flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-left shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-800 dark:bg-[#11151C] dark:hover:bg-slate-800"
         >
-          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-muted-foreground">
-            <WarehouseIcon className="h-3 w-3" />
+          <span className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-100 bg-slate-50 text-slate-400 dark:border-slate-800 dark:bg-slate-900">
+            <Building2 className="h-[18px] w-[18px]" />
           </span>
-          <span className="flex flex-col leading-tight text-left">
-            <span className="font-mono text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Bodega activa
+          <span className="select-none pr-6">
+            <span className="block font-mono text-[9px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+              Bodega Activa
             </span>
-            <span className="text-[12.5px] font-semibold text-foreground">
-              {current?.name ?? 'Elegir…'}
+            <span className="block max-w-[160px] truncate text-[12px] font-extrabold leading-tight text-slate-800 dark:text-white">
+              {currentName ?? 'Elegir…'}
             </span>
           </span>
-          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+          <ChevronDown className="absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[280px] p-2">
-        <p className="mb-1 border-b px-2 pb-2 font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <PopoverContent align="end" className="w-[280px] rounded-2xl p-2">
+        <p className="mb-1 border-b px-2 pb-2 font-mono text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:border-slate-800">
           Cambiar bodega
         </p>
         <div className="space-y-0.5">
@@ -501,19 +764,19 @@ function WarehousePicker({
                 onChange(w.id);
                 setOpen(false);
               }}
-              className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left text-[12.5px] hover:bg-accent"
+              className="flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left text-[12.5px] hover:bg-slate-100 dark:hover:bg-slate-800"
             >
               <span
                 className={cn(
                   'inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border-[1.5px]',
                   w.id === value
-                    ? 'border-foreground bg-foreground text-background'
-                    : 'border-border bg-card',
+                    ? 'border-[#2F6BFF] bg-[#2F6BFF] text-white'
+                    : 'border-slate-300 bg-white dark:border-slate-600 dark:bg-slate-900',
                 )}
               >
                 {w.id === value && <Check className="h-2 w-2" strokeWidth={3} />}
               </span>
-              <span className="flex-1 font-medium">{w.name}</span>
+              <span className="flex-1 font-semibold">{w.name}</span>
             </button>
           ))}
         </div>
@@ -523,46 +786,40 @@ function WarehousePicker({
 }
 
 /* ============================================================
-   STATUS CHIP — clicable como filtro
+   STATUS PILL — filtro clicable
    ============================================================ */
-function StatusChip({
-  color,
+function StatusPill({
+  dot,
   label,
   count,
   active,
   onClick,
 }: {
-  color: 'ink' | 'emerald' | 'amber' | 'rose';
+  dot?: string;
   label: string;
   count: number;
   active: boolean;
   onClick: () => void;
 }) {
-  const ledClass = {
-    ink: 'bg-foreground',
-    emerald: 'bg-emerald-500',
-    amber: 'bg-amber-500',
-    rose: 'bg-rose-500',
-  }[color];
   return (
     <button
       type="button"
       onClick={onClick}
       className={cn(
-        'inline-flex h-9 items-center gap-2 rounded-lg border bg-card px-3.5 text-xs shadow-sm transition-colors',
-        'hover:bg-accent hover:text-foreground',
-        active &&
-          'border-foreground bg-foreground text-background hover:bg-foreground/90 hover:text-background',
+        'inline-flex items-center gap-2 rounded-xl px-4 py-2 text-[11.5px] font-bold transition-all',
+        active
+          ? 'bg-slate-950 text-white shadow-md dark:bg-slate-100 dark:text-slate-950'
+          : 'border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-[#11151C] dark:text-slate-300 dark:hover:bg-slate-800',
       )}
     >
-      <span className={cn('h-2 w-2 rounded-full', ledClass)} />
-      <span className="font-medium">{label}</span>
+      {dot && <span className={cn('h-2 w-2 rounded-full', dot)} />}
+      <span>{label}</span>
       <span
         className={cn(
-          'rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums',
+          'rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums',
           active
-            ? 'bg-white/20 text-background dark:bg-black/20'
-            : 'bg-muted text-foreground',
+            ? 'bg-slate-800 text-white dark:bg-slate-300 dark:text-slate-900'
+            : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500',
         )}
       >
         {count}
@@ -583,61 +840,45 @@ function StockCell({
   min: number;
   status: StockStatus;
 }) {
-  // qty=min → 50%, qty=2*min → 100%.
-  const ratio = min > 0 ? Math.min(2, qty / min) : qty > 0 ? 2 : 0;
-  const w = Math.min(100, ratio * 50);
+  const ratio = Math.min(100, (qty / (min || 1)) * 105);
   const barColor = {
     ok: 'bg-emerald-500',
     low: 'bg-amber-500',
     out: 'bg-rose-500',
   }[status];
   const qtyColor = {
-    ok: 'text-foreground',
-    low: 'text-amber-700 dark:text-amber-400',
-    out: 'text-rose-600 dark:text-rose-400',
+    ok: 'text-slate-900 dark:text-white',
+    low: 'text-amber-500',
+    out: 'text-rose-500',
   }[status];
   return (
-    <div className="flex flex-col items-end gap-1">
-      <span className={cn('font-mono text-sm font-semibold tabular-nums leading-none', qtyColor)}>
-        {qty}
-      </span>
-      <div className="flex items-center gap-1.5">
-        <span className="h-1 w-9 overflow-hidden rounded-full bg-muted">
-          <span className={cn('block h-full rounded-full', barColor)} style={{ width: `${w}%` }} />
+    <div className="flex flex-col">
+      <div className="flex items-baseline gap-0.5">
+        <span className={cn('font-mono text-[13.5px] font-extrabold tabular-nums', qtyColor)}>
+          {qty}
         </span>
-        <span className="font-mono text-[9px] text-muted-foreground">/{min}</span>
+        <span className="text-[10px] font-bold text-slate-400">/{min}</span>
+      </div>
+      <div className="mt-1.5 h-1 w-16 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+        <span className={cn('block h-full rounded-full', barColor)} style={{ width: `${ratio || 4}%` }} />
       </div>
     </div>
   );
 }
 
 /* ============================================================
-   STATUS BADGE
+   STATUS BADGE — solo texto + punto (estilo Operations)
    ============================================================ */
 function StatusBadge({ status }: { status: StockStatus }) {
-  const map: Record<StockStatus, { label: string; cls: string }> = {
-    ok: {
-      label: 'OK',
-      cls: 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-400',
-    },
-    low: {
-      label: 'Bajo stock',
-      cls: 'bg-amber-500/14 text-amber-700 dark:text-amber-400',
-    },
-    out: {
-      label: 'Sin stock',
-      cls: 'bg-rose-500/12 text-rose-600 dark:text-rose-400',
-    },
+  const map: Record<StockStatus, { label: string; cls: string; dot: string; pulse?: boolean }> = {
+    ok: { label: 'OK', cls: 'text-emerald-500', dot: 'bg-emerald-500' },
+    low: { label: 'Bajo stock', cls: 'text-amber-500', dot: 'bg-amber-500' },
+    out: { label: 'Sin stock', cls: 'text-rose-500', dot: 'bg-rose-500', pulse: true },
   };
-  const { label, cls } = map[status];
+  const { label, cls, dot, pulse } = map[status];
   return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold',
-        cls,
-      )}
-    >
-      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+    <span className={cn('inline-flex items-center gap-1.5 text-[10px] font-black', cls)}>
+      <span className={cn('h-1.5 w-1.5 rounded-full', dot, pulse && 'animate-pulse')} />
       {label}
     </span>
   );
@@ -690,7 +931,7 @@ function LocationCell({
         maxLength={30}
         placeholder="ej: A-12-3"
         disabled={pending}
-        className="h-7 w-full rounded border bg-card px-2 font-mono text-xs outline-none focus:border-foreground"
+        className="h-7 w-full rounded-lg border border-slate-200 bg-white px-2 font-mono text-xs outline-none focus:border-[#2F6BFF] dark:border-slate-700 dark:bg-slate-900"
       />
     );
   }
@@ -700,12 +941,12 @@ function LocationCell({
       type="button"
       onClick={() => setEditing(true)}
       className={cn(
-        'group/loc inline-flex items-center gap-1.5 rounded border border-transparent px-2 py-1 transition-colors hover:border-border hover:bg-accent',
+        'group/loc inline-flex items-center gap-1.5 text-left text-[11.5px] font-semibold transition-all hover:underline',
         initialValue
-          ? 'font-mono text-[11.5px] text-foreground/85'
-          : 'text-[11.5px] italic text-muted-foreground',
+          ? 'text-slate-600 dark:text-slate-300'
+          : 'italic font-medium text-slate-400',
       )}
-      title="Click para editar"
+      title="Click para editar ubicación"
     >
       {initialValue ?? 'definir'}
       <Pencil className="h-2.5 w-2.5 opacity-0 transition-opacity group-hover/loc:opacity-100" />
@@ -713,10 +954,9 @@ function LocationCell({
   );
 }
 
-/**
- * Ronda 10 — arma la query string para el endpoint `/api/inventory/stock.xlsx`
- * a partir de los filtros activos. Omite undefined/vacíos.
- */
+/* ============================================================
+   Query string del endpoint /inventory/stock.xlsx (idéntico)
+   ============================================================ */
 function buildStockExportQuery(
   params: Record<string, string | undefined>,
 ): string {

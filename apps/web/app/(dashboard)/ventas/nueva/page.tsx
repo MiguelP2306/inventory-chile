@@ -6,11 +6,12 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMemo } from 'react';
 import { toast } from 'sonner';
-import { SaleForm } from '@/components/forms/sale-form';
+import { SaleForm, type SaleBagItem } from '@/components/forms/sale-form';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { createDispatchNote } from '@/lib/dispatch-api';
 import { getQuotation } from '@/lib/quotations-api';
+import { clearProductBag, useProductBag } from '@/lib/use-product-bag';
 
 /**
  * Pantalla "Nueva venta" navegada por URL.
@@ -26,10 +27,23 @@ export default function NuevaVentaPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const fromQuotationId = searchParams.get('fromQuotation');
+  const fromBag = searchParams.get('fromBag') === '1';
   // Ronda 9 — si llega `generateDispatch=1`, después de crear la venta se
   // dispara la creación automática de una guía con datos mínimos (sin
   // dirección custom — el operador puede editarla desde /guias/[id]).
   const generateDispatch = searchParams.get('generateDispatch') === '1';
+
+  const bag = useProductBag();
+  const bagPrefill: SaleBagItem[] | undefined =
+    fromBag && bag.items.length > 0
+      ? bag.items.map((it) => ({
+          productId: it.productId,
+          sku: it.sku,
+          name: it.name,
+          qty: it.qty,
+          unitPrice: it.unitPrice,
+        }))
+      : undefined;
 
   const dispatchMut = useMutation({
     mutationFn: (saleId: string) => createDispatchNote({ saleId }),
@@ -123,7 +137,10 @@ export default function NuevaVentaPage() {
 
       <SaleForm
         prefillFromQuotation={prefill}
+        initialBagItems={bagPrefill}
         onSuccess={(sale) => {
+          // Si la venta arrancó desde el bolso, limpiamos al guardar OK.
+          if (fromBag) clearProductBag();
           // Ronda 9 — flujo "convertir y generar guía". Tras confirmar la
           // venta, generamos la guía con datos mínimos y redirigimos a su
           // detalle. Si falla la guía, el toast lo indica y queda la venta

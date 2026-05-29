@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { Resend } from 'resend';
 
-const DEFAULT_FROM = 'cotizaciones@onresend.dev';
+const DEFAULT_FROM = 'onboarding@resend.dev';
 
 export interface EmailAttachment {
   filename: string;

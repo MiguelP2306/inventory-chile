@@ -68,7 +68,6 @@ export class ProductsService {
           OR p.partNumber LIKE :q
           OR p.barcode LIKE :q
           OR p.name LIKE :q
-          OR p.universalCode LIKE :q
           OR EXISTS (
             SELECT 1 FROM product_codes pc
             WHERE pc.productId = p.id AND pc.code LIKE :q
@@ -96,7 +95,31 @@ export class ProductsService {
 
     const [items, total] = await qb.getManyAndCount();
     const itemsWithCover = await this.attachCoverImages(items);
-    return { items: itemsWithCover, total, page, pageSize };
+    const itemsWithStock = await this.attachCurrentStock(itemsWithCover);
+    return { items: itemsWithStock, total, page, pageSize };
+  }
+
+  /**
+   * Anota `currentStock` (suma de todas las bodegas) a cada producto del
+   * listado en una sola query. Permite que la UI muestre el stock actual
+   * sin pedir /inventory/stock por separado.
+   */
+  private async attachCurrentStock<T extends { id: string }>(
+    items: T[],
+  ): Promise<Array<T & { currentStock: number }>> {
+    if (items.length === 0) return [];
+    const ids = items.map((i) => i.id);
+    const rows: Array<{ productId: string; total: string }> =
+      await this.dataSource
+        .createQueryBuilder()
+        .select('s.productId', 'productId')
+        .addSelect('SUM(s.quantity)', 'total')
+        .from('stocks', 's')
+        .where('s.productId IN (:...ids)', { ids })
+        .groupBy('s.productId')
+        .getRawMany();
+    const map = new Map(rows.map((r) => [r.productId, Number(r.total)]));
+    return items.map((i) => ({ ...i, currentStock: map.get(i.id) ?? 0 }));
   }
 
   async getOne(id: string) {
@@ -118,12 +141,15 @@ export class ProductsService {
       this.codes.find({ where: { productId: id }, order: { code: 'ASC' } }),
     ]);
     const coverUrl = images.find((i) => i.isCover)?.url ?? images[0]?.url ?? null;
+    const stocks = (await this.stockByProduct([id])).get(id) ?? [];
+    const currentStock = stocks.reduce((acc, s) => acc + s.qty, 0);
     return {
       ...product,
       fitments,
       images,
       compatibleCodes: codes.filter((c) => c.kind === ProductCodeKind.COMPATIBLE).map((c) => c.code),
       coverUrl,
+      currentStock,
     };
   }
 
@@ -306,8 +332,8 @@ export class ProductsService {
   /**
    * Fase 11 — lookup EXACTO por código, optimizado para escaneo (USB o cámara).
    * A diferencia de `quickSearch` (LIKE %q%, devuelve N resultados), acá
-   * comparamos por igualdad estricta contra los 5 códigos que un scanner
-   * puede leer (`barcode`, `sku`, `partNumber`, `universalCode` y los
+   * comparamos por igualdad estricta contra los 4 códigos que un scanner
+   * puede leer (`barcode`, `sku`, `partNumber` y los
    * `product_codes.code` compatibles). Devuelve el primer match con sus
    * datos enriquecidos, o `null`.
    *
@@ -330,7 +356,6 @@ export class ProductsService {
           p.sku = :code
           OR p.partNumber = :code
           OR p.barcode = :code
-          OR p.universalCode = :code
           OR EXISTS (
             SELECT 1 FROM product_codes pc
             WHERE pc.productId = p.id AND pc.code = :code
@@ -358,7 +383,6 @@ export class ProductsService {
           OR p.partNumber LIKE :q
           OR p.barcode LIKE :q
           OR p.name LIKE :q
-          OR p.universalCode LIKE :q
           OR EXISTS (
             SELECT 1 FROM product_codes pc
             WHERE pc.productId = p.id AND pc.code LIKE :q
@@ -415,10 +439,8 @@ export class ProductsService {
     if (dto.cost !== undefined) fields.cost = dto.cost;
     if (dto.price !== undefined) fields.price = dto.price;
     if (dto.minStock !== undefined) fields.minStock = dto.minStock;
-    if (dto.maxStock !== undefined) fields.maxStock = dto.maxStock ?? null;
     if (dto.location !== undefined) fields.location = dto.location ?? null;
     if (dto.isActive !== undefined) fields.isActive = dto.isActive;
-    if (dto.universalCode !== undefined) fields.universalCode = dto.universalCode ?? null;
     if (dto.productKind !== undefined) fields.productKind = dto.productKind;
     return fields;
   }
@@ -530,7 +552,6 @@ export class ProductsService {
           OR p.partNumber LIKE :q
           OR p.barcode LIKE :q
           OR p.name LIKE :q
-          OR p.universalCode LIKE :q
         )`,
         { q: `%${query.q}%` },
       );
@@ -578,6 +599,95 @@ export class ProductsService {
       .getMany();
     for (const c of covers) {
       map.set(c.productId, c.url);
+    }
+    return map;
+  }
+
+  /**
+   * Devuelve, por producto, la lista de bodegas en las que tiene stock con
+   * su cantidad. Se usa para anotar `currentStock` (suma) en /products y
+   * para el export XLSX. Una sola query con join contra `warehouses`.
+   */
+  async stockByProduct(
+    productIds: string[],
+  ): Promise<
+    Map<string, { warehouseId: string; warehouseName: string; qty: number }[]>
+  > {
+    const map = new Map<
+      string,
+      { warehouseId: string; warehouseName: string; qty: number }[]
+    >();
+    if (productIds.length === 0) return map;
+    const rows: Array<{
+      productId: string;
+      warehouseId: string;
+      warehouseName: string;
+      qty: number;
+    }> = await this.dataSource
+      .createQueryBuilder()
+      .select('s.productId', 'productId')
+      .addSelect('s.warehouseId', 'warehouseId')
+      .addSelect('w.name', 'warehouseName')
+      .addSelect('s.quantity', 'qty')
+      .from('stocks', 's')
+      .innerJoin('warehouses', 'w', 'w.id = s.warehouseId')
+      .where('s.productId IN (:...ids)', { ids: productIds })
+      .getRawMany();
+    for (const r of rows) {
+      const arr = map.get(r.productId) ?? [];
+      arr.push({
+        warehouseId: r.warehouseId,
+        warehouseName: r.warehouseName,
+        qty: Number(r.qty),
+      });
+      map.set(r.productId, arr);
+    }
+    return map;
+  }
+
+  /**
+   * Devuelve, por producto, una cadena con sus modelos compatibles en el
+   * formato del importer: "Marca:Modelo:AñoFrom-AñoTo; ...". Se usa solo
+   * para el export XLSX (que el archivo importado de vuelta sea idempotente).
+   */
+  async compatibleModelsByProduct(
+    productIds: string[],
+  ): Promise<Map<string, string>> {
+    const map = new Map<string, string>();
+    if (productIds.length === 0) return map;
+    const rows: Array<{
+      productId: string;
+      makeName: string;
+      modelName: string;
+      yearFrom: number | null;
+      yearTo: number | null;
+    }> = await this.dataSource
+      .createQueryBuilder()
+      .select('f.productId', 'productId')
+      .addSelect('mk.name', 'makeName')
+      .addSelect('m.name', 'modelName')
+      .addSelect('f.yearFrom', 'yearFrom')
+      .addSelect('f.yearTo', 'yearTo')
+      .from('vehicle_fitments', 'f')
+      .innerJoin('vehicle_models', 'm', 'm.id = f.modelId')
+      .innerJoin('vehicle_makes', 'mk', 'mk.id = m.makeId')
+      .where('f.productId IN (:...ids)', { ids: productIds })
+      .orderBy('mk.name', 'ASC')
+      .addOrderBy('m.name', 'ASC')
+      .getRawMany();
+    const groups = new Map<string, string[]>();
+    for (const r of rows) {
+      const parts = [r.makeName, r.modelName];
+      if (r.yearFrom != null || r.yearTo != null) {
+        parts.push(`${r.yearFrom ?? ''}-${r.yearTo ?? ''}`);
+      }
+      const token = parts.join(':');
+      const arr = groups.get(r.productId) ?? [];
+      arr.push(token);
+      groups.set(r.productId, arr);
+    }
+    for (const [pid, tokens] of groups) {
+      map.set(pid, tokens.join('; '));
     }
     return map;
   }

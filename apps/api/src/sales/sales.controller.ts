@@ -9,8 +9,14 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { Permission } from '@inventory/shared';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/types';
+import {
+  redactSaleBreakdown,
+  redactSaleBreakdownList,
+  viewerHas,
+} from '../common/redact';
 import {
   fetchAllPages,
   MONEY_FMT,
@@ -50,8 +56,15 @@ export class SalesController {
   ) {}
 
   @Get()
-  list(@Query() query: ListSalesQueryDto) {
-    return this.svc.list(query);
+  async list(
+    @CurrentUser() viewer: JwtPayload,
+    @Query() query: ListSalesQueryDto,
+  ) {
+    const result = await this.svc.list(query);
+    return {
+      ...result,
+      items: redactSaleBreakdownList(result.items, viewer),
+    };
   }
 
   /**
@@ -60,9 +73,14 @@ export class SalesController {
    */
   @Get('export.xlsx')
   async exportXlsx(
+    @CurrentUser() viewer: JwtPayload,
     @Query() query: ListSalesQueryDto,
     @Res() res: Response,
   ) {
+    const canSeeBreakdown = viewerHas(
+      viewer,
+      Permission.SALE_VIEW_FINANCIAL_BREAKDOWN,
+    );
     const items = await fetchAllPages((page, pageSize) =>
       this.svc.list({ ...query, page, pageSize }),
     );
@@ -80,11 +98,35 @@ export class SalesController {
       { header: 'Cliente', key: 'customer', width: 30 },
       { header: 'RUT', key: 'taxId', width: 14 },
       { header: 'Bodega', key: 'warehouse', width: 18 },
-      { header: 'Método pago', key: 'paymentMethod', width: 16 },
+      // Columnas de desglose financiero solo para usuarios con permiso.
+      ...(canSeeBreakdown
+        ? [
+            { header: 'Método pago', key: 'paymentMethod', width: 16 },
+          ]
+        : []),
       { header: 'Items', key: 'itemsCount', width: 8 },
-      { header: 'Subtotal', key: 'subtotal', width: 14, style: { numFmt: MONEY_FMT } },
-      { header: 'IVA', key: 'taxAmount', width: 14, style: { numFmt: MONEY_FMT } },
-      { header: 'Comisión', key: 'commissionAmount', width: 14, style: { numFmt: MONEY_FMT } },
+      ...(canSeeBreakdown
+        ? [
+            {
+              header: 'Subtotal',
+              key: 'subtotal',
+              width: 14,
+              style: { numFmt: MONEY_FMT },
+            },
+            {
+              header: 'IVA',
+              key: 'taxAmount',
+              width: 14,
+              style: { numFmt: MONEY_FMT },
+            },
+            {
+              header: 'Comisión',
+              key: 'commissionAmount',
+              width: 14,
+              style: { numFmt: MONEY_FMT },
+            },
+          ]
+        : []),
       { header: 'Total', key: 'total', width: 14, style: { numFmt: MONEY_FMT } },
       { header: 'Cotización origen', key: 'quotation', width: 18 },
       { header: 'Vendedor', key: 'user', width: 22 },
@@ -100,11 +142,17 @@ export class SalesController {
         customer: s.customer?.name ?? '',
         taxId: s.customer?.taxId ?? '',
         warehouse: s.warehouse?.name ?? '',
-        paymentMethod: PAYMENT_METHOD_LABEL[s.paymentMethod] ?? s.paymentMethod,
+        ...(canSeeBreakdown
+          ? {
+              paymentMethod: s.paymentMethod
+                ? PAYMENT_METHOD_LABEL[s.paymentMethod] ?? s.paymentMethod
+                : '',
+              subtotal: Number(s.subtotal ?? 0) || 0,
+              taxAmount: Number(s.taxAmount ?? 0) || 0,
+              commissionAmount: Number(s.commissionAmount ?? 0) || 0,
+            }
+          : {}),
         itemsCount: s.items?.length ?? 0,
-        subtotal: Number(s.subtotal) || 0,
-        taxAmount: Number(s.taxAmount) || 0,
-        commissionAmount: Number(s.commissionAmount) || 0,
         total: Number(s.total) || 0,
         quotation: s.quotation?.number ?? '',
         user: s.user?.name ?? '',
@@ -143,8 +191,12 @@ export class SalesController {
   }
 
   @Get(':id')
-  getOne(@Param('id', new ParseUUIDPipe()) id: string) {
-    return this.svc.getOne(id);
+  async getOne(
+    @CurrentUser() viewer: JwtPayload,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    const sale = await this.svc.getOne(id);
+    return redactSaleBreakdown(sale, viewer);
   }
 
   @Post()
@@ -163,11 +215,13 @@ export class SalesController {
 
   @Get(':id/pdf')
   async getPdf(
+    @CurrentUser() viewer: JwtPayload,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Query() query: GeneratePdfQueryDto,
     @Res() res: Response,
   ) {
-    const sale = await this.svc.getOne(id);
+    const rawSale = await this.svc.getOne(id);
+    const sale = redactSaleBreakdown(rawSale, viewer);
     const settings = await this.svc.getSettings();
     const buffer = await this.pdf.generate(
       this.pdf.fromSaleDto(sale, settings),

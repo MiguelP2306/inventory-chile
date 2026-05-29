@@ -760,7 +760,6 @@ export class SalesService {
                 sku: it.product.sku,
                 name: it.product.name,
                 partNumber: it.product.partNumber,
-                universalCode: it.product.universalCode ?? null,
               }
             : undefined,
         }),

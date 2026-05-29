@@ -170,7 +170,9 @@ export function ProductPicker({ onPick, buttonLabel = 'Agregar producto' }: Prop
                     </div>
                   </div>
                   <div className="text-right text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-                    <div>Costo {formatCurrency(p.cost)}</div>
+                    {p.cost != null && (
+                      <div>Costo {formatCurrency(p.cost)}</div>
+                    )}
                     <div>Precio {formatCurrency(p.price)}</div>
                   </div>
                 </button>

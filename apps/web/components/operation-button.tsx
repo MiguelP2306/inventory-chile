@@ -38,9 +38,10 @@ export function OperationButton() {
         onClick={() => setChooserOpen(true)}
         aria-label="Nueva operación"
         title="Nueva operación"
+        className='bg-[#2F6BFF] hover:bg-[#2F6BFF]/90'
       >
-        <Plus className="h-4 w-4" />
-        <span className="hidden sm:inline">Nuevo</span>
+        <Plus className="h-4 w-4" color="#fff" />
+        <span className="hidden sm:inline text-white">Nuevo</span>
       </Button>
 
       <OperationModal

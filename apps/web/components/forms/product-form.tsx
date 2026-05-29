@@ -23,6 +23,7 @@ import {
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { ProductImageLightbox } from '@/components/product-image-lightbox';
 import {
   Controller,
   useFieldArray,
@@ -67,6 +68,7 @@ import {
   uploadProductImage,
   type ProductInput,
 } from '@/lib/catalog-api';
+import { Permission, useCan } from '@/lib/current-user-context';
 import { formatCurrency } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { ProductDto, ProductKindDto } from '@inventory/shared';
@@ -106,7 +108,6 @@ const schema = z
     name: z.string().min(1, 'Nombre obligatorio').max(200),
     partNumber: z.string().min(1, 'Número de parte obligatorio').max(80),
     barcode: z.string().max(80).optional().or(z.literal('')),
-    universalCode: z.string().max(80).optional().or(z.literal('')),
     productKind: z.enum(['ORIGINAL', 'ALTERNATIVE']),
     description: z.string().optional().or(z.literal('')),
     categoryId: z.string().optional(),
@@ -122,7 +123,6 @@ const schema = z
       .optional()
       .or(z.literal('')),
     minStock: z.coerce.number().int().min(0).optional(),
-    maxStock: z.coerce.number().int().min(0).optional().nullable(),
     location: z.string().max(120).optional().or(z.literal('')),
     isActive: z.boolean().optional(),
     fitments: z.array(fitmentSchema).optional(),
@@ -204,6 +204,9 @@ export function ProductForm({ product }: Props) {
   // Solo se usa en modo "nuevo": archivos cargados antes de que exista el productId.
   const [pendingImages, setPendingImages] = useState<File[]>([]);
   const [activeTab, setActiveTab] = useState<TabKey>('datos');
+  // USER (vendedor) no ve costos ni margen. Defense in depth: el backend
+  // también filtra esos campos, así que para USER `product.cost` llega null.
+  const canSeeCost = useCan(Permission.PRODUCT_VIEW_COST);
 
   const categories = useQuery({
     queryKey: ['categories'],
@@ -223,7 +226,6 @@ export function ProductForm({ product }: Props) {
       name: product?.name ?? '',
       partNumber: product?.partNumber ?? '',
       barcode: product?.barcode ?? '',
-      universalCode: product?.universalCode ?? '',
       productKind: (product?.productKind as ProductKindDto) ?? 'ORIGINAL',
       description: product?.description ?? '',
       categoryId: product?.categoryId ?? NULL_OPTION,
@@ -231,7 +233,6 @@ export function ProductForm({ product }: Props) {
       cost: product?.cost ?? '',
       price: product?.price ?? '',
       minStock: product?.minStock ?? 0,
-      maxStock: product?.maxStock ?? null,
       location: product?.location ?? '',
       isActive: product?.isActive ?? true,
       fitments:
@@ -327,16 +328,16 @@ export function ProductForm({ product }: Props) {
       name: values.name,
       partNumber: values.partNumber,
       barcode: values.barcode || null,
-      universalCode: values.universalCode || null,
       productKind: values.productKind,
       description: values.description || null,
       categoryId:
         values.categoryId === NULL_OPTION ? null : (values.categoryId ?? null),
       brandId: values.brandId === NULL_OPTION ? null : (values.brandId ?? null),
-      cost: values.cost || '0',
+      // Solo enviamos cost si el viewer tiene permiso. Si lo omitimos, el
+      // backend hace skip del campo (no lo sobrescribe en update).
+      ...(canSeeCost ? { cost: values.cost || '0' } : {}),
       price: values.price || '0',
       minStock: values.minStock ?? 0,
-      maxStock: values.maxStock ?? null,
       location: values.location || null,
       isActive: values.isActive ?? true,
       fitments: values.fitments?.map((f) => ({
@@ -362,7 +363,6 @@ export function ProductForm({ product }: Props) {
       'name',
       'partNumber',
       'barcode',
-      'universalCode',
       'productKind',
       'categoryId',
       'brandId',
@@ -374,7 +374,6 @@ export function ProductForm({ product }: Props) {
       'cost',
       'price',
       'minStock',
-      'maxStock',
     ]),
     compat: countArrayErrors(errors.fitments),
     codigos: countArrayErrors(errors.compatibleCodes),
@@ -590,16 +589,6 @@ export function ProductForm({ product }: Props) {
                   />
                 </Field>
                 <Field
-                  label="Código universal"
-                  optional
-                  error={errors.universalCode?.message}
-                >
-                  <Input
-                    {...form.register('universalCode')}
-                    placeholder="ej: 7891234567890"
-                  />
-                </Field>
-                <Field
                   label="Tipo (origen)"
                   required
                   error={errors.productKind?.message}
@@ -745,7 +734,12 @@ export function ProductForm({ product }: Props) {
                 title="Precios y stock"
                 description="El precio de venta se muestra en cotizaciones y al cliente. El stock mínimo dispara la alerta de reposición en el dashboard."
               />
-              <PriciosSection form={form} errors={errors} />
+              <PriciosSection
+                form={form}
+                errors={errors}
+                currentStock={product?.currentStock}
+                canSeeCost={canSeeCost}
+              />
             </TabsContent>
 
             {/* COMPATIBILIDAD */}
@@ -1005,6 +999,7 @@ export function ProductForm({ product }: Props) {
               imageCount={imageCount}
               fitmentsCount={fitments.fields.length}
               codesCount={codes.fields.length}
+              canSeeCost={canSeeCost}
             />
             <aside className="rounded-xl border border-dashed p-4">
               <h4 className="mb-2.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -1310,40 +1305,47 @@ function ToggleField({
 function PriciosSection({
   form,
   errors,
+  currentStock,
+  canSeeCost,
 }: {
   form: UseFormReturn<FormValues>;
   errors: FieldErrors<FormValues>;
+  currentStock?: number;
+  canSeeCost: boolean;
 }) {
   // Margen calculado en tiempo real (cost vs price)
   const cost = useWatch({ control: form.control, name: 'cost' });
   const price = useWatch({ control: form.control, name: 'price' });
   const margin = useMemo(() => {
+    if (!canSeeCost) return null;
     const c = Number(cost || 0);
     const p = Number(price || 0);
     if (!c || !p) return null;
     return Math.round(((p - c) / p) * 100);
-  }, [cost, price]);
+  }, [cost, price, canSeeCost]);
 
   return (
     <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
-      <Field
-        label="Costo unitario"
-        optional="CLP"
-        error={errors.cost?.message}
-        hint="Costo neto al que se importa la unidad."
-      >
-        <div className="relative">
-          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-mono text-sm text-muted-foreground">
-            $
-          </span>
-          <Input
-            {...form.register('cost')}
-            placeholder="0.00"
-            inputMode="decimal"
-            className="pl-7"
-          />
-        </div>
-      </Field>
+      {canSeeCost && (
+        <Field
+          label="Costo unitario"
+          optional="CLP"
+          error={errors.cost?.message}
+          hint="Costo neto al que se importa la unidad."
+        >
+          <div className="relative">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-mono text-sm text-muted-foreground">
+              $
+            </span>
+            <Input
+              {...form.register('cost')}
+              placeholder="0.00"
+              inputMode="decimal"
+              className="pl-7"
+            />
+          </div>
+        </Field>
+      )}
       <Field
         label="Precio de venta"
         required
@@ -1391,17 +1393,15 @@ function PriciosSection({
         />
       </Field>
       <Field
-        label="Stock máximo"
-        optional
-        error={errors.maxStock?.message}
-        hint="Tope sugerido para órdenes de compra."
+        label="Stock actual"
+        hint="Suma de todas las bodegas. Para ajustar, usá /inventario."
       >
-        <Input
-          type="number"
-          min={0}
-          {...form.register('maxStock')}
-          placeholder="—"
-        />
+        <div className="flex h-10 items-center rounded-md border border-input bg-muted/40 px-3 font-mono text-sm font-semibold">
+          {currentStock ?? '—'}
+          <span className="ml-1 text-xs font-normal text-muted-foreground">
+            un.
+          </span>
+        </div>
       </Field>
     </div>
   );
@@ -1523,6 +1523,7 @@ function PreviewCard({
   imageCount,
   fitmentsCount,
   codesCount,
+  canSeeCost,
 }: {
   control: Control<FormValues>;
   product?: ProductDto;
@@ -1530,6 +1531,7 @@ function PreviewCard({
   imageCount: number;
   fitmentsCount: number;
   codesCount: number;
+  canSeeCost: boolean;
 }) {
   const w = useWatch({ control });
   const name = w.name || (product?.name ?? '');
@@ -1542,7 +1544,7 @@ function PreviewCard({
   const costN = Number(w.cost || 0);
   const priceN = Number(w.price || 0);
   const margin =
-    costN > 0 && priceN > 0
+    canSeeCost && costN > 0 && priceN > 0
       ? Math.round(((priceN - costN) / priceN) * 100)
       : null;
 
@@ -1555,6 +1557,19 @@ function PreviewCard({
     return null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingImages, product?.coverUrl]);
+
+  // Lista de imágenes para el lightbox: prioriza las del producto guardadas;
+  // si está en modo "nuevo", cae a los archivos en memoria.
+  const lightboxImages = useMemo(() => {
+    if (product?.images?.length) {
+      return product.images
+        .map((i) => publicImageUrl(i.url) ?? '')
+        .filter(Boolean);
+    }
+    return pendingImages.map((f) => URL.createObjectURL(f));
+  }, [product?.images, pendingImages]);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const canOpenLightbox = lightboxImages.length > 0;
 
   return (
     <div className="overflow-hidden rounded-xl border bg-card shadow-md">
@@ -1570,7 +1585,16 @@ function PreviewCard({
       </div>
 
       {/* cover */}
-      <div className="relative aspect-[4/3] overflow-hidden">
+      <button
+        type="button"
+        onClick={() => canOpenLightbox && setLightboxOpen(true)}
+        aria-label={canOpenLightbox ? 'Ver imagen ampliada' : undefined}
+        className={cn(
+          'relative block aspect-[4/3] w-full overflow-hidden',
+          canOpenLightbox && 'cursor-zoom-in',
+        )}
+        disabled={!canOpenLightbox}
+      >
         {previewUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -1609,7 +1633,13 @@ function PreviewCard({
           <ImageIcon className="h-3 w-3" />
           {imageCount}
         </span>
-      </div>
+      </button>
+
+      <ProductImageLightbox
+        open={lightboxOpen}
+        onOpenChange={setLightboxOpen}
+        images={lightboxImages}
+      />
 
       {/* body */}
       <div className="px-4 py-4">
@@ -1644,7 +1674,9 @@ function PreviewCard({
             )}
           </div>
           <div className="text-right text-[11px] text-muted-foreground tabular-nums">
-            <div>costo {costN > 0 ? formatCurrency(String(costN)) : '$ 0,00'}</div>
+            {canSeeCost && (
+              <div>costo {costN > 0 ? formatCurrency(String(costN)) : '$ 0,00'}</div>
+            )}
             {margin != null && (
               <div className="mt-0.5 font-semibold text-emerald-600 dark:text-emerald-400">
                 +{margin}% margen
@@ -1655,6 +1687,11 @@ function PreviewCard({
 
         {/* metadata grid */}
         <div className="mt-4 grid grid-cols-2 gap-x-3 gap-y-3 border-t pt-3.5">
+          <MetaRow
+            k="Stock actual"
+            v={`${product?.currentStock ?? '—'} un.`}
+            muted={product?.currentStock == null}
+          />
           <MetaRow k="Stock mín." v={String(minStock ?? 0)} />
           <MetaRow k="Ubicación" v={location || '—'} muted={!location} />
           <MetaRow

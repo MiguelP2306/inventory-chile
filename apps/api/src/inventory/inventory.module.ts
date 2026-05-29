@@ -6,6 +6,7 @@ import {
   DispatchNote,
   InventoryMovement,
   Product,
+  ProductImage,
   PurchaseEntry,
   PurchaseEntryItem,
   PurchaseInvoice,
@@ -27,6 +28,7 @@ import { InventoryService } from './inventory.service';
   imports: [
     TypeOrmModule.forFeature([
       Product,
+      ProductImage,
       Warehouse,
       Stock,
       InventoryMovement,

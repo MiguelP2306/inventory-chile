@@ -150,8 +150,8 @@ export const getProduct = (id: string) =>
 
 /**
  * Fase 11 — lookup EXACTO por código (scanner USB o cámara). Devuelve el
- * producto si hay match exacto contra `sku`, `partNumber`, `barcode`,
- * `universalCode` o `product_codes.code`. Devuelve `null` si no hay match
+ * producto si hay match exacto contra `sku`, `partNumber`, `barcode` o
+ * `product_codes.code`. Devuelve `null` si no hay match
  * (404 atrapado para que el caller decida UX — toast "código no reconocido"
  * o fallback a quickSearch).
  */
@@ -196,11 +196,9 @@ export interface ProductInput {
   cost?: string;
   price?: string;
   minStock?: number;
-  maxStock?: number | null;
   location?: string | null;
   isActive?: boolean;
   // Fase 4B
-  universalCode?: string | null;
   productKind?: ProductKindDto;
   fitments?: FitmentInput[];
   compatibleCodes?: string[];

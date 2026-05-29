@@ -129,7 +129,7 @@ export function CustomerReturnForm({ sale, onSuccess, onCancel }: Props) {
   const [reason, setReason] = useState('');
   const [notes, setNotes] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethodDto>(
-    sale.paymentMethod,
+    sale.paymentMethod ?? 'CASH',
   );
 
   // Ronda 9 — modo de reembolso. CUSTOMER soporta MONEY o EXCHANGE (no CREDIT).

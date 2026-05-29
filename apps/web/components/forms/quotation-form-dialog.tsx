@@ -6,7 +6,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { QuotationForm } from '@/components/forms/quotation-form';
+import { QuotationForm, type QuotationBagItem } from '@/components/forms/quotation-form';
 import type { QuotationDto } from '@inventory/shared';
 
 interface Props {
@@ -14,6 +14,11 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   mode: 'create' | 'edit';
   initialData?: QuotationDto;
+  /**
+   * Items provenientes del bolso (localStorage) para prellenar el form en
+   * modo create. Tienen prioridad sobre `initialData?.items`.
+   */
+  initialBagItems?: QuotationBagItem[];
   onSaved?: (q: QuotationDto) => void;
 }
 
@@ -22,6 +27,7 @@ export function QuotationFormDialog({
   onOpenChange,
   mode,
   initialData,
+  initialBagItems,
   onSaved,
 }: Props) {
   return (
@@ -40,6 +46,7 @@ export function QuotationFormDialog({
           key={`${mode}:${initialData?.id ?? 'new'}:${open ? '1' : '0'}`}
           mode={mode}
           initialData={initialData}
+          initialBagItems={initialBagItems}
           embedded
           onSuccess={(saved) => {
             onSaved?.(saved);

@@ -7,6 +7,7 @@ import { User } from '../database/entities';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RolesGuard } from './guards/roles.guard';
 import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
@@ -21,7 +22,8 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     AuthService,
     JwtStrategy,
     JwtRefreshStrategy,
-    { provide: APP_GUARD, useClass: JwtAuthGuard }, // guard global
+    { provide: APP_GUARD, useClass: JwtAuthGuard }, // guard global (auth)
+    { provide: APP_GUARD, useClass: RolesGuard }, // guard global (roles)
   ],
   exports: [AuthService],
 })

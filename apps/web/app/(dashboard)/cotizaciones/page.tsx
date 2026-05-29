@@ -29,6 +29,7 @@ import {
 import { apiAbsoluteUrl } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
 import { listQuotations } from '@/lib/quotations-api';
+import { clearProductBag, useProductBag } from '@/lib/use-product-bag';
 import { useUrlFilters } from '@/lib/use-url-filters';
 import type { QuotationStatusDto } from '@inventory/shared';
 
@@ -90,13 +91,21 @@ export default function CotizacionesPage() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  // Si llegamos con ?fromBag=1, el modal se abre con los items del bolso ya
+  // cargados. Limpiamos el bolso solo cuando la cotización se guarda exitosamente.
+  const [bagPrefillActive, setBagPrefillActive] = useState(false);
+  const bag = useProductBag();
 
   // ?new=1 abre el modal automáticamente y limpia el query param.
   useEffect(() => {
     if (searchParams.get('new') === '1') {
       setDialogOpen(true);
+      if (searchParams.get('fromBag') === '1' && bag.items.length > 0) {
+        setBagPrefillActive(true);
+      }
       const next = new URLSearchParams(searchParams.toString());
       next.delete('new');
+      next.delete('fromBag');
       const qs = next.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname);
     }
@@ -321,10 +330,30 @@ export default function CotizacionesPage() {
 
       <QuotationFormDialog
         open={dialogOpen}
-        onOpenChange={setDialogOpen}
+        onOpenChange={(o) => {
+          setDialogOpen(o);
+          // Si el operador cierra el modal sin guardar, el bolso queda
+          // intacto y el prefill se descarta.
+          if (!o) setBagPrefillActive(false);
+        }}
         mode="create"
+        initialBagItems={
+          bagPrefillActive
+            ? bag.items.map((it) => ({
+                productId: it.productId,
+                sku: it.sku,
+                name: it.name,
+                qty: it.qty,
+                unitPrice: it.unitPrice,
+              }))
+            : undefined
+        }
         onSaved={() => {
           qc.invalidateQueries({ queryKey: ['quotations'] });
+          if (bagPrefillActive) {
+            clearProductBag();
+            setBagPrefillActive(false);
+          }
         }}
       />
     </div>

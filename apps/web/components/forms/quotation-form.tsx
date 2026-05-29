@@ -140,9 +140,23 @@ const schema = z
 
 type FormValues = z.infer<typeof schema>;
 
+export interface QuotationBagItem {
+  productId: string;
+  sku: string | null;
+  name: string;
+  qty: number;
+  unitPrice: string;
+}
+
 interface Props {
   mode: 'create' | 'edit';
   initialData?: QuotationDto;
+  /**
+   * Items provenientes del bolso (localStorage). Si vienen seteados en modo
+   * create, sobrescriben `initialData?.items` y se cargan como filas
+   * editables del cuerpo de la cotización.
+   */
+  initialBagItems?: QuotationBagItem[];
   onSuccess?: (q: QuotationDto) => void;
   onCancel?: () => void;
   /**
@@ -156,12 +170,26 @@ interface Props {
 export function QuotationForm({
   mode,
   initialData,
+  initialBagItems,
   onSuccess,
   onCancel,
   embedded = false,
 }: Props) {
   const qc = useQueryClient();
-  const [items, setItems] = useState<ItemRow[]>(() => itemsFromQuotation(initialData));
+  const [items, setItems] = useState<ItemRow[]>(() => {
+    if (initialBagItems && initialBagItems.length > 0) {
+      return initialBagItems.map((it) => ({
+        productId: it.productId,
+        sku: it.sku,
+        name: it.name,
+        qty: it.qty,
+        unitPrice: it.unitPrice,
+        discountKind: '$',
+        discountValue: '0',
+      }));
+    }
+    return itemsFromQuotation(initialData);
+  });
   // Ronda 10 — tabs simplificadas: la sección "Cliente" y la tabla de items
   // viven en la misma tab para que el flujo sea más rápido. La tab "Notas"
   // queda aparte. Cuando una validación apunta a "items" o "cliente", todo
@@ -1120,16 +1148,19 @@ function itemsFromQuotation(q?: QuotationDto): ItemRow[] {
   if (!q?.items) return [];
   return q.items.map((it) => {
     const hasPercent = it.discountPercent != null;
+    const isTemp = it.productId == null;
     return {
       productId: it.productId,
-      sku: it.product?.sku ?? '',
-      name: it.product?.name ?? '',
+      sku: isTemp ? it.tempProductSku ?? '' : it.product?.sku ?? '',
+      name: isTemp ? it.tempProductName ?? '' : it.product?.name ?? '',
       qty: it.qty,
       unitPrice: String(it.unitPrice),
       discountKind: hasPercent ? '%' : '$',
       discountValue: hasPercent
         ? String(it.discountPercent)
         : String(it.discount),
+      tempProductPartNumber: isTemp ? it.tempProductPartNumber : null,
+      isTemporary: isTemp,
     };
   });
 }

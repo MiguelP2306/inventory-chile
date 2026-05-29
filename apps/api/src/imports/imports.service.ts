@@ -4,6 +4,7 @@ import type {
   ProductImportPreviewDto,
   ProductImportResultDto,
   ProductImportRowDto,
+  VehicleModelImportInput,
 } from '@inventory/shared';
 import {
   BadRequestException,
@@ -12,7 +13,7 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { Workbook } from 'exceljs';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import {
   findHeaderRow,
   lastDataRow,
@@ -25,13 +26,19 @@ import {
   Category,
   Product,
   ProductCode,
+  Stock,
+  VehicleFitment,
+  VehicleMake,
+  VehicleModel,
+  Warehouse,
 } from '../database/entities';
+import { InventoryMovementType } from '@inventory/shared';
+import { InventoryService } from '../inventory/inventory.service';
 
 const COLUMNS = [
   'sku',
   'partNumber',
   'barcode',
-  'universalCode',
   'name',
   'description',
   'categoryName',
@@ -39,10 +46,12 @@ const COLUMNS = [
   'cost',
   'price',
   'minStock',
-  'maxStock',
   'location',
   'productKind',
   'compatibleCodes',
+  'vehicleModels',
+  'warehouseName',
+  'stockQuantity',
 ] as const;
 type Column = (typeof COLUMNS)[number];
 
@@ -50,7 +59,6 @@ const HEADERS: Record<Column, string> = {
   sku: 'SKU',
   partNumber: 'PartNumber',
   barcode: 'Codigo de barras',
-  universalCode: 'Codigo universal',
   name: 'Nombre',
   description: 'Descripcion',
   categoryName: 'Categoria',
@@ -58,25 +66,33 @@ const HEADERS: Record<Column, string> = {
   cost: 'Costo (bruto)',
   price: 'Precio (bruto)',
   minStock: 'Stock minimo',
-  maxStock: 'Stock maximo',
   location: 'Ubicacion (deprecated)',
   productKind: 'Tipo (ORIGINAL/ALTERNATIVE)',
   compatibleCodes: 'Codigos compatibles (separados por ;)',
+  vehicleModels: 'Modelo (Marca:Modelo:Año-Año, separados por ;)',
+  warehouseName: 'Bodega',
+  stockQuantity: 'Stock actual',
 };
 
 /**
- * Fase 10 — Importador masivo de productos vía Excel (.xlsx).
+ * Importador masivo de productos vía Excel (.xlsx).
  *
  * Flujo en 2 pasos:
  *
  *   1. POST /imports/products/preview → parsea + valida. Devuelve preview
  *      (primeras 10 filas válidas), conteos, lista de errores, y los nombres
- *      de categorías/marcas que se crearían si el operador confirma.
+ *      de categorías/marcas/marcas-de-vehículo/modelos que se crearían si el
+ *      operador confirma.
  *
  *   2. POST /imports/products/confirm → ejecuta la carga real. Estrategia:
  *      - UPSERT por SKU (si existe, actualiza; si no, crea).
  *      - Categorías/marcas faltantes se crean automáticamente.
- *      - Códigos compatibles se replazan (clear + insert) para cada producto.
+ *      - Marcas y modelos de vehículo faltantes se crean automáticamente.
+ *      - Fitments del producto se reemplazan por completo (clear + insert).
+ *      - Códigos compatibles se reemplazan por completo (clear + insert).
+ *      - Si la fila trae `Bodega` + `Stock actual`, el stock de esa bodega
+ *        se ESTABLECE al valor (delta vs stock actual) con un movimiento
+ *        ADJUSTMENT cuyo motivo es "Importación masiva".
  *      - Partial success: filas inválidas se reportan pero no abortan el batch.
  *
  * También expone GET /imports/products/template.xlsx con una plantilla
@@ -95,13 +111,23 @@ export class ImportsService {
     private readonly brands: Repository<Brand>,
     @InjectRepository(ProductCode)
     private readonly codes: Repository<ProductCode>,
+    @InjectRepository(Warehouse)
+    private readonly warehouses: Repository<Warehouse>,
+    @InjectRepository(Stock)
+    private readonly stocks: Repository<Stock>,
+    @InjectRepository(VehicleMake)
+    private readonly vehicleMakes: Repository<VehicleMake>,
+    @InjectRepository(VehicleModel)
+    private readonly vehicleModels: Repository<VehicleModel>,
+    @InjectRepository(VehicleFitment)
+    private readonly vehicleFitments: Repository<VehicleFitment>,
     @InjectDataSource() private readonly ds: DataSource,
+    private readonly inventory: InventoryService,
   ) {}
 
   async preview(buffer: Buffer): Promise<ProductImportPreviewDto> {
     const parsed = await this.parseExcel(buffer);
 
-    // Indexamos productos existentes por SKU para determinar create vs update.
     const skus = parsed.valid.map((r) => r.sku);
     const existing = skus.length
       ? await this.products.find({
@@ -111,7 +137,6 @@ export class ImportsService {
       : [];
     const existingMap = new Map(existing.map((p) => [p.sku, p.id]));
 
-    // Nombres únicos de categorías/marcas que aparecen en el Excel.
     const catNames = new Set<string>();
     const brandNames = new Set<string>();
     for (const r of parsed.valid) {
@@ -164,12 +189,9 @@ export class ImportsService {
     };
   }
 
-  async confirm(buffer: Buffer): Promise<ProductImportResultDto> {
+  async confirm(buffer: Buffer, userId: string): Promise<ProductImportResultDto> {
     const parsed = await this.parseExcel(buffer);
 
-    // Snapshot ANTES de procesar: qué SKUs ya existían. Necesario para
-    // discriminar create vs update — si el upsert los crea ahora, igual
-    // los contamos del lado correcto.
     const skus = parsed.valid.map((r) => r.sku);
     const existingProducts = skus.length
       ? await this.products.find({
@@ -179,7 +201,7 @@ export class ImportsService {
       : [];
     const existedBefore = new Set(existingProducts.map((p) => p.sku));
 
-    // Auto-create categorías/marcas faltantes (decisión de Fase 10).
+    // Auto-create categorías/marcas faltantes.
     const catNames = new Set<string>();
     const brandNames = new Set<string>();
     for (const r of parsed.valid) {
@@ -223,8 +245,6 @@ export class ImportsService {
       }
     });
 
-    // Upsert producto a producto con try/catch (partial success). El batch
-    // continúa aunque una fila falle; el error se reporta en la respuesta.
     const errors: ProductImportErrorDto[] = [...parsed.errors];
     let createdCount = 0;
     let updatedCount = 0;
@@ -232,7 +252,7 @@ export class ImportsService {
 
     for (const row of parsed.valid) {
       try {
-        await this.upsertProduct(row, catByName, brandByName);
+        await this.upsertProduct(row, catByName, brandByName, userId);
         if (existedBefore.has(row.sku)) {
           updatedCount += 1;
         } else {
@@ -273,14 +293,12 @@ export class ImportsService {
     wb.creator = 'Inventario';
     wb.created = new Date();
 
-    // Hoja 1: datos
     const sheet = wb.addWorksheet('Productos');
     sheet.columns = COLUMNS.map((col) => ({
       header: HEADERS[col],
       key: col,
       width: Math.max(HEADERS[col].length + 2, 16),
     }));
-    // Estilo del header
     const header = sheet.getRow(1);
     header.font = { bold: true };
     header.fill = {
@@ -288,12 +306,10 @@ export class ImportsService {
       pattern: 'solid',
       fgColor: { argb: 'FFE0E0E0' },
     };
-    // Fila de ejemplo
     sheet.addRow({
       sku: 'FIL-AC-001',
       partNumber: 'A12345',
       barcode: '7891234567890',
-      universalCode: 'UNI-001',
       name: 'Filtro de aire Toyota Corolla 2018',
       description: 'Filtro de aire para motor 1.8L',
       categoryName: 'Filtros',
@@ -301,25 +317,25 @@ export class ImportsService {
       cost: '8000',
       price: '15000',
       minStock: 5,
-      maxStock: 50,
       location: '',
       productKind: 'ORIGINAL',
       compatibleCodes: 'A12345; B67890; XYZ-001',
+      vehicleModels: 'Toyota:Corolla:2014-2019; Toyota:Yaris:2018-',
+      warehouseName: 'Principal',
+      stockQuantity: 20,
     });
 
-    // Hoja 2: instrucciones
     const inst = wb.addWorksheet('Instrucciones');
     inst.columns = [
-      { header: 'Columna', key: 'col', width: 30 },
+      { header: 'Columna', key: 'col', width: 32 },
       { header: 'Obligatoria', key: 'req', width: 12 },
-      { header: 'Descripcion', key: 'desc', width: 80 },
+      { header: 'Descripcion', key: 'desc', width: 90 },
     ];
     inst.getRow(1).font = { bold: true };
     const ROWS: Array<[Column, boolean, string]> = [
       ['sku', true, 'Codigo unico interno. Si ya existe en el sistema, se actualiza ese producto (upsert).'],
       ['partNumber', false, 'Codigo de pieza del fabricante. Indexado para busqueda.'],
       ['barcode', false, 'Codigo de barras del producto. Indexado para escanner.'],
-      ['universalCode', false, 'Codigo universal (Fase 4B). Distintos productos pueden compartirlo.'],
       ['name', true, 'Nombre comercial del producto.'],
       ['description', false, 'Descripcion larga (opcional).'],
       ['categoryName', false, 'Nombre de la categoria. Si no existe, se crea automaticamente.'],
@@ -327,10 +343,12 @@ export class ImportsService {
       ['cost', false, 'Costo unitario BRUTO en CLP (con IVA). Ej: 8000. Default 0.'],
       ['price', false, 'Precio venta BRUTO en CLP (con IVA). Ej: 15000. Default 0.'],
       ['minStock', false, 'Stock minimo. Entero >= 0. Default 0.'],
-      ['maxStock', false, 'Stock maximo. Entero >= 0. Vacio = sin limite.'],
       ['location', false, 'Deprecated desde Fase 7.5. Usar locationCode por bodega desde /inventario.'],
       ['productKind', false, 'ORIGINAL o ALTERNATIVE. Default ORIGINAL.'],
       ['compatibleCodes', false, 'Lista de codigos compatibles separados por punto y coma (;). Ej: "A123;B456;XYZ-789".'],
+      ['vehicleModels', false, 'Compatibilidad vehicular separada por ";". Cada item es "Marca:Modelo" o "Marca:Modelo:AnioFrom-AnioTo". Marcas/modelos faltantes se crean automaticamente. Ej: "Toyota:Corolla:2014-2019; Toyota:Yaris:2018-".'],
+      ['warehouseName', false, 'Nombre exacto de la bodega para asignar stock. Si no existe, la fila se rechaza (la bodega NO se crea sola). Vacio = no toca stock.'],
+      ['stockQuantity', false, 'Stock actual a ESTABLECER en la bodega indicada (registra un ADJUSTMENT con la diferencia). Requiere Bodega para tener efecto.'],
     ];
     for (const [col, req, desc] of ROWS) {
       inst.addRow({ col: HEADERS[col], req: req ? 'Si' : 'No', desc });
@@ -349,17 +367,12 @@ export class ImportsService {
   }> {
     const wb = new Workbook();
     try {
-      // ExcelJS espera `ArrayBuffer` aunque acepta Buffer en runtime. Casteamos
-      // explícitamente para conformar al tipo declarado por la librería.
       await wb.xlsx.load(buffer as unknown as ArrayBuffer);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'archivo invalido';
       throw new BadRequestException(`No se pudo leer el Excel: ${message}`);
     }
 
-    // Detectar la hoja de datos: priorizamos "Productos" (de la plantilla), si
-    // no existe usamos la primera hoja con contenido. La segunda hoja de la
-    // plantilla es "Instrucciones" y no debe parsearse como datos.
     const sheet =
       wb.getWorksheet('Productos') ??
       wb.worksheets.find((w) => w.rowCount > 0) ??
@@ -368,10 +381,6 @@ export class ImportsService {
       throw new BadRequestException('El Excel no tiene hojas.');
     }
 
-    // Buscar la fila de header: típicamente es la 1, pero algunos exporters
-    // (Google Sheets, Numbers, Looker Studio) insertan filas vacías arriba.
-    // Probamos hasta las primeras 5 filas y nos quedamos con la que tenga
-    // las columnas obligatorias "SKU" y "Nombre".
     const found = findHeaderRow(sheet, HEADERS, ['sku', 'name']);
     if (!found) {
       throw new BadRequestException(
@@ -383,8 +392,6 @@ export class ImportsService {
     const valid: Omit<ProductImportRowDto, 'action' | 'existingProductId'>[] = [];
     const errors: ProductImportErrorDto[] = [];
 
-    // Upper-bound robusto del último número de fila — ver `lastDataRow` para
-    // detalles del bug histórico con `actualRowCount`.
     const lastRowNumber = lastDataRow(sheet);
 
     let totalDataRows = 0;
@@ -400,10 +407,6 @@ export class ImportsService {
         return readCellText(row.getCell(idx));
       };
 
-      // Filas completamente vacías: las saltamos pero NO cortamos el loop —
-      // el operador puede tener una fila en blanco intercalada por accidente
-      // (ej. separador visual). Sólo cortamos si encontramos 50 filas vacías
-      // consecutivas, asumiendo que ya estamos pasando del final real.
       const isFullyEmpty = COLUMNS.every((col) => cellText(col) === '');
       if (isFullyEmpty) {
         consecutiveEmptyRows += 1;
@@ -450,8 +453,6 @@ export class ImportsService {
       }
       seenSkusInBatch.add(sku);
 
-      // Barcode duplicado en el mismo batch (la columna NO es única en DB pero
-      // duplicar dentro del mismo upload casi siempre es un copy/paste por error).
       const barcode = cellText('barcode');
       if (barcode !== '') {
         if (seenBarcodesInBatch.has(barcode)) {
@@ -465,17 +466,12 @@ export class ImportsService {
         seenBarcodesInBatch.add(barcode);
       }
 
-      // Numéricos — el helper devuelve `null` solo cuando el string es no-vacío
-      // pero no parseable. Empty string siempre devuelve `null` también, así
-      // que diferenciamos con el `raw`.
       const costRaw = cellText('cost');
       const priceRaw = cellText('price');
       const minStockRaw = cellText('minStock');
-      const maxStockRaw = cellText('maxStock');
       const cost = parseNumeric(costRaw);
       const price = parseNumeric(priceRaw);
       const minStock = parseInteger(minStockRaw);
-      const maxStock = maxStockRaw === '' ? null : parseInteger(maxStockRaw);
 
       if (cost === null && costRaw !== '') {
         errors.push({
@@ -501,14 +497,6 @@ export class ImportsService {
         });
         continue;
       }
-      if (maxStock === null && maxStockRaw !== '') {
-        errors.push({
-          rowNumber: r,
-          sku,
-          message: `Stock máximo no es entero válido: "${maxStockRaw}"`,
-        });
-        continue;
-      }
       if (cost !== null && cost < 0) {
         errors.push({ rowNumber: r, sku, message: 'Costo no puede ser negativo' });
         continue;
@@ -518,7 +506,6 @@ export class ImportsService {
         continue;
       }
 
-      // productKind
       const kindRaw = cellText('productKind').toUpperCase();
       let productKind: 'ORIGINAL' | 'ALTERNATIVE' | null = null;
       if (kindRaw === '' || kindRaw === 'ORIGINAL' || kindRaw === 'OEM') {
@@ -538,7 +525,6 @@ export class ImportsService {
         continue;
       }
 
-      // Códigos compatibles: lista separada por `;` o por `,`.
       const codesRaw = cellText('compatibleCodes');
       const compatibleCodes = codesRaw
         .split(/[;,]/)
@@ -553,8 +539,81 @@ export class ImportsService {
         });
         continue;
       }
-      // Códigos compatibles repetidos dentro de la misma fila → quedan únicos.
       const compatibleCodesUnique = Array.from(new Set(compatibleCodes));
+
+      // Modelos de vehículo compatibles: "Marca:Modelo[:AñoFrom-AñoTo]"
+      const modelsRaw = cellText('vehicleModels');
+      const vehicleModels: VehicleModelImportInput[] = [];
+      let modelsError: string | null = null;
+      if (modelsRaw !== '') {
+        for (const token of modelsRaw.split(';').map((t) => t.trim()).filter(Boolean)) {
+          const parts = token.split(':').map((p) => p.trim());
+          if (parts.length < 2 || parts.length > 3) {
+            modelsError = `Modelo "${token}" inválido. Esperado "Marca:Modelo" o "Marca:Modelo:Año-Año".`;
+            break;
+          }
+          const [makeName, modelName, yearRange] = parts;
+          if (!makeName || !modelName) {
+            modelsError = `Modelo "${token}" tiene Marca o Modelo vacío.`;
+            break;
+          }
+          let yearFrom: number | null = null;
+          let yearTo: number | null = null;
+          if (yearRange) {
+            const [fromStr, toStr] = yearRange.split('-').map((s) => s.trim());
+            if (fromStr) {
+              const n = Number(fromStr);
+              if (!Number.isInteger(n) || n < 1900 || n > 2100) {
+                modelsError = `Año "from" inválido en "${token}".`;
+                break;
+              }
+              yearFrom = n;
+            }
+            if (toStr) {
+              const n = Number(toStr);
+              if (!Number.isInteger(n) || n < 1900 || n > 2100) {
+                modelsError = `Año "to" inválido en "${token}".`;
+                break;
+              }
+              yearTo = n;
+            }
+            if (yearFrom != null && yearTo != null && yearFrom > yearTo) {
+              modelsError = `Año "from" > "to" en "${token}".`;
+              break;
+            }
+          }
+          vehicleModels.push({ makeName, modelName, yearFrom, yearTo });
+        }
+      }
+      if (modelsError) {
+        errors.push({ rowNumber: r, sku, message: modelsError });
+        continue;
+      }
+
+      // Bodega + stock
+      const warehouseNameRaw = cellText('warehouseName');
+      const stockQtyRaw = cellText('stockQuantity');
+      let stockQuantity: number | null = null;
+      if (stockQtyRaw !== '') {
+        const n = parseInteger(stockQtyRaw);
+        if (n === null || n < 0) {
+          errors.push({
+            rowNumber: r,
+            sku,
+            message: `Stock actual inválido: "${stockQtyRaw}" (debe ser entero ≥ 0)`,
+          });
+          continue;
+        }
+        stockQuantity = n;
+      }
+      if (stockQuantity !== null && warehouseNameRaw === '') {
+        errors.push({
+          rowNumber: r,
+          sku,
+          message: 'Se cargó "Stock actual" pero falta "Bodega"',
+        });
+        continue;
+      }
 
       valid.push({
         rowNumber: r,
@@ -562,17 +621,18 @@ export class ImportsService {
         name,
         partNumber: cellText('partNumber') || null,
         barcode: barcode || null,
-        universalCode: cellText('universalCode') || null,
         description: cellText('description') || null,
         categoryName: cellText('categoryName') || null,
         brandName: cellText('brandName') || null,
         cost: cost !== null ? cost.toFixed(2) : null,
         price: price !== null ? price.toFixed(2) : null,
         minStock,
-        maxStock,
         location: cellText('location') || null,
         productKind,
         compatibleCodes: compatibleCodesUnique,
+        vehicleModels,
+        warehouseName: warehouseNameRaw || null,
+        stockQuantity,
       });
     }
 
@@ -583,11 +643,27 @@ export class ImportsService {
     row: Omit<ProductImportRowDto, 'action' | 'existingProductId'>,
     catByName: Map<string, string>,
     brandByName: Map<string, string>,
+    userId: string,
   ): Promise<void> {
     const categoryId = row.categoryName ? catByName.get(row.categoryName) ?? null : null;
     const brandId = row.brandName ? brandByName.get(row.brandName) ?? null : null;
 
-    await this.ds.transaction(async (manager) => {
+    // Resolver bodega ANTES de empezar la transacción para fallar temprano
+    // con un error de validación más claro.
+    let warehouseId: string | null = null;
+    if (row.warehouseName) {
+      const wh = await this.warehouses.findOne({
+        where: { name: row.warehouseName },
+      });
+      if (!wh) {
+        throw new Error(
+          `Bodega "${row.warehouseName}" no existe. Creala en /bodegas antes de importar.`,
+        );
+      }
+      warehouseId = wh.id;
+    }
+
+    const productId = await this.ds.transaction(async (manager) => {
       const existing = await manager.findOne(Product, {
         where: { sku: row.sku },
       });
@@ -596,40 +672,134 @@ export class ImportsService {
         name: row.name,
         partNumber: row.partNumber,
         barcode: row.barcode,
-        universalCode: row.universalCode,
         description: row.description,
         categoryId,
         brandId,
         cost: row.cost ?? '0',
         price: row.price ?? '0',
         minStock: row.minStock ?? 0,
-        maxStock: row.maxStock,
         location: row.location,
         productKind: (row.productKind ?? 'ORIGINAL') as 'ORIGINAL' | 'ALTERNATIVE',
         isActive: existing?.isActive ?? true,
       };
 
-      let productId: string;
+      let pid: string;
       if (existing) {
         await manager.update(Product, { id: existing.id }, patch);
-        productId = existing.id;
+        pid = existing.id;
       } else {
         const created = manager.create(Product, patch);
         await manager.save(created);
-        productId = created.id;
+        pid = created.id;
       }
 
       // Códigos compatibles: estrategia replace.
-      await manager.delete(ProductCode, { productId, kind: 'COMPATIBLE' });
+      await manager.delete(ProductCode, { productId: pid, kind: 'COMPATIBLE' });
       for (const code of row.compatibleCodes) {
         const entry = manager.create(ProductCode, {
-          productId,
+          productId: pid,
           code,
           kind: 'COMPATIBLE' as 'COMPATIBLE',
         });
         await manager.save(entry);
       }
+
+      // Fitments (compatibilidad vehicular): estrategia replace + auto-create
+      // de marcas/modelos faltantes.
+      await this.replaceFitments(manager, pid, row.vehicleModels);
+
+      return pid;
+    });
+
+    // Ajuste de stock por bodega — se hace FUERA de la transacción anterior
+    // porque `applyMovement` administra su propia atomicidad (movimiento +
+    // upsert de stocks). El delta puede ser positivo o negativo según el
+    // stock previo.
+    if (warehouseId && row.stockQuantity !== null) {
+      await this.setStockToTarget(productId, warehouseId, row.stockQuantity, userId);
+    }
+  }
+
+  private async replaceFitments(
+    manager: EntityManager,
+    productId: string,
+    models: VehicleModelImportInput[],
+  ): Promise<void> {
+    await manager.delete(VehicleFitment, { productId });
+    if (models.length === 0) return;
+
+    // Cachés para no consultar dos veces la misma marca/modelo dentro de
+    // un mismo upsert (caso típico: mismo modelo varios años).
+    const makeByName = new Map<string, string>();
+    const modelByKey = new Map<string, string>(); // `${makeId}::${modelName}` → modelId
+
+    for (const m of models) {
+      let makeId = makeByName.get(m.makeName);
+      if (!makeId) {
+        let existing = await manager.findOne(VehicleMake, {
+          where: { name: m.makeName },
+        });
+        if (!existing) {
+          existing = manager.create(VehicleMake, { name: m.makeName });
+          await manager.save(existing);
+        }
+        makeId = existing.id;
+        makeByName.set(m.makeName, makeId);
+      }
+      const key = `${makeId}::${m.modelName}`;
+      let modelId = modelByKey.get(key);
+      if (!modelId) {
+        let existingModel = await manager.findOne(VehicleModel, {
+          where: { makeId, name: m.modelName },
+        });
+        if (!existingModel) {
+          existingModel = manager.create(VehicleModel, {
+            makeId,
+            name: m.modelName,
+          });
+          await manager.save(existingModel);
+        }
+        modelId = existingModel.id;
+        modelByKey.set(key, modelId);
+      }
+      const fitment = manager.create(VehicleFitment, {
+        productId,
+        modelId,
+        yearFrom: m.yearFrom,
+        yearTo: m.yearTo,
+      });
+      await manager.save(fitment);
+    }
+  }
+
+  /**
+   * Establece el stock de un producto en una bodega al valor `target`.
+   * Calcula el delta vs el stock actual y registra un movimiento
+   * ADJUSTMENT con ese delta (motivo: "Importación masiva"). Si el stock
+   * ya coincide con `target`, no inserta nada (no ensucia el Kardex).
+   */
+  private async setStockToTarget(
+    productId: string,
+    warehouseId: string,
+    target: number,
+    userId: string,
+  ): Promise<void> {
+    const current = await this.stocks.findOne({
+      where: { productId, warehouseId },
+    });
+    const currentQty = current?.quantity ?? 0;
+    const delta = target - currentQty;
+    if (delta === 0) return;
+    await this.ds.transaction(async (manager) => {
+      await this.inventory.applyMovement(manager, {
+        productId,
+        warehouseId,
+        type: InventoryMovementType.ADJUSTMENT,
+        qty: delta,
+        reference: 'ProductImport',
+        refId: null,
+        userId,
+      });
     });
   }
 }
-

@@ -26,6 +26,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { apiAbsoluteUrl } from '@/lib/api';
+import { Permission, useCan } from '@/lib/current-user-context';
 import { formatCurrency } from '@/lib/format';
 import { getSalesKpis, listSales } from '@/lib/sales-api';
 import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
@@ -55,6 +56,7 @@ export default function VentasPage() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const qc = useQueryClient();
+  const canSeeBreakdown = useCan(Permission.SALE_VIEW_FINANCIAL_BREAKDOWN);
 
   const filters = useUrlFilters({
     status: '',
@@ -325,25 +327,27 @@ export default function VentasPage() {
             ))}
           </SelectContent>
         </Select>
-        <Select
-          value={method}
-          onValueChange={(v) => {
-            setFilter('method', v === ALL ? null : v);
-            setFilter('page', null);
-          }}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder="Método" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Todos los métodos</SelectItem>
-            {METHOD_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {canSeeBreakdown && (
+          <Select
+            value={method}
+            onValueChange={(v) => {
+              setFilter('method', v === ALL ? null : v);
+              setFilter('page', null);
+            }}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Método" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>Todos los métodos</SelectItem>
+              {METHOD_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <Input
           type="date"
           value={dateFrom}
@@ -371,7 +375,7 @@ export default function VentasPage() {
               <TableHead>Cliente</TableHead>
               <TableHead className="text-right">Items</TableHead>
               <TableHead className="text-right">Total</TableHead>
-              <TableHead>Método</TableHead>
+              {canSeeBreakdown && <TableHead>Método</TableHead>}
               <TableHead>Estado</TableHead>
               <TableHead className="w-[100px]" />
             </TableRow>
@@ -416,10 +420,15 @@ export default function VentasPage() {
                 <TableCell className="text-right tabular-nums font-medium">
                   {formatCurrency(s.total)}
                 </TableCell>
-                <TableCell className="text-xs text-muted-foreground">
-                  {METHOD_OPTIONS.find((o) => o.value === s.paymentMethod)?.label ??
-                    s.paymentMethod}
-                </TableCell>
+                {canSeeBreakdown && (
+                  <TableCell className="text-xs text-muted-foreground">
+                    {s.paymentMethod
+                      ? METHOD_OPTIONS.find(
+                          (o) => o.value === s.paymentMethod,
+                        )?.label ?? s.paymentMethod
+                      : '—'}
+                  </TableCell>
+                )}
                 <TableCell>
                   <SaleStatusBadge status={s.status} />
                 </TableCell>

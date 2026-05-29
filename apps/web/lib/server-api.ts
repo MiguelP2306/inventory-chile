@@ -1,3 +1,4 @@
+import type { UserRole } from '@inventory/shared';
 import { cookies } from 'next/headers';
 
 /**
@@ -43,7 +44,7 @@ export interface AuthUser {
   id: string;
   name: string;
   email: string;
-  role: string;
+  role: UserRole;
 }
 
 export const getCurrentUser = () => serverFetch<AuthUser>('/auth/me');

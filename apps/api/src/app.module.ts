@@ -33,6 +33,7 @@ import { SuppliersModule } from './suppliers/suppliers.module';
 import { TransfersModule } from './transfers/transfers.module';
 import { UPLOADS_ROOT } from './uploads/upload-config';
 import { UploadsModule } from './uploads/uploads.module';
+import { UsersModule } from './users/users.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 import { WarehousesModule } from './warehouses/warehouses.module';
 import { WarrantiesModule } from './warranties/warranties.module';
@@ -88,6 +89,7 @@ import { WarrantiesModule } from './warranties/warranties.module';
     HubspotModule,
     DashboardModule,
     ImportsModule,
+    UsersModule,
   ],
   controllers: [HealthController],
   providers: [],

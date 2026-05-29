@@ -74,9 +74,6 @@ export class Product {
   @Column({ type: 'int', default: 0 })
   minStock!: number;
 
-  @Column({ type: 'int', nullable: true })
-  maxStock!: number | null;
-
   /**
    * @deprecated Desde Fase 7.5 la ubicación es per-bodega vía `Stock.locationCode`.
    * Este campo queda en la tabla para no perder datos históricos pero NO se
@@ -88,13 +85,6 @@ export class Product {
 
   @Column({ type: 'boolean', default: true })
   isActive!: boolean;
-
-  // Código universal del producto (EAN, código común de mercado, etc.). Único
-  // por producto, opcional. Indexado pero NO único — distintos productos pueden
-  // compartir el mismo universal cuando son equivalentes.
-  @Index('idx_products_universal_code')
-  @Column({ type: 'varchar', length: 80, nullable: true })
-  universalCode!: string | null;
 
   // ORIGINAL (OEM) o ALTERNATIVE (equivalente / aftermarket). Default ORIGINAL.
   @Index('idx_products_kind')

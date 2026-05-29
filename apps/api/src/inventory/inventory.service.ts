@@ -16,6 +16,7 @@ import {
   DispatchNote,
   InventoryMovement,
   Product,
+  ProductImage,
   PurchaseEntry,
   Return,
   Sale,
@@ -106,6 +107,8 @@ export interface ApplyMovementInput {
 export class InventoryService {
   constructor(
     @InjectRepository(Product) private readonly products: Repository<Product>,
+    @InjectRepository(ProductImage)
+    private readonly productImages: Repository<ProductImage>,
     @InjectRepository(Warehouse) private readonly warehouses: Repository<Warehouse>,
     @InjectRepository(Stock) private readonly stocks: Repository<Stock>,
     @InjectRepository(InventoryMovement)
@@ -926,6 +929,26 @@ export class InventoryService {
     qb.orderBy('p.name', 'ASC');
 
     const raw = await qb.getRawAndEntities();
+
+    // Cover por producto en batch — la portada se usa como thumbnail en la
+    // tabla de /inventario. Cae al primer registro si nada está marcado
+    // explícitamente como `isCover` (alineado con `getOne` del módulo de
+    // productos).
+    const productIds = raw.entities.map((p) => p.id);
+    const coverByProductId = new Map<string, string>();
+    if (productIds.length > 0) {
+      const imgs = await this.productImages
+        .createQueryBuilder('img')
+        .where('img.productId IN (:...ids)', { ids: productIds })
+        .orderBy('img.isCover', 'DESC')
+        .addOrderBy('img.position', 'ASC')
+        .addOrderBy('img.createdAt', 'ASC')
+        .getMany();
+      for (const i of imgs) {
+        if (!coverByProductId.has(i.productId)) coverByProductId.set(i.productId, i.url);
+      }
+    }
+
     const all = raw.entities.map((p, idx) => {
       const qty = Number(raw.raw[idx]?.qty ?? 0);
       const status: 'ok' | 'low' | 'out' =
@@ -938,7 +961,6 @@ export class InventoryService {
           partNumber: p.partNumber,
           barcode: p.barcode,
           minStock: p.minStock,
-          maxStock: p.maxStock,
           // `Product.location` queda deprecated desde Fase 7.5 — la fuente
           // de verdad ahora es `Stock.locationCode` per bodega.
           location: p.location,
@@ -946,6 +968,7 @@ export class InventoryService {
           price: p.price,
           category: p.category ? { id: p.category.id, name: p.category.name } : null,
           brand: p.brand ? { id: p.brand.id, name: p.brand.name } : null,
+          coverUrl: coverByProductId.get(p.id) ?? null,
         },
         warehouseId,
         quantity: qty,

@@ -61,16 +61,19 @@ interface PdfInput {
   // cada documento — el renderer no usa el estado para nada cosmético salvo
   // el badge informativo, que solo se imprime para cotizaciones por ahora.
   status: QuotationStatusDto | SaleStatusDto;
-  subtotal: string;
-  taxAmount: string;
+  // null cuando el viewer no tiene permiso (USER en ventas). El renderer
+  // omite la línea correspondiente.
+  subtotal: string | null;
+  taxAmount: string | null;
   total: string;
   notes: string | null;
   customer: CustomerInfo;
   items: QuotationItemLine[];
   company: CompanyInfo;
   // Solo aplica a ventas: método de pago + comisión tarjeta (cuando aplica).
-  paymentMethod?: PaymentMethodDto;
-  commissionAmount?: string;
+  // null para usuarios sin permiso financiero.
+  paymentMethod?: PaymentMethodDto | null;
+  commissionAmount?: string | null;
 }
 
 @Injectable()
@@ -112,9 +115,10 @@ export class PdfService {
         code:
           it.product?.partNumber ??
           it.product?.sku ??
-          it.product?.universalCode ??
+          it.tempProductPartNumber ??
+          it.tempProductSku ??
           '',
-        description: it.product?.name ?? '',
+        description: it.product?.name ?? it.tempProductName ?? '',
         qty: it.qty,
         unitPrice: it.unitPrice,
         discount: it.discount,
@@ -180,7 +184,6 @@ export class PdfService {
         code:
           it.product?.partNumber ??
           it.product?.sku ??
-          it.product?.universalCode ??
           '',
         description: it.product?.name ?? '',
         qty: it.qty,
@@ -332,16 +335,21 @@ export class PdfService {
 
     const totalsX = pageWidth - margin - 200;
     doc.setFontSize(10);
-    doc.text('Subtotal neto:', totalsX, totalsY);
-    doc.text(formatMoney(input.subtotal), pageWidth - margin, totalsY, {
-      align: 'right',
-    });
-    totalsY += 14;
-    doc.text('IVA:', totalsX, totalsY);
-    doc.text(formatMoney(input.taxAmount), pageWidth - margin, totalsY, {
-      align: 'right',
-    });
-    totalsY += 14;
+    // Subtotal, IVA y comisión solo si el viewer tiene el desglose.
+    if (input.subtotal != null) {
+      doc.text('Subtotal neto:', totalsX, totalsY);
+      doc.text(formatMoney(input.subtotal), pageWidth - margin, totalsY, {
+        align: 'right',
+      });
+      totalsY += 14;
+    }
+    if (input.taxAmount != null) {
+      doc.text('IVA:', totalsX, totalsY);
+      doc.text(formatMoney(input.taxAmount), pageWidth - margin, totalsY, {
+        align: 'right',
+      });
+      totalsY += 14;
+    }
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(12);
     doc.text('Total:', totalsX, totalsY);
@@ -473,16 +481,20 @@ export class PdfService {
     let totalsY = tableEnd + 8;
 
     doc.setFontSize(7);
-    doc.text('Subtotal neto:', margin, totalsY);
-    doc.text(formatMoney(input.subtotal), widthPt - margin, totalsY, {
-      align: 'right',
-    });
-    totalsY += 9;
-    doc.text('IVA:', margin, totalsY);
-    doc.text(formatMoney(input.taxAmount), widthPt - margin, totalsY, {
-      align: 'right',
-    });
-    totalsY += 9;
+    if (input.subtotal != null) {
+      doc.text('Subtotal neto:', margin, totalsY);
+      doc.text(formatMoney(input.subtotal), widthPt - margin, totalsY, {
+        align: 'right',
+      });
+      totalsY += 9;
+    }
+    if (input.taxAmount != null) {
+      doc.text('IVA:', margin, totalsY);
+      doc.text(formatMoney(input.taxAmount), widthPt - margin, totalsY, {
+        align: 'right',
+      });
+      totalsY += 9;
+    }
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8);
     doc.text('Total:', margin, totalsY);
@@ -1113,7 +1125,8 @@ export interface DispatchPdfInput {
   company: CompanyInfo;
 }
 
-function formatMoney(value: string): string {
+function formatMoney(value: string | null): string {
+  if (value == null) return '—';
   const n = parseFloat(value);
   if (!Number.isFinite(n)) return value;
   return n.toLocaleString('es-CL', {
@@ -1256,7 +1269,8 @@ export interface CatalogProductLine {
   // Si la categoría tiene padre, lo concatenamos como "Padre › Hija".
   categoryPath: string | null;
   brandName: string | null;
-  cost: string;
+  // null cuando el viewer no tiene permiso para ver costos (USER).
+  cost: string | null;
   price: string;
   productKind: 'ORIGINAL' | 'ALTERNATIVE';
   coverUrl: string | null;

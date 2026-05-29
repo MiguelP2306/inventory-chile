@@ -95,18 +95,23 @@ export interface ProductDto {
   categoryId: string | null;
   brandId: string | null;
   supplierId: string | null;
-  cost: string;
+  // `cost` es null cuando el rol del usuario no tiene el permiso
+  // `PRODUCT_VIEW_COST` (típicamente USER/vendedor). El backend hace defense
+  // in depth: aunque el frontend olvide esconder el campo, el valor no
+  // llega al cliente. ADMIN siempre lo recibe como string.
+  cost: string | null;
   price: string;
   minStock: number;
-  maxStock: number | null;
   location: string | null;
   isActive: boolean;
   // Fase 4B
-  universalCode: string | null;
   productKind: ProductKindDto;
   images?: ProductImageDto[];
   compatibleCodes?: string[];
   coverUrl?: string | null;
+  // Stock agregado de todas las bodegas. Lo expone el backend para que la
+  // UI de productos pueda mostrarlo sin pedir /inventory/stock por separado.
+  currentStock?: number;
   // Relaciones
   category?: CategoryDto | null;
   brand?: BrandDto | null;
@@ -132,13 +137,14 @@ export interface StockSummary {
     partNumber: string | null;
     barcode: string | null;
     minStock: number;
-    maxStock: number | null;
     /** @deprecated Desde Fase 7.5, ver `locationCode` per-bodega. */
     location: string | null;
-    cost: string;
+    // null cuando el viewer no tiene permiso para ver costos (USER).
+    cost: string | null;
     price: string;
     category: { id: string; name: string } | null;
     brand: { id: string; name: string } | null;
+    coverUrl: string | null;
   };
   warehouseId: string;
   quantity: number;
@@ -845,7 +851,6 @@ export interface QuotationItemDto {
     sku: string | null;
     name: string;
     partNumber: string | null;
-    universalCode: string | null;
     description: string | null;
   };
 }
@@ -961,7 +966,6 @@ export interface SaleItemDto {
     sku: string | null;
     name: string;
     partNumber: string | null;
-    universalCode: string | null;
   };
 }
 
@@ -973,11 +977,13 @@ export interface SaleDto {
   warehouseId: string;
   warehouse?: { id: string; name: string };
   date: string;
-  subtotal: string;
-  taxAmount: string;
-  commissionAmount: string;
+  // Cuando el viewer no tiene `SALE_VIEW_FINANCIAL_BREAKDOWN` (USER), el
+  // backend devuelve null en estos campos. El frontend muestra solo `total`.
+  subtotal: string | null;
+  taxAmount: string | null;
+  commissionAmount: string | null;
   total: string;
-  paymentMethod: PaymentMethodDto;
+  paymentMethod: PaymentMethodDto | null;
   status: SaleStatusDto;
   notes: string | null;
   quotationId: string | null;
@@ -1494,7 +1500,6 @@ export interface ProductImportRowDto {
   name: string;
   partNumber: string | null;
   barcode: string | null;
-  universalCode: string | null;
   description: string | null;
   // Nombre tal como vino en el Excel; al confirmar, si la categoría/marca no
   // existe se crea automáticamente.
@@ -1503,13 +1508,33 @@ export interface ProductImportRowDto {
   cost: string | null;
   price: string | null;
   minStock: number | null;
-  maxStock: number | null;
   location: string | null;
   productKind: 'ORIGINAL' | 'ALTERNATIVE' | null;
   // Lista de códigos compatibles ya parseados (separados por `;` en el Excel).
   compatibleCodes: string[];
+  // Compatibilidad vehicular. Cada string viene en formato
+  // "Marca:Modelo" o "Marca:Modelo:AñoFrom-AñoTo" en el Excel; al
+  // confirmar, marca/modelo se crean si no existen y se reemplazan los
+  // fitments del producto (estrategia replace).
+  vehicleModels: VehicleModelImportInput[];
+  // Bodega + stock actual. Si `warehouseName` viene seteado y existe,
+  // el importer establece el stock de esa bodega al valor `stockQuantity`
+  // (registra un ADJUSTMENT). Si la bodega no existe, la fila se rechaza.
+  warehouseName: string | null;
+  stockQuantity: number | null;
   // Si `action='update'`, el id del producto existente. Null si es create.
   existingProductId: string | null;
+}
+
+/**
+ * Item de compatibilidad vehicular parseado de la columna `Modelo` del
+ * Excel. Si `yearFrom`/`yearTo` vienen null, aplica a cualquier año.
+ */
+export interface VehicleModelImportInput {
+  makeName: string;
+  modelName: string;
+  yearFrom: number | null;
+  yearTo: number | null;
 }
 
 export interface ProductImportErrorDto {

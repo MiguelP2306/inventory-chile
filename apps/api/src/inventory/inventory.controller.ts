@@ -1,8 +1,10 @@
 import { Body, Controller, Get, Patch, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
+import { Permission } from '@inventory/shared';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/types';
 import { CategoriesService } from '../categories/categories.service';
+import { viewerHas } from '../common/redact';
 import {
   fetchAllPages,
   MONEY_FMT,
@@ -42,8 +44,23 @@ export class InventoryController {
   ) {}
 
   @Get('stock')
-  listStock(@Query() query: ListStockQueryDto) {
-    return this.svc.listStock(query);
+  async listStock(
+    @CurrentUser() viewer: JwtPayload,
+    @Query() query: ListStockQueryDto,
+  ) {
+    const result = await this.svc.listStock(query);
+    const canSeeCost = viewerHas(viewer, Permission.PRODUCT_VIEW_COST);
+    if (canSeeCost) return result;
+    // Filtramos cost de cada item.product. Soporta tanto el shape paginado
+    // como el array plano que devuelve listStock cuando no llegan page/pageSize.
+    const stripCost = <T extends { product: { cost: string | null } }>(
+      item: T,
+    ): T => ({
+      ...item,
+      product: { ...item.product, cost: null },
+    });
+    if (Array.isArray(result)) return result.map(stripCost);
+    return { ...result, items: result.items.map(stripCost) };
   }
 
   /**

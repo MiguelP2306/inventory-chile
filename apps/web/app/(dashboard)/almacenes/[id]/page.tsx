@@ -17,6 +17,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Permission, useCan } from '@/lib/current-user-context';
 import { formatCurrency } from '@/lib/format';
 import { listMovements, listStock } from '@/lib/inventory-api';
 import { listTransfers } from '@/lib/transfers-api';
@@ -47,6 +48,8 @@ export default function AlmacenDetailPage() {
     enabled: !!id,
   });
   const stock = useMemo(() => stockQ.data ?? [], [stockQ.data]);
+
+  const canSeeCost = useCan(Permission.PRODUCT_VIEW_COST);
 
   // KPIs derivados del stock de la bodega.
   const kpis = useMemo(() => {
@@ -175,11 +178,18 @@ export default function AlmacenDetailPage() {
                   hint="Bajo el mínimo"
                   variant={kpis.lowStock > 0 ? 'warning' : 'default'}
                 />
-                <KpiCard
-                  label="Valor inventario (costo)"
-                  value={formatCurrency(kpis.valueCost.toFixed(2))}
-                  hint={`A precio: ${formatCurrency(kpis.valuePrice.toFixed(2))}`}
-                />
+                {canSeeCost ? (
+                  <KpiCard
+                    label="Valor inventario (costo)"
+                    value={formatCurrency(kpis.valueCost.toFixed(2))}
+                    hint={`A precio: ${formatCurrency(kpis.valuePrice.toFixed(2))}`}
+                  />
+                ) : (
+                  <KpiCard
+                    label="Valor inventario (precio)"
+                    value={formatCurrency(kpis.valuePrice.toFixed(2))}
+                  />
+                )}
               </div>
             </>
           )}

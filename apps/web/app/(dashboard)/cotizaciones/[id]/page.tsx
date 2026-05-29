@@ -510,10 +510,15 @@ export default function QuotationDetailPage() {
             {(q.items ?? []).map((it) => (
               <TableRow key={it.id}>
                 <TableCell className="font-mono text-xs">
-                  {it.product?.sku ?? '—'}
+                  {it.product?.sku ?? it.tempProductSku ?? '—'}
                 </TableCell>
                 <TableCell className="max-w-[280px] truncate">
-                  {it.product?.name ?? '—'}
+                  {it.product?.name ?? it.tempProductName ?? '—'}
+                  {it.isTemporary && (
+                    <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+                      Temporal
+                    </span>
+                  )}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {it.qty}

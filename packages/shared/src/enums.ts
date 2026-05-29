@@ -165,8 +165,35 @@ export type DispatchStatus =
 
 export const UserRole = {
   ADMIN: 'ADMIN',
+  // USER = vendedor/cliente. Mismo acceso de navegación que ADMIN pero con
+  // los datos financieros sensibles (costo, margen, comisión por método
+  // de pago) filtrados tanto en backend como en la UI.
+  USER: 'USER',
 } as const;
 export type UserRole = (typeof UserRole)[keyof typeof UserRole];
+
+// Permisos finos. Por ahora solo derivados del rol, pero la capa de
+// permisos queda separada para que en el futuro un USER puntual pueda
+// recibir un permiso extra (o un ADMIN restringirse) sin tocar UI.
+export const Permission = {
+  PRODUCT_VIEW_COST: 'PRODUCT_VIEW_COST',
+  SALE_VIEW_FINANCIAL_BREAKDOWN: 'SALE_VIEW_FINANCIAL_BREAKDOWN',
+  USER_MANAGE: 'USER_MANAGE',
+} as const;
+export type Permission = (typeof Permission)[keyof typeof Permission];
+
+export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
+  ADMIN: [
+    Permission.PRODUCT_VIEW_COST,
+    Permission.SALE_VIEW_FINANCIAL_BREAKDOWN,
+    Permission.USER_MANAGE,
+  ],
+  USER: [],
+};
+
+export function roleHasPermission(role: UserRole, perm: Permission): boolean {
+  return ROLE_PERMISSIONS[role]?.includes(perm) ?? false;
+}
 
 // Producto: original o alternativo (Fase 4B). El cliente lo usa para
 // distinguir repuestos OEM vs equivalentes/alternativos del mercado.

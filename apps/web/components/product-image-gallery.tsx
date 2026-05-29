@@ -1,10 +1,11 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Star, Trash2, Upload } from 'lucide-react';
+import { Maximize2, Star, Trash2, Upload } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import { ProductImageLightbox } from '@/components/product-image-lightbox';
 import { Button } from '@/components/ui/button';
 import {
   apiErrorMessage,
@@ -28,6 +29,7 @@ export function ProductImageGallery({ productId }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   const images = useQuery({
     queryKey: ['product-images', productId],
@@ -128,24 +130,34 @@ export function ProductImageGallery({ productId }: Props) {
 
       {images.data && images.data.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-          {images.data.map((img) => {
+          {images.data.map((img, idx) => {
             const url = publicImageUrl(img.url);
             return (
               <div
                 key={img.id}
                 className="group relative overflow-hidden rounded-md border bg-muted/20"
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={url ?? ''}
-                  alt=""
-                  className="aspect-square w-full object-cover"
-                />
+                <button
+                  type="button"
+                  onClick={() => setLightboxIndex(idx)}
+                  className="block w-full"
+                  aria-label="Ver imagen ampliada"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={url ?? ''}
+                    alt=""
+                    className="aspect-square w-full object-cover transition-transform group-hover:scale-105"
+                  />
+                </button>
                 {img.isCover && (
-                  <div className="absolute left-2 top-2 rounded bg-amber-500/90 px-2 py-0.5 text-[11px] font-semibold text-white">
+                  <div className="pointer-events-none absolute left-2 top-2 rounded bg-amber-500/90 px-2 py-0.5 text-[11px] font-semibold text-white">
                     Portada
                   </div>
                 )}
+                <div className="pointer-events-none absolute right-2 top-2 rounded-full bg-black/50 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100">
+                  <Maximize2 className="h-3.5 w-3.5" />
+                </div>
                 <div className="absolute inset-x-0 bottom-0 flex justify-end gap-1 bg-gradient-to-t from-black/80 to-transparent p-2 opacity-0 transition-opacity group-hover:opacity-100">
                   {!img.isCover && (
                     <Button
@@ -177,6 +189,15 @@ export function ProductImageGallery({ productId }: Props) {
           })}
         </div>
       )}
+
+      <ProductImageLightbox
+        open={lightboxIndex != null}
+        onOpenChange={(o) => !o && setLightboxIndex(null)}
+        images={(images.data ?? [])
+          .map((img) => publicImageUrl(img.url) ?? '')
+          .filter(Boolean)}
+        initialIndex={lightboxIndex ?? 0}
+      />
 
       <ConfirmDialog
         open={!!deleteTarget}

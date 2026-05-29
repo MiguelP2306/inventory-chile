@@ -156,9 +156,10 @@ export class QuotationsService {
         code:
           it.product?.partNumber ??
           it.product?.sku ??
-          it.product?.universalCode ??
+          it.tempProductPartNumber ??
+          it.tempProductSku ??
           '',
-        description: it.product?.name ?? '',
+        description: it.product?.name ?? it.tempProductName ?? '',
         qty: it.qty,
         unitPrice: it.unitPrice,
         discount: it.discount,
@@ -732,7 +733,6 @@ export class QuotationsService {
             sku: it.product.sku,
             name: it.product.name,
             partNumber: it.product.partNumber,
-            universalCode: it.product.universalCode,
             description: it.product.description,
           }
         : undefined,

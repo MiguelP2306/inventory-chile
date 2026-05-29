@@ -26,8 +26,16 @@ import {
   ValidateIf,
 } from 'class-validator';
 import type { Response } from 'express';
+import { Permission } from '@inventory/shared';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { JwtPayload } from '../auth/types';
 import { BrandsService } from '../brands/brands.service';
 import { CategoriesService } from '../categories/categories.service';
+import {
+  redactProductCost,
+  redactProductCostList,
+  viewerHas,
+} from '../common/redact';
 import { MONEY_FMT, sendXlsx, stylizeSheet } from '../common/xlsx-export';
 import { PdfService } from '../notifications/pdf.service';
 import { SettingsService } from '../settings/settings.service';
@@ -84,29 +92,47 @@ export class ProductsController {
   ) {}
 
   @Get()
-  list(@Query() query: ListProductsQueryDto) {
-    return this.svc.list(query);
+  async list(
+    @CurrentUser() viewer: JwtPayload,
+    @Query() query: ListProductsQueryDto,
+  ) {
+    const result = await this.svc.list(query);
+    return {
+      ...result,
+      items: redactProductCostList(result.items, viewer),
+    };
   }
 
   @Get('by-vehicle')
-  byVehicle(@Query() query: ByVehicleQueryDto) {
-    return this.svc.byVehicle(query);
+  async byVehicle(
+    @CurrentUser() viewer: JwtPayload,
+    @Query() query: ByVehicleQueryDto,
+  ) {
+    const items = await this.svc.byVehicle(query);
+    return redactProductCostList(items, viewer);
   }
 
   @Get('quick-search')
-  quickSearch(@Query() query: QuickSearchQueryDto) {
-    return this.svc.quickSearch(query);
+  async quickSearch(
+    @CurrentUser() viewer: JwtPayload,
+    @Query() query: QuickSearchQueryDto,
+  ) {
+    const items = await this.svc.quickSearch(query);
+    return redactProductCostList(items, viewer);
   }
 
   /**
    * Fase 11 — lookup EXACTO por código. Pensado para scanners (USB o cámara).
-   * Compara por igualdad estricta contra `sku`, `partNumber`, `barcode`,
-   * `universalCode` y los `product_codes` compatibles. Si hay match devuelve
-   * el producto; si no, 404. El frontend distingue ambos casos para mostrar
+   * Compara por igualdad estricta contra `sku`, `partNumber`, `barcode`
+   * y los `product_codes` compatibles. Si hay match devuelve el producto;
+   * si no, 404. El frontend distingue ambos casos para mostrar
    * "código no reconocido" sin reintentar con quickSearch.
    */
   @Get('lookup')
-  async lookup(@Query('code') code: string | undefined) {
+  async lookup(
+    @CurrentUser() viewer: JwtPayload,
+    @Query('code') code: string | undefined,
+  ) {
     if (!code || !code.trim()) {
       throw new BadRequestException('Query param `code` requerido');
     }
@@ -116,7 +142,7 @@ export class ProductsController {
         `Ningún producto coincide exactamente con el código "${code}"`,
       );
     }
-    return match;
+    return redactProductCost(match as { cost?: string | null }, viewer);
   }
 
   /**
@@ -166,9 +192,11 @@ export class ProductsController {
    */
   @Get('export.xlsx')
   async exportXlsx(
+    @CurrentUser() viewer: JwtPayload,
     @Query() query: ListProductsQueryDto,
     @Res() res: Response,
   ) {
+    const canSeeCost = viewerHas(viewer, Permission.PRODUCT_VIEW_COST);
     // Fase 10 polish — usamos `listForExport` (sin cap) en vez de
     // `listForCatalog` (cap 500 para PDF). El operador debe poder bajar TODO
     // el catálogo a Excel sin tope.
@@ -184,21 +212,45 @@ export class ProductsController {
     wb.creator = 'Inventory App';
     wb.created = new Date();
 
+    // Stock por bodega: traemos las bodegas activas + un map productId → qty
+    // por bodega. La columna "Bodega" del Excel contiene "Bodega:qty;..." para
+    // ser consistente con el formato del importer.
+    const stockByProduct = await this.svc.stockByProduct(
+      products.map((p) => p.id),
+    );
+
+    // Modelos compatibles por producto (mismo formato del importer:
+    // "Marca:Modelo:AñoFrom-AñoTo; ..."). Cargado en batch para evitar N+1.
+    const modelsByProduct = await this.svc.compatibleModelsByProduct(
+      products.map((p) => p.id),
+    );
+
     const sheet = wb.addWorksheet('Productos');
     sheet.columns = [
       { header: 'SKU', key: 'sku', width: 18 },
       { header: 'Nombre', key: 'name', width: 36 },
       { header: 'PartNumber', key: 'partNumber', width: 16 },
       { header: 'Código de barras', key: 'barcode', width: 18 },
-      { header: 'Código universal', key: 'universalCode', width: 18 },
       { header: 'Categoría', key: 'category', width: 22 },
       { header: 'Subcategoría', key: 'subcategory', width: 22 },
       { header: 'Marca', key: 'brand', width: 18 },
+      { header: 'Modelo (compatibilidad)', key: 'models', width: 32 },
       { header: 'Tipo', key: 'kind', width: 14 },
-      { header: 'Costo', key: 'cost', width: 14, style: { numFmt: MONEY_FMT } },
+      // La columna Costo solo aparece para usuarios con permiso.
+      ...(canSeeCost
+        ? [
+            {
+              header: 'Costo',
+              key: 'cost',
+              width: 14,
+              style: { numFmt: MONEY_FMT },
+            },
+          ]
+        : []),
       { header: 'Precio', key: 'price', width: 14, style: { numFmt: MONEY_FMT } },
       { header: 'Stock mín.', key: 'minStock', width: 10 },
-      { header: 'Stock máx.', key: 'maxStock', width: 10 },
+      { header: 'Stock por bodega', key: 'stockByWarehouse', width: 28 },
+      { header: 'Stock actual (total)', key: 'totalStock', width: 14 },
       { header: 'Descripción', key: 'description', width: 40 },
       { header: 'Activo', key: 'isActive', width: 8 },
     ];
@@ -207,20 +259,26 @@ export class ProductsController {
       const cat = p.categoryId ? categoryById.get(p.categoryId) : null;
       const categoryName = cat?.parentName ?? cat?.name ?? '';
       const subcategoryName = cat?.parentName ? cat.name : '';
+      const stocks = stockByProduct.get(p.id) ?? [];
+      const totalStock = stocks.reduce((acc, s) => acc + s.qty, 0);
+      const stockByWarehouse = stocks
+        .map((s) => `${s.warehouseName}:${s.qty}`)
+        .join('; ');
       sheet.addRow({
         sku: p.sku ?? '',
         name: p.name,
         partNumber: p.partNumber ?? '',
         barcode: p.barcode ?? '',
-        universalCode: p.universalCode ?? '',
         category: categoryName,
         subcategory: subcategoryName,
         brand: p.brand?.name ?? '',
+        models: modelsByProduct.get(p.id) ?? '',
         kind: p.productKind === 'ORIGINAL' ? 'Original' : 'Alternativo',
-        cost: parseFloat(p.cost ?? '0'),
+        ...(canSeeCost ? { cost: parseFloat(p.cost ?? '0') } : {}),
         price: parseFloat(p.price ?? '0'),
         minStock: p.minStock ?? 0,
-        maxStock: p.maxStock ?? '',
+        stockByWarehouse,
+        totalStock,
         description: p.description ?? '',
         isActive: p.isActive ? 'Sí' : 'No',
       });
@@ -232,9 +290,11 @@ export class ProductsController {
 
   @Get('catalog.pdf')
   async catalogPdf(
+    @CurrentUser() viewer: JwtPayload,
     @Query() query: ListProductsQueryDto,
     @Res() res: Response,
   ) {
+    const canSeeCost = viewerHas(viewer, Permission.PRODUCT_VIEW_COST);
     const [products, settings] = await Promise.all([
       this.svc.listForCatalog(query),
       this.settings.get(),
@@ -288,7 +348,7 @@ export class ProductsController {
         categoryName: cat?.name ?? null,
         categoryPath,
         brandName: p.brand?.name ?? null,
-        cost: p.cost,
+        cost: canSeeCost ? p.cost : null,
         price: p.price,
         productKind: p.productKind,
         coverUrl: coverByProduct.get(p.id) ?? null,
@@ -326,8 +386,12 @@ export class ProductsController {
   }
 
   @Get(':id')
-  getOne(@Param('id', new ParseUUIDPipe()) id: string) {
-    return this.svc.getOne(id);
+  async getOne(
+    @CurrentUser() viewer: JwtPayload,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    const product = await this.svc.getOne(id);
+    return redactProductCost(product as { cost?: string | null }, viewer);
   }
 
   @Post()
