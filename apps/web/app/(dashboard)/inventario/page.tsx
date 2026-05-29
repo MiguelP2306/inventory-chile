@@ -518,13 +518,13 @@ function AdjustStockModal({
           locationCode: nextLoc,
         });
       }
-      // 2) Ajuste de cantidad (registra movimiento en el Kardex).
-      // ⚠️ Verificá la firma real de `adjustStock` en tu inventory-api.
+      // 2) Ajuste de cantidad (registra movimiento en el Kardex). `delta` ya
+      // viene con signo (+ entrada / − salida); la API lo recibe como `qty`.
       if (delta !== 0) {
         await adjustStock({
           productId: product.id,
           warehouseId: target.warehouseId,
-          delta,
+          qty: delta,
           reason: reason.trim() || 'Ajuste manual',
         });
       }
