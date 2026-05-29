@@ -5,8 +5,10 @@ import {
   Customer,
   DispatchNote,
   InventoryMovement,
+  LotConsumption,
   Product,
   ProductImage,
+  ProductLot,
   PurchaseEntry,
   PurchaseEntryItem,
   PurchaseInvoice,
@@ -23,6 +25,7 @@ import {
 import { WarehousesModule } from '../warehouses/warehouses.module';
 import { InventoryController } from './inventory.controller';
 import { InventoryService } from './inventory.service';
+import { LotCostService } from './lot-cost.service';
 
 @Module({
   imports: [
@@ -32,6 +35,9 @@ import { InventoryService } from './inventory.service';
       Warehouse,
       Stock,
       InventoryMovement,
+      // Costo ponderado dinámico — lotes FIFO y sus consumos.
+      ProductLot,
+      LotConsumption,
       // Ronda 13 — `listMovementCards` joinea con las entidades padre para
       // devolver cards enriquecidas (cliente, proveedor, totales, etc.).
       Sale,
@@ -51,7 +57,7 @@ import { InventoryService } from './inventory.service';
     WarehousesModule,
   ],
   controllers: [InventoryController],
-  providers: [InventoryService],
+  providers: [InventoryService, LotCostService],
   exports: [InventoryService],
 })
 export class InventoryModule {}

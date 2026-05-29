@@ -202,7 +202,13 @@ export class ProductsService {
     }
 
     await this.dataSource.transaction(async (manager) => {
-      Object.assign(existing, this.toEntityFields(dto));
+      const fields = this.toEntityFields(dto);
+      // El costo unitario es AUTOGESTIONADO por el motor de costo ponderado
+      // (lotes FIFO). Se recalcula solo con cada compra/venta/devolución/ajuste,
+      // así que ignoramos cualquier `cost` enviado por PATCH para no pisar el
+      // ponderado real con un valor manual. La UI muestra el campo de solo lectura.
+      delete fields.cost;
+      Object.assign(existing, fields);
       await manager.save(existing);
       if (dto.fitments !== undefined) {
         await this.replaceFitments(manager, id, dto.fitments);

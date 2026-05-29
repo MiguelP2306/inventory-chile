@@ -739,6 +739,7 @@ export function ProductForm({ product }: Props) {
                 errors={errors}
                 currentStock={product?.currentStock}
                 canSeeCost={canSeeCost}
+                isEdit={!!product}
               />
             </TabsContent>
 
@@ -1307,11 +1308,13 @@ function PriciosSection({
   errors,
   currentStock,
   canSeeCost,
+  isEdit,
 }: {
   form: UseFormReturn<FormValues>;
   errors: FieldErrors<FormValues>;
   currentStock?: number;
   canSeeCost: boolean;
+  isEdit: boolean;
 }) {
   // Margen calculado en tiempo real (cost vs price)
   const cost = useWatch({ control: form.control, name: 'cost' });
@@ -1326,26 +1329,45 @@ function PriciosSection({
 
   return (
     <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
-      {canSeeCost && (
-        <Field
-          label="Costo unitario"
-          optional="CLP"
-          error={errors.cost?.message}
-          hint="Costo neto al que se importa la unidad."
-        >
-          <div className="relative">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-mono text-sm text-muted-foreground">
-              $
-            </span>
-            <Input
-              {...form.register('cost')}
-              placeholder="0.00"
-              inputMode="decimal"
-              className="pl-7"
-            />
-          </div>
-        </Field>
-      )}
+      {canSeeCost &&
+        (isEdit ? (
+          // El costo unitario es AUTOGESTIONADO por el motor de costo ponderado
+          // (lotes FIFO): se recalcula solo con cada compra/venta/devolución/
+          // ajuste. En edición es de solo lectura — el backend ignora cualquier
+          // valor manual.
+          <Field
+            label="Costo unitario"
+            optional="CLP · automático"
+            hint="Promedio ponderado de los lotes con stock disponible. Se actualiza solo con cada compra, venta, devolución o ajuste."
+          >
+            <div className="flex h-10 items-center rounded-md border border-input bg-muted/40 px-3 font-mono text-sm font-semibold">
+              <span className="mr-1 text-muted-foreground">$</span>
+              {cost ? Number(cost).toLocaleString('es-CL', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              }) : '—'}
+            </div>
+          </Field>
+        ) : (
+          <Field
+            label="Costo unitario inicial"
+            optional="CLP"
+            error={errors.cost?.message}
+            hint="Costo de partida. Luego se recalcula solo como promedio ponderado de los lotes (compras)."
+          >
+            <div className="relative">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-mono text-sm text-muted-foreground">
+                $
+              </span>
+              <Input
+                {...form.register('cost')}
+                placeholder="0.00"
+                inputMode="decimal"
+                className="pl-7"
+              />
+            </div>
+          </Field>
+        ))}
       <Field
         label="Precio de venta"
         required

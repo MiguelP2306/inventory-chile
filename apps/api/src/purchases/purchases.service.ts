@@ -197,6 +197,8 @@ export class PurchasesService {
           reference: 'PurchaseEntry',
           refId: entry.id,
           userId,
+          // Fecha del documento → orden FIFO del lote (soporta compras backdated).
+          occurredAt: entry.date,
         });
       }
 

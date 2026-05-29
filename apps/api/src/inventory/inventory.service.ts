@@ -30,6 +30,7 @@ import {
   ListMovementsQueryDto,
   ListStockQueryDto,
 } from './dto';
+import { LotCostService } from './lot-cost.service';
 
 const MOVEMENTS_PAGE_SIZE = 50;
 
@@ -101,6 +102,9 @@ export interface ApplyMovementInput {
   reference?: string | null;
   refId?: string | null;
   userId: string;
+  // Fecha del documento origen — usada como fecha de compra del lote para el
+  // orden FIFO (costo ponderado). Si se omite, se usa el momento actual.
+  occurredAt?: Date | null;
 }
 
 @Injectable()
@@ -123,6 +127,7 @@ export class InventoryService {
     @InjectRepository(DispatchNote)
     private readonly dispatches: Repository<DispatchNote>,
     @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly lotCost: LotCostService,
   ) {}
 
   /**
@@ -181,6 +186,20 @@ export class InventoryService {
         }, requerido: ${Math.abs(input.qty)}.`,
       );
     }
+
+    // Costo ponderado dinámico: crear/consumir/restituir lotes FIFO y recalcular
+    // `Product.cost`. Se hace en la MISMA transacción, después de validar el
+    // stock, para que el ponderado refleje exactamente el inventario disponible.
+    await this.lotCost.handleMovement(manager, {
+      productId: input.productId,
+      warehouseId: input.warehouseId,
+      type: input.type,
+      qty: input.qty,
+      unitCost: input.unitCost ?? null,
+      reference: input.reference ?? null,
+      refId: input.refId ?? null,
+      occurredAt: input.occurredAt ?? null,
+    });
 
     return movement;
   }
