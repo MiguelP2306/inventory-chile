@@ -24,17 +24,28 @@ export class WeightedAverageCostLots1780200000000
   name = 'WeightedAverageCostLots1780200000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
+    // Las migraciones corren sin transacción (DDL en MySQL/TiDB es autocommit),
+    // así que un intento fallido puede dejar `product_lots` creada a medias (sin
+    // FKs). Limpiamos cualquier estado parcial para que el reintento sea seguro.
+    // Las tablas están vacías hasta el backfill del final, por lo que dropearlas
+    // no pierde datos.
+    await queryRunner.query(`DROP TABLE IF EXISTS \`lot_consumptions\``);
+    await queryRunner.query(`DROP TABLE IF EXISTS \`product_lots\``);
+
     // ---- 1. Tabla product_lots ----
+    // IMPORTANTE: las columnas FK usan `varchar(36)` (igual que `products.id`,
+    // `stocks.productId`, etc.). TiDB exige que las columnas de una FK tengan el
+    // MISMO tipo y colación; `char(36)` contra `varchar(36)` la rechaza.
     await queryRunner.query(
       `CREATE TABLE \`product_lots\` (
         \`id\` varchar(36) NOT NULL,
-        \`productId\` char(36) NOT NULL,
-        \`warehouseId\` char(36) NOT NULL,
+        \`productId\` varchar(36) NOT NULL,
+        \`warehouseId\` varchar(36) NOT NULL,
         \`originalQty\` int NOT NULL,
         \`remainingQty\` int NOT NULL,
         \`unitCost\` decimal(15,2) NOT NULL,
         \`source\` enum('PURCHASE','OPENING','RETURN_IN','TRANSFER_IN','ADJUSTMENT') NOT NULL,
-        \`refId\` char(36) NULL,
+        \`refId\` varchar(36) NULL,
         \`purchasedAt\` datetime(6) NOT NULL,
         \`createdAt\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
         INDEX \`idx_lots_product\` (\`productId\`),
@@ -60,11 +71,11 @@ export class WeightedAverageCostLots1780200000000
     await queryRunner.query(
       `CREATE TABLE \`lot_consumptions\` (
         \`id\` varchar(36) NOT NULL,
-        \`lotId\` char(36) NOT NULL,
+        \`lotId\` varchar(36) NOT NULL,
         \`qty\` int NOT NULL,
         \`unitCost\` decimal(15,2) NOT NULL,
         \`reference\` varchar(40) NULL,
-        \`refId\` char(36) NULL,
+        \`refId\` varchar(36) NULL,
         \`restoredAt\` datetime(6) NULL,
         \`createdAt\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
         INDEX \`idx_lot_consumptions_lot\` (\`lotId\`),
