@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { apiErrorMessage } from '@/lib/catalog-api';
+import { invalidateProductCaches } from '@/lib/invalidate-product-caches';
 import { adjustStock } from '@/lib/inventory-api';
 
 type Mode = 'increase' | 'decrease' | 'set';
@@ -85,6 +86,7 @@ export function AdjustStockDialog({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['stock'] });
       qc.invalidateQueries({ queryKey: ['movements'] });
+      invalidateProductCaches(qc);
       toast.success(`Stock ajustado en ${warehouseName}`);
       onOpenChange(false);
     },

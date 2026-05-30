@@ -44,6 +44,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { getCompanySettings } from '@/lib/cashbox-api';
 import { apiErrorMessage } from '@/lib/catalog-api';
+import { invalidateProductCaches } from '@/lib/invalidate-product-caches';
 import { listCustomers } from '@/lib/customers-api';
 import { Permission, useCan } from '@/lib/current-user-context';
 import { formatCurrency } from '@/lib/format';
@@ -282,6 +283,7 @@ export function SaleForm({
       qc.invalidateQueries({ queryKey: ['cashbox-balance'] });
       qc.invalidateQueries({ queryKey: ['cash-transactions'] });
       qc.invalidateQueries({ queryKey: ['quotations'] });
+      invalidateProductCaches(qc);
       toast.success(`Venta ${sale.number} registrada`);
       onSuccess?.(sale);
     },
@@ -291,6 +293,17 @@ export function SaleForm({
   function buildPayload(): CreateSaleInput | null {
     if (!customer) {
       toast.error('Elegí un cliente del catálogo');
+      setActiveTab('principal');
+      setClientOpen(true);
+      return null;
+    }
+    // El backend exige RUT del cliente para facturar (una cotización puede
+    // tener un cliente "lite" sin RUT). Validamos acá para dar un mensaje claro
+    // en vez de un error 409 silencioso que dejaba el botón "sin avanzar".
+    if (!customer.taxId || customer.taxId.trim() === '') {
+      toast.error(
+        'El cliente no tiene RUT cargado. Completalo en el perfil del cliente antes de facturar la venta.',
+      );
       setActiveTab('principal');
       setClientOpen(true);
       return null;

@@ -356,7 +356,12 @@ export default function QuotationDetailPage() {
               </Button>
             </>
           )}
-          {q.status === 'APPROVED' && (
+          {/* La conversión a venta se permite desde BORRADOR, ENVIADA o
+              APROBADA (el backend acepta esos estados). Así el operador puede
+              vender directo sin tener que enviar/aprobar primero. */}
+          {(q.status === 'DRAFT' ||
+            q.status === 'SENT' ||
+            q.status === 'APPROVED') && (
             <>
               {/* Ronda 9 — split button: Convertir a venta + opción
                   "Convertir y generar guía". Si la cotización tiene items
@@ -406,14 +411,16 @@ export default function QuotationDetailPage() {
                   </div>
                 );
               })()}
-              <Button
-                variant="outline"
-                onClick={() => setRejectOpen(true)}
-                disabled={rejectMut.isPending}
-              >
-                <X className="h-4 w-4" />
-                Marcar rechazada
-              </Button>
+              {q.status === 'APPROVED' && (
+                <Button
+                  variant="outline"
+                  onClick={() => setRejectOpen(true)}
+                  disabled={rejectMut.isPending}
+                >
+                  <X className="h-4 w-4" />
+                  Marcar rechazada
+                </Button>
+              )}
             </>
           )}
         </div>

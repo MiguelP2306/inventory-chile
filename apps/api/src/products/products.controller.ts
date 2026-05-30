@@ -225,30 +225,56 @@ export class ProductsController {
       products.map((p) => p.id),
     );
 
+    // Códigos compatibles por producto (separados por "; "). Se exportan para
+    // que el archivo round-trip con el importer (exportar → editar → reimportar).
+    const codesByProduct = await this.svc.compatibleCodesByProduct(
+      products.map((p) => p.id),
+    );
+
     const sheet = wb.addWorksheet('Productos');
+    // Los headers de Categoría, Marca, Descripción, Modelo y Códigos compatibles
+    // usan EXACTAMENTE los nombres que reconoce el importer (match normalizado,
+    // sin acentos/símbolos), para que el export se pueda reimportar sin perder
+    // esos campos. Costo/Precio/Stock se dejan con headers "humanos" a propósito:
+    // así el importer los IGNORA y reimportar NO pisa el costo ponderado ni el
+    // stock (que se gestionan solos).
     sheet.columns = [
       { header: 'SKU', key: 'sku', width: 18 },
       { header: 'Nombre', key: 'name', width: 36 },
       { header: 'PartNumber', key: 'partNumber', width: 16 },
       { header: 'Código de barras', key: 'barcode', width: 18 },
-      { header: 'Categoría', key: 'category', width: 22 },
-      { header: 'Subcategoría', key: 'subcategory', width: 22 },
+      { header: 'Categoria', key: 'category', width: 22 },
       { header: 'Marca', key: 'brand', width: 18 },
-      { header: 'Modelo (compatibilidad)', key: 'models', width: 32 },
-      { header: 'Tipo', key: 'kind', width: 14 },
-      // La columna Costo solo aparece para usuarios con permiso.
+      {
+        header: 'Modelo (Marca:Modelo:Año-Año, separados por ;)',
+        key: 'models',
+        width: 40,
+      },
+      {
+        header: 'Codigos compatibles (separados por ;)',
+        key: 'compatibleCodes',
+        width: 32,
+      },
+      { header: 'Tipo (ORIGINAL/ALTERNATIVE)', key: 'kind', width: 16 },
+      // La columna Costo solo aparece para usuarios con permiso. Es informativa:
+      // al reimportar, el costo de productos existentes NO se pisa (autogestionado).
       ...(canSeeCost
         ? [
             {
-              header: 'Costo',
+              header: 'Costo (bruto)',
               key: 'cost',
               width: 14,
               style: { numFmt: MONEY_FMT },
             },
           ]
         : []),
-      { header: 'Precio', key: 'price', width: 14, style: { numFmt: MONEY_FMT } },
-      { header: 'Stock mín.', key: 'minStock', width: 10 },
+      {
+        header: 'Precio (bruto)',
+        key: 'price',
+        width: 14,
+        style: { numFmt: MONEY_FMT },
+      },
+      { header: 'Stock minimo', key: 'minStock', width: 10 },
       { header: 'Stock por bodega', key: 'stockByWarehouse', width: 28 },
       { header: 'Stock actual (total)', key: 'totalStock', width: 14 },
       { header: 'Descripción', key: 'description', width: 40 },
@@ -257,8 +283,10 @@ export class ProductsController {
 
     for (const p of products) {
       const cat = p.categoryId ? categoryById.get(p.categoryId) : null;
-      const categoryName = cat?.parentName ?? cat?.name ?? '';
-      const subcategoryName = cat?.parentName ? cat.name : '';
+      // Emitimos la categoría HOJA (la específica del producto) en una sola
+      // columna 'Categoria'. Al reimportar, el importer la reasigna/crea por
+      // nombre, preservando la categoría del producto.
+      const categoryName = cat?.name ?? '';
       const stocks = stockByProduct.get(p.id) ?? [];
       const totalStock = stocks.reduce((acc, s) => acc + s.qty, 0);
       const stockByWarehouse = stocks
@@ -270,10 +298,11 @@ export class ProductsController {
         partNumber: p.partNumber ?? '',
         barcode: p.barcode ?? '',
         category: categoryName,
-        subcategory: subcategoryName,
         brand: p.brand?.name ?? '',
         models: modelsByProduct.get(p.id) ?? '',
-        kind: p.productKind === 'ORIGINAL' ? 'Original' : 'Alternativo',
+        compatibleCodes: codesByProduct.get(p.id) ?? '',
+        // Valor en mayúsculas para que el archivo round-trip con el importer.
+        kind: p.productKind === 'ORIGINAL' ? 'ORIGINAL' : 'ALTERNATIVE',
         ...(canSeeCost ? { cost: parseFloat(p.cost ?? '0') } : {}),
         price: parseFloat(p.price ?? '0'),
         minStock: p.minStock ?? 0,

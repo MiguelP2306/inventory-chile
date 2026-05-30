@@ -19,6 +19,7 @@ import {
 } from '@/lib/catalog-api';
 import { formatCurrency } from '@/lib/format';
 import { listStock } from '@/lib/inventory-api';
+import { listWarehouses } from '@/lib/warehouses-api';
 import { useProductBag } from '@/lib/use-product-bag';
 import { cn } from '@/lib/utils';
 
@@ -42,6 +43,10 @@ export function AddToBagDialog({ productId, onClose }: Props) {
   const { add } = useProductBag();
 
   useEffect(() => {
+    // Resetear el visor de imágenes en cada apertura/cierre del diálogo: si no,
+    // al cerrar y volver a buscar otro producto el lightbox quedaba "abierto"
+    // con el índice anterior y se mostraba solo, sin que el usuario lo pidiera.
+    setLightboxIndex(null);
     if (open) setQty(1);
   }, [open]);
 
@@ -51,6 +56,20 @@ export function AddToBagDialog({ productId, onClose }: Props) {
     enabled: open,
     staleTime: 30 * 1000,
   });
+
+  // Bodegas para mostrar el NOMBRE en vez del UUID en el desglose de stock.
+  const warehouses = useQuery({
+    queryKey: ['warehouses'],
+    queryFn: () => listWarehouses(),
+    enabled: open,
+    staleTime: 5 * 60 * 1000,
+    select: (rows) => (Array.isArray(rows) ? rows : rows.items),
+  });
+  const warehouseNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const w of warehouses.data ?? []) map.set(w.id, w.name);
+    return map;
+  }, [warehouses.data]);
 
   const images = useQuery({
     queryKey: ['product-images', productId],
@@ -196,9 +215,17 @@ export function AddToBagDialog({ productId, onClose }: Props) {
                         {(stock.data ?? []).map((s) => (
                           <li
                             key={`${s.product.id}-${s.warehouseId}`}
-                            className="flex items-center justify-between"
+                            className="flex items-center justify-between gap-2"
                           >
-                            <span>Bodega: {s.warehouseId.slice(0, 8)}…</span>
+                            <span className="truncate">
+                              {warehouseNameById.get(s.warehouseId) ??
+                                'Bodega'}
+                              {s.locationCode ? (
+                                <span className="text-muted-foreground/70">
+                                  {' · '}Ubic.: {s.locationCode}
+                                </span>
+                              ) : null}
+                            </span>
                             <span className="font-mono font-semibold">
                               {s.quantity} un.
                             </span>

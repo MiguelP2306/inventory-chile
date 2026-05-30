@@ -53,6 +53,7 @@ import {
 } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
 import { apiAbsoluteUrl } from '@/lib/api';
+import { invalidateProductCaches } from '@/lib/invalidate-product-caches';
 import { apiErrorMessage, publicImageUrl } from '@/lib/catalog-api';
 import { listStockPaginated, setStockLocation } from '@/lib/inventory-api';
 // ⚠️ NOTA: `adjustStock` es la función que tu antiguo <AdjustStockDialog>
@@ -534,6 +535,7 @@ function AdjustStockModal({
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['stock'] });
+      invalidateProductCaches(qc);
       toast.success(
         `${product.sku} ajustado · nuevo stock: ${resultingStock} un.`,
       );

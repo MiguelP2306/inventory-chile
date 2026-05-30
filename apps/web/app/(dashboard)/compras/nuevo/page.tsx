@@ -29,6 +29,7 @@ import {
   publicDocumentUrl,
   uploadPurchaseInvoice,
 } from '@/lib/cashbox-api';
+import { invalidateProductCaches } from '@/lib/invalidate-product-caches';
 import { apiErrorMessage } from '@/lib/catalog-api';
 import { formatCurrency } from '@/lib/format';
 import {
@@ -165,6 +166,10 @@ export default function NuevaCompraPage() {
       qc.invalidateQueries({ queryKey: ['movements'] });
       qc.invalidateQueries({ queryKey: ['cashbox-balance'] });
       qc.invalidateQueries({ queryKey: ['cash-transactions'] });
+      // La compra recalcula el costo ponderado del producto (motor de lotes),
+      // así que hay que refrescar todas las vistas que muestran ese costo:
+      // listado, detalle, buscador/picker y stock del bolso.
+      invalidateProductCaches(qc);
       toast.success('Compra registrada');
       router.push('/compras');
       router.refresh();

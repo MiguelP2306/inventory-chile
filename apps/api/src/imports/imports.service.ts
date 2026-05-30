@@ -675,11 +675,19 @@ export class ImportsService {
         description: row.description,
         categoryId,
         brandId,
-        cost: row.cost ?? '0',
-        price: row.price ?? '0',
-        minStock: row.minStock ?? 0,
+        // El costo es AUTOGESTIONADO por el motor de costo ponderado (lotes). En
+        // un producto existente NUNCA se pisa desde el import (evita destruir el
+        // ponderado al reimportar un export). En alta nueva se usa como costo
+        // inicial de partida.
+        cost: existing ? existing.cost : (row.cost ?? '0'),
+        // Precio, stock mínimo y tipo se PRESERVAN si la celda viene vacía, así
+        // reimportar un archivo que no trae esas columnas no las deja en 0.
+        price: row.price ?? existing?.price ?? '0',
+        minStock: row.minStock ?? existing?.minStock ?? 0,
         location: row.location,
-        productKind: (row.productKind ?? 'ORIGINAL') as 'ORIGINAL' | 'ALTERNATIVE',
+        productKind: (row.productKind ??
+          existing?.productKind ??
+          'ORIGINAL') as 'ORIGINAL' | 'ALTERNATIVE',
         isActive: existing?.isActive ?? true,
       };
 

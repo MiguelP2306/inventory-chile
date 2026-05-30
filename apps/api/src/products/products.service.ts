@@ -698,6 +698,30 @@ export class ProductsService {
     return map;
   }
 
+  /**
+   * Devuelve, por producto, sus códigos compatibles unidos por "; " (mismo
+   * separador que acepta el importer). Se usa en el export XLSX para que el
+   * archivo exportado se pueda reimportar sin perder los códigos.
+   */
+  async compatibleCodesByProduct(
+    productIds: string[],
+  ): Promise<Map<string, string>> {
+    const map = new Map<string, string>();
+    if (productIds.length === 0) return map;
+    const rows = await this.codes.find({
+      where: { productId: In(productIds), kind: ProductCodeKind.COMPATIBLE },
+      order: { code: 'ASC' },
+    });
+    const groups = new Map<string, string[]>();
+    for (const c of rows) {
+      const arr = groups.get(c.productId) ?? [];
+      arr.push(c.code);
+      groups.set(c.productId, arr);
+    }
+    for (const [pid, codes] of groups) map.set(pid, codes.join('; '));
+    return map;
+  }
+
   // Reemplaza la lista completa de códigos compatibles del producto vía endpoint
   // dedicado, fuera del ciclo de update normal.
   async replaceCompatibleCodesPublic(productId: string, codes: string[]) {
