@@ -433,7 +433,7 @@ export default function CategoriaDetailPage() {
                     productos de sus subcategorías.
                   </p>
                 </div>
-                <Button size="sm" onClick={startCreateSub}>
+                <Button size="sm" variant="brand" onClick={startCreateSub}>
                   <Plus className="h-3.5 w-3.5" />
                   Nueva subcategoría
                 </Button>

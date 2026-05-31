@@ -1260,7 +1260,7 @@ function StatusToggle({
           className={cn(
             'rounded-xl px-4 py-1.5 text-[11.5px] font-bold transition-all',
             value === opt.value
-              ? 'bg-slate-950 font-black text-white shadow-sm dark:bg-slate-100 dark:text-slate-950'
+              ? 'bg-[#2F6BFF] font-black text-white shadow-sm'
               : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200',
           )}
         >

@@ -151,7 +151,7 @@ export default function AlmacenesPage() {
         </div>
         <button
           onClick={startCreate}
-          className="inline-flex shrink-0 cursor-pointer items-center gap-2 self-start rounded-2xl bg-slate-950 px-5 py-3 text-xs font-bold text-white shadow-md transition-colors hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-50 sm:self-auto"
+          className="inline-flex shrink-0 cursor-pointer items-center gap-2 self-start rounded-2xl bg-[#2F6BFF] px-5 py-3 text-xs font-bold text-white shadow-md transition-colors hover:bg-[#2F6BFF]/90 sm:self-auto"
         >
           <Plus className="h-[18px] w-[18px]" />
           <span>Nueva bodega</span>

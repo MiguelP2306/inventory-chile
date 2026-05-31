@@ -1,16 +1,13 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { ArrowRight, Eye, EyeOff } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff } from 'lucide-react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { api } from '@/lib/api';
-import { cn } from '@/lib/utils';
 
 const schema = z.object({
   email: z.string().email('Email inválido'),
@@ -19,14 +16,66 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
-// Grano sutil — SVG noise inline para no depender de assets externos.
-const NOISE =
-  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.06 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>\")";
+/**
+ * /login — Rediseño UI (look de Login.tsx: card 2 columnas + carrusel).
+ *
+ * SOLO UI/UX. La lógica de autenticación es idéntica a la versión previa:
+ *  · react-hook-form + zodResolver (email + password).
+ *  · api.post('/auth/login', values) → router.replace('/') + refresh.
+ *  · serverError + showPassword.
+ *
+ * Cambios visuales: card rounded-3xl de 2 columnas. Izquierda = formulario
+ * (pill de marca, título, inputs estilizados, toggle "Recuérdame", botón
+ * índigo). Derecha = hero oscuro con carrusel auto-rotativo y dots.
+ *
+ * NOTAS (controles del mock que NO existían en tu lógica):
+ *  · "Recuérdame": estado local visual. NO altera el submit. Si querés que
+ *    persista la sesión, conectalo a tu flujo de auth (marcado abajo).
+ *  · "¿Olvidaste tu contraseña?" y "Google Sign In": stubs marcados con TODO.
+ *    Los dejé porque son parte del diseño; conectá tus endpoints reales o
+ *    eliminálos si no aplican. Un click hoy no dispara backend.
+ *  · Imagen del hero: cada slide del carrusel tiene su foto en /public/login
+ *    (taller.jpg, stock.jpg, punto-de-venta.jpg), renderizada con next/image
+ *    (fill + sizes, priority en la primera) y crossfade entre slides. El
+ *    gradiente del <div data-hero-bg> queda como fallback mientras cargan.
+ */
+
+const CAROUSEL_SLIDES = [
+  {
+    title: 'Potencia tu taller.',
+    description:
+      'Abastecimiento ágil e inmediato de repuestos automotrices, optimizando los tiempos de reparación.',
+    image: '/login/taller.jpg',
+  },
+  {
+    title: 'Control de stock milimétrico.',
+    description:
+      'Actualización en tiempo real del inventario en múltiples bodegas para que nunca te quedes sin repuestos.',
+    image: '/login/stock.jpg',
+  },
+  {
+    title: 'Punto de venta ultra veloz.',
+    description:
+      'Factura, vende y emite comprobantes electrónicos de forma instantánea con el ERP preferido para talleres en Chile.',
+    image: '/login/punto-de-venta.jpg',
+  },
+];
+
+const ACCENT = '#4E44E7';
 
 export default function LoginPage() {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true); // visual-only (ver NOTAS)
+  const [activeSlide, setActiveSlide] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setActiveSlide((prev) => (prev + 1) % CAROUSEL_SLIDES.length);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const {
     register,
@@ -40,203 +89,226 @@ export default function LoginPage() {
   const onSubmit = async (values: FormValues) => {
     setServerError(null);
     try {
+      // TODO (opcional): si "Recuérdame" debe persistir sesión, pasá
+      // rememberMe a tu endpoint/almacenamiento aquí.
       await api.post('/auth/login', values);
       router.replace('/');
       router.refresh();
     } catch (err: unknown) {
       const message =
-        (err as { response?: { data?: { message?: string } } })?.response?.data
-          ?.message ?? 'No pudimos iniciar sesión. Reintentá.';
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+        'No pudimos iniciar sesión. Reintentá.';
       setServerError(message);
     }
   };
 
+  const inputCls =
+    'w-full text-xs font-semibold px-4 py-3 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-900/50 text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-[#4E44E7] transition-all';
+
   return (
-    <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-[#f6f5f1] px-4 py-8 text-neutral-900">
-      {/* Aurora mesh — gradientes radiales muy desaturados */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0"
-        style={{
-          background: [
-            'radial-gradient(60% 50% at 12% 18%, rgba(180,200,230,0.55), transparent 70%)',
-            'radial-gradient(45% 38% at 88% 12%, rgba(255,222,200,0.55), transparent 70%)',
-            'radial-gradient(55% 55% at 78% 92%, rgba(220,200,230,0.45), transparent 70%)',
-            'radial-gradient(40% 40% at 28% 95%, rgba(210,230,215,0.45), transparent 70%)',
-          ].join(','),
-        }}
-      />
-      {/* Grano */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-60 mix-blend-multiply"
-        style={{ backgroundImage: NOISE }}
-      />
-
-      {/* Píldora de estado */}
-      {/* <div className="absolute right-5 top-5 z-10 inline-flex items-center gap-1.5 rounded-full border border-black/5 bg-white/60 px-2.5 py-1 pl-2 text-[11px] font-medium text-neutral-600 backdrop-blur">
-        <span className="relative inline-flex h-1.5 w-1.5">
-          <span className="absolute inset-0 inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-35" />
-          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-600" />
-        </span>
-        Todos los sistemas operativos
-      </div> */}
-
-      {/* Card glass */}
-      <div className="relative z-10 w-full max-w-md">
-        <div className="relative overflow-hidden rounded-[20px] border border-white/65 bg-white/60 p-8 shadow-[0_1px_0_rgba(255,255,255,0.7)_inset,0_1px_2px_rgba(11,11,12,0.04),0_18px_40px_-16px_rgba(11,11,12,0.14),0_36px_80px_-28px_rgba(11,11,12,0.16)] backdrop-blur-2xl backdrop-saturate-150">
-          {/* Brillo superior del borde (gradient stroke) */}
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-0 rounded-[20px]"
-            style={{
-              padding: 1,
-              background:
-                'linear-gradient(180deg, rgba(255,255,255,0.9), rgba(255,255,255,0))',
-              WebkitMask:
-                'linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)',
-              WebkitMaskComposite: 'xor',
-              maskComposite: 'exclude',
-            }}
-          />
-
+    <div className="flex min-h-screen w-full items-center justify-center bg-[#F3F4F6] p-3 font-sans dark:bg-[#0B0E14] sm:p-6">
+      <div className="flex min-h-[600px] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-2xl dark:border-slate-800/80 dark:bg-[#121620] md:flex-row">
+        {/* ============================================================
+            LEFT — FORM
+            ============================================================ */}
+        <div className="flex w-full flex-col justify-between bg-white p-8 dark:bg-[#121620] sm:p-12 md:w-1/2">
           {/* Marca */}
-          <div className="mb-7 flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-[9px] bg-gradient-to-br from-neutral-900 to-neutral-700 shadow-[0_1px_0_rgba(255,255,255,0.4)_inset,0_6px_14px_-6px_rgba(11,11,12,0.4)]">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <rect x="3" y="3" width="18" height="18" rx="4" stroke="#fff" strokeWidth="1.8" />
-                <circle cx="12" cy="12" r="3.2" stroke="#fff" strokeWidth="1.8" />
-                <path
-                  d="M12 6.5V3M12 21v-3.5M6.5 12H3M21 12h-3.5"
-                  stroke="#fff"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </div>
-            <div className="text-[15px] font-semibold tracking-tight">
-              Inventario{' '}
-              <span className="font-normal text-neutral-500">· Repuestos</span>
+          <div className="mb-10 flex items-center md:mb-0">
+            <div
+              className="inline-flex select-none items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black"
+              style={{ backgroundColor: `${ACCENT}14`, color: ACCENT }}
+            >
+              <span
+                className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] text-white"
+                style={{ backgroundColor: ACCENT }}
+              >
+                ⚙️
+              </span>
+              <span className="font-sans tracking-tight">Repuestos San Pablo</span>
             </div>
           </div>
 
-          {/* Título */}
-          <h1 className="mb-2 text-2xl font-semibold tracking-tight">
-            Bienvenido de vuelta
-          </h1>
-          <p className="mb-7 text-sm leading-relaxed text-neutral-600">
-            Ingresá con tu cuenta de administrador para continuar.
-          </p>
-
           {/* Form */}
-          <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-3.5">
-            <div className="space-y-1.5">
-              <Label htmlFor="email" className="text-xs font-medium text-neutral-900">
-                Email
-              </Label>
-              <Input
-                id="email"
-                type="email"
-                autoComplete="email"
-                autoFocus
-                placeholder="vos@empresa.cl"
-                className={cn(
-                  'h-11 rounded-xl border-neutral-200/80 bg-white/60 px-3.5 text-sm text-neutral-900 placeholder:text-neutral-400',
-                  'transition-colors hover:border-neutral-300',
-                  'focus-visible:border-neutral-700 focus-visible:bg-white focus-visible:ring-4 focus-visible:ring-neutral-900/[0.06]',
-                  errors.email &&
-                  'border-destructive/60 focus-visible:border-destructive focus-visible:ring-destructive/15',
-                )}
-                {...register('email')}
-              />
-              {errors.email && (
-                <p className="text-[12px] text-destructive">{errors.email.message}</p>
-              )}
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password" className="text-xs font-medium text-neutral-900">
-                  Contraseña
-                </Label>
-                {/* <a
-                  href="#"
-                  className="text-[12px] font-medium text-neutral-600 transition-colors hover:text-neutral-900 hover:underline hover:underline-offset-[3px]"
-                >
-                  ¿Olvidaste tu contraseña?
-                </a> */}
-              </div>
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={showPassword ? 'text' : 'password'}
-                  autoComplete="current-password"
-                  placeholder="••••••••"
-                  className={cn(
-                    'h-11 rounded-xl border-neutral-200/80 bg-white/60 px-3.5 pr-11 text-sm text-neutral-900 placeholder:text-neutral-400',
-                    'transition-colors hover:border-neutral-300',
-                    'focus-visible:border-neutral-700 focus-visible:bg-white focus-visible:ring-4 focus-visible:ring-neutral-900/[0.06]',
-                    errors.password &&
-                    'border-destructive/60 focus-visible:border-destructive focus-visible:ring-destructive/15',
-                  )}
-                  {...register('password')}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-black/[0.04] hover:text-neutral-900"
-                  aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-                >
-                  {showPassword ? (
-                    <EyeOff className="h-4 w-4" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
-                </button>
-              </div>
-              {errors.password && (
-                <p className="text-[12px] text-destructive">{errors.password.message}</p>
-              )}
-            </div>
+          <div className="my-auto mx-auto w-full max-w-sm py-4">
+            <h1 className="mb-2 text-2xl font-black tracking-tight text-slate-900 dark:text-white sm:text-3xl">
+              ¡Bienvenido de vuelta!
+            </h1>
+            <p className="mb-8 text-xs font-medium text-slate-400 dark:text-slate-500">
+              Ingresa con tu cuenta comercial para administrar el inventario.
+            </p>
 
             {serverError && (
-              <p className="rounded-md bg-destructive/10 px-3 py-2 text-[13px] text-destructive">
-                {serverError}
-              </p>
+              <div className="mb-5 flex items-center gap-2 rounded-xl border border-rose-100 bg-rose-50 p-3 text-xs font-semibold text-rose-600 animate-in fade-in slide-in-from-top-1 dark:border-rose-900/30 dark:bg-rose-950/20 dark:text-rose-400">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>{serverError}</span>
+              </div>
             )}
 
-            <Button
-              type="submit"
-              disabled={isSubmitting}
-              className={cn(
-                'group mt-5 h-[46px] w-full gap-2 rounded-xl bg-neutral-900 text-sm font-medium text-white',
-                'shadow-[0_1px_0_rgba(255,255,255,0.18)_inset,0_1px_2px_rgba(11,11,12,0.2),0_12px_28px_-10px_rgba(11,11,12,0.5)]',
-                'transition-all hover:bg-neutral-800 hover:text-white hover:shadow-[0_1px_0_rgba(255,255,255,0.2)_inset,0_2px_4px_rgba(11,11,12,0.22),0_18px_36px_-10px_rgba(11,11,12,0.55)]',
-                'active:translate-y-px',
-                'disabled:opacity-70',
-              )}
-            >
-              {isSubmitting ? (
-                'Ingresando…'
-              ) : (
-                <>
-                  <span>Ingresar</span>
-                  <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
-                </>
-              )}
-            </Button>
-          </form>
+            <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-5">
+              {/* Email */}
+              <div className="space-y-1.5">
+                <label htmlFor="email" className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                  Email
+                </label>
+                <input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  autoFocus
+                  placeholder="ej: admin@inventory.local"
+                  className={inputCls}
+                  style={{
+                    ['--tw-ring-color' as string]: `${ACCENT}1a`,
+                  }}
+                  {...register('email')}
+                />
+                {errors.email && (
+                  <p className="text-[11px] font-bold text-rose-500">{errors.email.message}</p>
+                )}
+              </div>
 
-          {/* Footer del card */}
-          <div className="mt-5 flex items-center justify-center gap-2 text-[11.5px] text-neutral-500">
-            <span>Acceso restringido · personal autorizado</span>
-            <span className="h-[3px] w-[3px] rounded-full bg-current opacity-50" />
-            <a
-              href="#"
-              className="text-neutral-600 transition-colors hover:text-neutral-900"
-            >
-              Soporte
-            </a>
+              {/* Password */}
+              <div className="space-y-1.5">
+                <label htmlFor="password" className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                  Contraseña
+                </label>
+                <div className="relative">
+                  <input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    autoComplete="current-password"
+                    placeholder="Escriba su contraseña"
+                    className={`${inputCls} pr-10 font-mono`}
+                    style={{ ['--tw-ring-color' as string]: `${ACCENT}1a` }}
+                    {...register('password')}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 cursor-pointer p-0.5 text-slate-400 transition-colors hover:text-slate-600 dark:hover:text-slate-200"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+                {errors.password && (
+                  <p className="text-[11px] font-bold text-rose-500">{errors.password.message}</p>
+                )}
+              </div>
+
+              {/* Recuérdame + olvidé contraseña */}
+              <div className="flex items-center justify-between pt-1 text-xs font-bold">
+                <label className="flex cursor-pointer select-none items-center gap-2 text-slate-600 dark:text-slate-400">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="sr-only"
+                  />
+                  <div
+                    className="h-[18px] w-8 rounded-full p-0.5 transition-colors duration-200"
+                    style={{ backgroundColor: rememberMe ? ACCENT : undefined }}
+                  >
+                    <div
+                      className={`h-3.5 w-3.5 rounded-full bg-white transition-transform duration-200 ${
+                        rememberMe ? 'translate-x-3.5' : 'translate-x-0'
+                      } ${rememberMe ? '' : 'bg-white'}`}
+                    />
+                  </div>
+                  <span className={rememberMe ? '' : 'text-slate-600 dark:text-slate-400'}>Recuérdame</span>
+                  {!rememberMe && <span className="hidden" />}
+                </label>
+                {/* TODO: conectá tu flujo real de recuperación de contraseña. */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setServerError(
+                      'Para restablecer tu contraseña, contactá al administrador de TI.',
+                    )
+                  }
+                  className="cursor-pointer hover:underline"
+                  style={{ color: ACCENT }}
+                >
+                  ¿Olvidaste tu contraseña?
+                </button>
+              </div>
+
+              {/* Botón Ingresar */}
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="mt-4 flex w-full cursor-pointer select-none items-center justify-center gap-2 rounded-xl py-3 text-center text-xs font-black text-white shadow-md transition-all hover:shadow-lg active:scale-[0.99] disabled:opacity-70"
+                style={{ backgroundColor: ACCENT }}
+              >
+                {isSubmitting ? 'Procesando ingreso…' : 'Ingresar →'}
+              </button>
+            </form>
+          </div>
+
+          {/* Footer */}
+          <div className="mt-10 select-none text-center md:mt-0">
+            <span className="block text-[11px] font-bold leading-relaxed text-slate-400 dark:text-slate-500">
+              Acceso restringido · Solo personal comercial autorizado
+            </span>
+          </div>
+        </div>
+
+        {/* ============================================================
+            RIGHT — HERO + CARRUSEL
+            ============================================================ */}
+        <div
+          data-hero-bg
+          className="relative flex h-[380px] w-full flex-col justify-end overflow-hidden bg-slate-950 p-8 dark:bg-black sm:p-10 md:h-auto md:w-1/2"
+          style={{
+            backgroundImage:
+              'radial-gradient(120% 80% at 80% 0%, rgba(78,68,231,0.35), transparent 60%), radial-gradient(100% 90% at 0% 100%, rgba(40,40,60,0.6), transparent 60%), linear-gradient(160deg, #1a1d2e 0%, #0b0e14 100%)',
+            backgroundSize: 'cover',
+          }}
+        >
+          {/* Imágenes del carrusel — optimizadas con next/image (fill + sizes).
+              Crossfade: la del slide activo en opacity-100, el resto en 0. */}
+          {CAROUSEL_SLIDES.map((slide, idx) => (
+            <Image
+              key={slide.image}
+              src={slide.image}
+              alt=""
+              fill
+              priority={idx === 0}
+              sizes="(min-width: 768px) 50vw, 100vw"
+              className={`object-cover transition-opacity duration-700 ${
+                activeSlide === idx ? 'opacity-100' : 'opacity-0'
+              }`}
+            />
+          ))}
+          {/* Overlay para legibilidad del texto sobre la foto */}
+          <div className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-t from-slate-950 via-slate-950/50 to-slate-950/20" />
+
+          <div className="relative z-20 space-y-4">
+            <div className="flex min-h-[140px] flex-col justify-end">
+              <div key={activeSlide} className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-700">
+                <h2 className="text-2xl font-extrabold leading-none tracking-tight text-white drop-shadow-md sm:text-3xl">
+                  {CAROUSEL_SLIDES[activeSlide]?.title}
+                </h2>
+                <p className="max-w-sm font-sans text-xs font-semibold leading-relaxed text-slate-300 drop-shadow-sm sm:text-sm">
+                  {CAROUSEL_SLIDES[activeSlide]?.description}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 pt-4">
+              {CAROUSEL_SLIDES.map((_, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setActiveSlide(idx)}
+                  title={`Ver diapositiva ${idx + 1}`}
+                  className="h-2 cursor-pointer rounded-full transition-all duration-300"
+                  style={{
+                    width: activeSlide === idx ? 28 : 8,
+                    backgroundColor: activeSlide === idx ? ACCENT : 'rgba(255,255,255,0.4)',
+                  }}
+                />
+              ))}
+            </div>
           </div>
         </div>
       </div>

@@ -204,7 +204,7 @@ export default function NuevaCompraPage() {
           <button
             type="submit"
             disabled={!valid || mut.isPending || uploadingInvoice}
-            className="flex-1 cursor-pointer rounded-xl bg-slate-950 px-5 py-3 text-center font-bold text-white transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-slate-950 sm:flex-initial"
+            className="flex-1 cursor-pointer rounded-xl bg-[#2F6BFF] px-5 py-3 text-center font-bold text-white transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 sm:flex-initial"
           >
             {mut.isPending
               ? 'Guardando…'

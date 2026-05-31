@@ -195,7 +195,7 @@ export default function CategoriasPage() {
             )}
           </p>
         </div>
-        <Button onClick={startCreate} size="sm">
+        <Button onClick={startCreate} size="sm" variant="brand">
           <Plus className="h-4 w-4" />
           Nueva categoría
         </Button>

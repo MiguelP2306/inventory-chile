@@ -15,6 +15,15 @@ const config: Config = {
     },
     extend: {
       colors: {
+        // `slate-850` no existe en la paleta default de Tailwind. El diseño lo
+        // usa en ~75 lugares (dark:border/divide/bg-slate-850); al no estar
+        // definido, esas clases eran no-op y en modo oscuro quedaba el valor
+        // claro (border-slate-100) → borde feo en las tablas. Lo definimos como
+        // un slate intermedio 800↔900 para que rinda un borde sutil igual al de
+        // la tabla de Stock (referencia, que usa slate-800).
+        slate: {
+          850: '#1a2336',
+        },
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',

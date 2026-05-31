@@ -315,10 +315,10 @@ export default function ProductosPage() {
           <ActionButton as="link" href="/productos/importar" icon={Upload}>
             Importar Excel
           </ActionButton>
-          {/* Nuevo producto — Link conservado, botón oscuro (estilo Catalog) */}
+          {/* Nuevo producto — Link conservado, botón azul de marca */}
           <Link
             href="/productos/nuevo"
-            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-xl bg-slate-950 px-4 py-2.5 text-[11.5px] font-extrabold text-white shadow-md transition-colors hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"
+            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-xl bg-[#2F6BFF] px-4 py-2.5 text-[11.5px] font-extrabold text-white shadow-md transition-colors hover:bg-[#2F6BFF]/90"
           >
             <Plus className="h-4 w-4" />
             Nuevo producto

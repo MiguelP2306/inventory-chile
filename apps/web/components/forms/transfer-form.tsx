@@ -339,7 +339,7 @@ export function TransferForm({ onSuccess, onCancel }: Props) {
         >
           Cancelar
         </Button>
-        <Button type="submit" disabled={!formValid || createMut.isPending}>
+        <Button type="submit" variant="brand" disabled={!formValid || createMut.isPending}>
           <Send className="h-4 w-4" />
           {createMut.isPending ? 'Registrando...' : 'Confirmar transferencia'}
         </Button>

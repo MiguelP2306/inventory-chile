@@ -462,7 +462,7 @@ export function ProductForm({ product }: Props) {
             <ArrowLeft className="h-4 w-4" />
             Cancelar
           </Button>
-          <Button type="submit" disabled={submitting}>
+          <Button type="submit" variant="brand" disabled={submitting}>
             {submitting ? (
               <>Guardando…</>
             ) : (
@@ -1042,7 +1042,7 @@ export function ProductForm({ product }: Props) {
           >
             Descartar
           </Button>
-          <Button type="submit" size="sm" disabled={submitting}>
+          <Button type="submit" variant="brand" size="sm" disabled={submitting}>
             {submitting ? (
               <>Guardando…</>
             ) : (
@@ -1959,6 +1959,7 @@ function PendingImagesUploader({
         </p>
         <Button
           type="button"
+          variant="brand"
           size="sm"
           className="mt-3"
           onClick={() => inputRef.current?.click()}

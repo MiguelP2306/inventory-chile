@@ -9,6 +9,8 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default: 'bg-primary text-primary-foreground hover:bg-primary/90',
+        // Acción primaria del nuevo diseño: azul de marca, igual en claro y oscuro.
+        brand: 'bg-[#2F6BFF] text-white hover:bg-[#2F6BFF]/90',
         destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
         outline:
           'border border-input bg-background hover:bg-accent hover:text-accent-foreground',

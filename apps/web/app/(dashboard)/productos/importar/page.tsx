@@ -170,7 +170,7 @@ export default function ImportProductsPage() {
           <div className="flex gap-2">
             <Button
               type="button"
-              variant="default"
+              variant="brand"
               onClick={() => inputRef.current?.click()}
               disabled={previewMut.isPending || confirmMut.isPending}
             >
@@ -343,6 +343,7 @@ function PreviewSection({
         </Button>
         <Button
           type="button"
+          variant="brand"
           onClick={onConfirm}
           disabled={loading || preview.validCount === 0}
         >
@@ -448,7 +449,7 @@ function ResultSection({
         <Button asChild variant="outline">
           <Link href="/productos">Ver catálogo</Link>
         </Button>
-        <Button type="button" onClick={onAgain}>
+        <Button type="button" variant="brand" onClick={onAgain}>
           Importar otro Excel
         </Button>
       </div>

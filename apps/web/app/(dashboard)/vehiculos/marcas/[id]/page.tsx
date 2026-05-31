@@ -139,7 +139,7 @@ export default function VehicleMakeDetailPage() {
       <div className="rounded-md border bg-card">
         <div className="flex items-center justify-between border-b p-4">
           <h2 className="font-medium">Modelos de {make?.name ?? '—'}</h2>
-          <Button size="sm" onClick={startCreate}>
+          <Button size="sm" variant="brand" onClick={startCreate}>
             <Plus className="h-4 w-4" />
             Nuevo modelo
           </Button>

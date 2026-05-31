@@ -170,7 +170,7 @@ export default function ProveedoresPage() {
           </Link>
           <button
             onClick={startCreate}
-            className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-slate-950 px-5 py-2.5 font-bold text-white shadow-sm transition-colors hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:opacity-95"
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-[#2F6BFF] px-5 py-2.5 font-bold text-white shadow-sm transition-colors hover:bg-[#2F6BFF]/90"
           >
             <Plus className="h-4 w-4" />
             <span>Nuevo proveedor</span>
@@ -452,7 +452,7 @@ export default function ProveedoresPage() {
                 <button
                   type="submit"
                   disabled={!form.name.trim() || rutInvalid || saving}
-                  className="inline-flex cursor-pointer items-center rounded-xl bg-slate-900 px-6 py-2.5 text-xs text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-slate-950"
+                  className="inline-flex cursor-pointer items-center rounded-xl bg-[#2F6BFF] px-6 py-2.5 text-xs text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {saving ? 'Guardando…' : editing ? 'Guardar' : 'Crear'}
                 </button>

@@ -110,7 +110,7 @@ export default function TransferenciasPage() {
           )}
           <Link
             href="/transferencias/nueva"
-            className="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-xs font-bold text-white shadow-md transition-colors hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-50"
+            className="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-2xl bg-[#2F6BFF] px-5 py-3 text-xs font-bold text-white shadow-md transition-colors hover:bg-[#2F6BFF]/90"
           >
             <Plus className="h-4 w-4" />
             <span>Nueva transferencia</span>

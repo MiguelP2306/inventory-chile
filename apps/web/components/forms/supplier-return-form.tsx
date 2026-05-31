@@ -488,7 +488,7 @@ export function SupplierReturnForm({ purchase, onSuccess, onCancel }: Props) {
         >
           Cancelar
         </Button>
-        <Button type="submit" disabled={!valid || createMut.isPending}>
+        <Button type="submit" variant="brand" disabled={!valid || createMut.isPending}>
           <RotateCcw className="h-4 w-4" />
           {createMut.isPending ? 'Registrando...' : 'Registrar devolución'}
         </Button>
