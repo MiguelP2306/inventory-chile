@@ -1,34 +1,13 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { FileDown, Paperclip, Plus } from 'lucide-react';
+import { Download, Eye, Paperclip, Plus, Search } from 'lucide-react';
 import Link from 'next/link';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { useRouter } from 'next/navigation';
 import { apiAbsoluteUrl } from '@/lib/api';
 import { publicDocumentUrl } from '@/lib/cashbox-api';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { formatCurrency } from '@/lib/format';
-import {
-  getPurchasesKpis,
-  listPurchases,
-  listSuppliers,
-} from '@/lib/inventory-api';
+import { getPurchasesKpis, listPurchases, listSuppliers } from '@/lib/inventory-api';
 import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
 import { listWarehouses } from '@/lib/warehouses-api';
@@ -37,11 +16,28 @@ import type { WarehouseDto } from '@inventory/shared';
 const ALL = '__all__';
 const PAGE_SIZE = 20;
 
+/**
+ * /compras — Rediseño UI (look de PurchasesList).
+ *
+ * SOLO UI/UX. La lógica es idéntica a la versión previa:
+ *  · useUrlFilters (q, supplier, warehouse, dateFrom, dateTo, totalMin, totalMax, page).
+ *  · useDebouncedUrlFilter para q (búsqueda libre) + totalMin/totalMax.
+ *  · getPurchasesKpis() (KPIs del mes, server-side, independientes de filtros).
+ *  · listPurchases con todos los filtros + paginación server-side.
+ *  · Export Excel respetando filtros (apiAbsoluteUrl + buildPurchasesExportQuery).
+ *
+ * Cambios visuales: header font-black, KPIs en cards rounded-2xl, search libre
+ * + grid de filtros redondeados (selects nativos + inputs), tabla en sheet
+ * rounded-3xl con filas clickeables, chip de facturas (×N) y footer de paginación.
+ *
+ * Búsqueda libre: `q` matchea proveedor (nombre/RUT) o notas de la compra
+ * (ListPurchasesQueryDto.q). El mismo `q` se aplica al export Excel, que usa
+ * el mismo DTO que el listado.
+ */
 export default function ComprasPage() {
-  // Ronda 7 — filtros agregados: bodega, rango de total. Antes solo
-  // proveedor + rango de fecha. Estos dos nuevos viven en URL como el resto
-  // para compartir links/refrescar sin perder el filtro.
+  const router = useRouter();
   const filters = useUrlFilters({
+    q: '',
     supplier: '',
     warehouse: '',
     dateFrom: '',
@@ -51,26 +47,19 @@ export default function ComprasPage() {
     page: '',
   });
   const { values, setFilter, clear } = filters;
+  const qFilter = useDebouncedUrlFilter(filters, 'q', { resetKeys: ['page'] });
   const supplierId = values.supplier || ALL;
   const warehouseId = values.warehouse || ALL;
   const dateFrom = values.dateFrom ?? '';
   const dateTo = values.dateTo ?? '';
-  // Ronda 8 — totalMin/totalMax con estado local debounceado. Antes cada
-  // tecla disparaba router.replace y se perdían caracteres al escribir
-  // rápido (mismo bug que se solucionó para inputs `q` en Ronda 1). El
-  // `value` local alimenta el input (responde instantáneo); la URL recibe
-  // el push 300 ms después y es lo que dispara la query.
-  const totalMinFilter = useDebouncedUrlFilter(filters, 'totalMin', {
-    resetKeys: ['page'],
-  });
-  const totalMaxFilter = useDebouncedUrlFilter(filters, 'totalMax', {
-    resetKeys: ['page'],
-  });
+  const totalMinFilter = useDebouncedUrlFilter(filters, 'totalMin', { resetKeys: ['page'] });
+  const totalMaxFilter = useDebouncedUrlFilter(filters, 'totalMax', { resetKeys: ['page'] });
   const totalMin = values.totalMin ?? '';
   const totalMax = values.totalMax ?? '';
   const page = Number(values.page || '1');
 
   const filtersActive =
+    qFilter.value.trim() !== '' ||
     supplierId !== ALL ||
     warehouseId !== ALL ||
     dateFrom !== '' ||
@@ -83,14 +72,10 @@ export default function ComprasPage() {
     queryKey: ['warehouses', 'all'],
     queryFn: () => listWarehouses(),
   });
-  const warehouseList = (
-    Array.isArray(warehouses.data)
-      ? warehouses.data
-      : warehouses.data?.items ?? []
-  ) as WarehouseDto[];
+  const warehouseList = (Array.isArray(warehouses.data)
+    ? warehouses.data
+    : warehouses.data?.items ?? []) as WarehouseDto[];
 
-  // Ronda 9 — KPIs del mes actual (default sin params). Se muestran como cards
-  // arriba de la tabla, independientes de los filtros aplicados a la lista.
   const kpis = useQuery({
     queryKey: ['purchases', 'kpis'],
     queryFn: () => getPurchasesKpis(),
@@ -99,10 +84,11 @@ export default function ComprasPage() {
   const list = useQuery({
     queryKey: [
       'purchases',
-      { supplierId, warehouseId, dateFrom, dateTo, totalMin, totalMax, page },
+      { q: values.q, supplierId, warehouseId, dateFrom, dateTo, totalMin, totalMax, page },
     ],
     queryFn: () =>
       listPurchases({
+        q: values.q || undefined,
         supplierId: supplierId === ALL ? undefined : supplierId,
         warehouseId: warehouseId === ALL ? undefined : warehouseId,
         dateFrom: dateFrom || undefined,
@@ -117,281 +103,314 @@ export default function ComprasPage() {
   const total = list.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  const exportHref = apiAbsoluteUrl(
+    `purchases/export.xlsx${buildPurchasesExportQuery({
+      q: values.q || undefined,
+      supplierId: supplierId === ALL ? undefined : supplierId,
+      warehouseId: warehouseId === ALL ? undefined : warehouseId,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+      totalMin: totalMin || undefined,
+      totalMax: totalMax || undefined,
+    })}`,
+  );
+
+  const fieldCls =
+    'w-full text-xs font-semibold px-3 py-3 bg-white dark:bg-[#11151C] text-slate-700 dark:text-white border border-slate-200 dark:border-slate-850 rounded-2xl focus:outline-none focus:border-[#2F6BFF] transition-all';
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold">Compras</h1>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button asChild variant="outline" size="sm">
-            <a
-              href={apiAbsoluteUrl(
-                `purchases/export.xlsx${buildPurchasesExportQuery({
-                  supplierId: supplierId === ALL ? undefined : supplierId,
-                  warehouseId: warehouseId === ALL ? undefined : warehouseId,
-                  dateFrom: dateFrom || undefined,
-                  dateTo: dateTo || undefined,
-                  totalMin: totalMin || undefined,
-                  totalMax: totalMax || undefined,
-                })}`,
-              )}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <FileDown className="h-4 w-4" />
-              Exportar Excel
-            </a>
-          </Button>
-          <Button asChild>
-            <Link href="/compras/nuevo">
-              <Plus className="h-4 w-4" />
-              Nueva entrada
-            </Link>
-          </Button>
+    <div className="space-y-6 animate-in fade-in duration-200">
+      {/* ============================================================
+          HEADER
+          ============================================================ */}
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">
+          Compras
+        </h1>
+        <div className="flex w-full gap-2.5 self-start sm:w-auto sm:self-auto">
+          <a
+            href={exportHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-bold text-slate-900 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-850 dark:bg-[#11151C] dark:text-white dark:hover:bg-slate-900 sm:flex-initial"
+          >
+            <Download className="h-4 w-4 text-slate-400" />
+            <span>Exportar Excel</span>
+          </a>
+          <Link
+            href="/compras/nuevo"
+            className="inline-flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-xs font-bold text-white shadow-md transition-all hover:opacity-95 dark:bg-white dark:text-slate-950 sm:flex-initial"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Nueva entrada</span>
+          </Link>
         </div>
       </div>
 
-      {/* Ronda 9 — KPIs del mes actual. Clicables: cada card filtra la
-          tabla según corresponda (mes actual o devoluciones). */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {/* ============================================================
+          KPIs
+          ============================================================ */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard
           label="Total comprado (mes)"
-          value={
-            kpis.data ? formatCurrency(kpis.data.totalAmount) : 'Cargando…'
-          }
-          hint={kpis.data ? `${kpis.data.count} compra(s)` : ''}
+          value={kpis.data ? formatCurrency(kpis.data.totalAmount) : '—'}
+          hint={kpis.data ? `${kpis.data.count} ${kpis.data.count === 1 ? 'compra' : 'compras'}` : 'Cargando…'}
         />
         <KpiCard
           label="Promedio por compra"
-          value={
-            kpis.data ? formatCurrency(kpis.data.averageAmount) : 'Cargando…'
-          }
+          value={kpis.data ? formatCurrency(kpis.data.averageAmount) : '—'}
           hint="Mes actual"
         />
         <KpiCard
           label="Devoluciones a proveedor"
-          value={
-            kpis.data ? formatCurrency(kpis.data.returnsAmount) : 'Cargando…'
-          }
-          hint={kpis.data ? `${kpis.data.returnsCount} devolución(es)` : ''}
+          value={kpis.data ? formatCurrency(kpis.data.returnsAmount) : '—'}
+          hint={kpis.data ? `${kpis.data.returnsCount} ${kpis.data.returnsCount === 1 ? 'devolución' : 'devoluciones'}` : 'Cargando…'}
+          accent="danger"
         />
         <KpiCard
           label="Última compra"
-          value={
-            kpis.data?.lastPurchase
-              ? formatCurrency(kpis.data.lastPurchase.total)
-              : 'Sin compras'
-          }
+          value={kpis.data?.lastPurchase ? formatCurrency(kpis.data.lastPurchase.total) : '—'}
           hint={
             kpis.data?.lastPurchase
               ? `${kpis.data.lastPurchase.supplierName} · ${new Date(
                   kpis.data.lastPurchase.date,
                 ).toLocaleDateString('es-CL')}`
-              : ''
+              : 'Sin compras'
           }
+          truncateValue
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Select
-          value={supplierId}
-          onValueChange={(v) => {
-            setFilter('supplier', v === ALL ? null : v);
-            setFilter('page', null);
-          }}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder="Proveedor" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Todos los proveedores</SelectItem>
+      {/* ============================================================
+          FILTROS
+          ============================================================ */}
+      <div className="space-y-3">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={qFilter.value}
+            onChange={(e) => qFilter.setValue(e.target.value)}
+            placeholder="Buscar por proveedor, RUT o notas…"
+            className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-xs font-semibold text-slate-700 transition-all placeholder:text-slate-400 placeholder:font-medium focus:border-[#2F6BFF] focus:outline-none dark:border-slate-850 dark:bg-[#11151C] dark:text-white"
+          />
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4">
+          <select
+            value={supplierId}
+            onChange={(e) => {
+              setFilter('supplier', e.target.value === ALL ? null : e.target.value);
+              setFilter('page', null);
+            }}
+            className={fieldCls}
+          >
+            <option value={ALL}>Todos los proveedores</option>
             {suppliers.data?.map((s) => (
-              <SelectItem key={s.id} value={s.id}>
+              <option key={s.id} value={s.id}>
                 {s.name}
-              </SelectItem>
+              </option>
             ))}
-          </SelectContent>
-        </Select>
-        <Select
-          value={warehouseId}
-          onValueChange={(v) => {
-            setFilter('warehouse', v === ALL ? null : v);
-            setFilter('page', null);
-          }}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder="Bodega destino" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Todas las bodegas</SelectItem>
+          </select>
+          <select
+            value={warehouseId}
+            onChange={(e) => {
+              setFilter('warehouse', e.target.value === ALL ? null : e.target.value);
+              setFilter('page', null);
+            }}
+            className={fieldCls}
+          >
+            <option value={ALL}>Todas las bodegas</option>
             {warehouseList.map((w) => (
-              <SelectItem key={w.id} value={w.id}>
+              <option key={w.id} value={w.id}>
                 {w.name}
                 {!w.isActive ? ' (inactiva)' : ''}
-              </SelectItem>
+              </option>
             ))}
-          </SelectContent>
-        </Select>
-        <Input
-          type="date"
-          value={dateFrom}
-          onChange={(e) => {
-            setFilter('dateFrom', e.target.value || null);
-            setFilter('page', null);
-          }}
-        />
-        <Input
-          type="date"
-          value={dateTo}
-          onChange={(e) => {
-            setFilter('dateTo', e.target.value || null);
-            setFilter('page', null);
-          }}
-        />
-        <Input
-          type="number"
-          inputMode="numeric"
-          min={0}
-          placeholder="Total mínimo (CLP)"
-          value={totalMinFilter.value}
-          onChange={(e) => totalMinFilter.setValue(e.target.value)}
-        />
-        <Input
-          type="number"
-          inputMode="numeric"
-          min={0}
-          placeholder="Total máximo (CLP)"
-          value={totalMaxFilter.value}
-          onChange={(e) => totalMaxFilter.setValue(e.target.value)}
-        />
-        {filtersActive && (
-          <Button variant="ghost" size="sm" onClick={clear}>
-            Limpiar filtros
-          </Button>
-        )}
+          </select>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => {
+              setFilter('dateFrom', e.target.value || null);
+              setFilter('page', null);
+            }}
+            className="w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-xs font-medium text-slate-700 transition-all focus:border-[#2F6BFF] focus:outline-none dark:border-slate-850 dark:bg-[#11151C] dark:text-white"
+          />
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => {
+              setFilter('dateTo', e.target.value || null);
+              setFilter('page', null);
+            }}
+            className="w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-xs font-medium text-slate-700 transition-all focus:border-[#2F6BFF] focus:outline-none dark:border-slate-850 dark:bg-[#11151C] dark:text-white"
+          />
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            placeholder="Total mínimo (CLP)"
+            value={totalMinFilter.value}
+            onChange={(e) => totalMinFilter.setValue(e.target.value)}
+            className={fieldCls}
+          />
+          <input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            placeholder="Total máximo (CLP)"
+            value={totalMaxFilter.value}
+            onChange={(e) => totalMaxFilter.setValue(e.target.value)}
+            className={fieldCls}
+          />
+          {filtersActive ? (
+            <button
+              onClick={clear}
+              className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-bold text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700 dark:border-slate-850 dark:bg-[#11151C] dark:hover:bg-slate-900 dark:hover:text-slate-200"
+            >
+              Limpiar filtros
+            </button>
+          ) : (
+            <div className="hidden md:block" />
+          )}
+        </div>
       </div>
 
-      <div className="rounded-md border bg-card">
-        <Table stickyFirstColumn>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Fecha</TableHead>
-              <TableHead>Proveedor</TableHead>
-              <TableHead>Bodega</TableHead>
-              <TableHead>Notas</TableHead>
-              <TableHead className="text-right">Subtotal</TableHead>
-              <TableHead className="text-right">IVA</TableHead>
-              <TableHead className="text-right">Total</TableHead>
-              <TableHead className="w-[80px] text-center">Facturas</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {list.isLoading && (
-              <>
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <TableRow key={i}>
-                    <TableCell colSpan={8}>
-                      <Skeleton className="h-4 w-full" />
-                    </TableCell>
-                  </TableRow>
+      {/* ============================================================
+          TABLA
+          ============================================================ */}
+      <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[800px] border-collapse text-left text-[12px]">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/50 font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-800 dark:bg-slate-900/10 dark:text-slate-500">
+                <th className="w-[12%] py-4 pl-6">Fecha</th>
+                <th className="py-4">Proveedor</th>
+                <th className="py-4">Bodega</th>
+                <th className="py-4">Notas</th>
+                <th className="py-4 text-right">Subtotal</th>
+                <th className="py-4 text-right">IVA</th>
+                <th className="py-4 text-right">Total</th>
+                <th className="py-4 text-center">Facturas</th>
+                <th className="w-[60px] py-4 pr-6 text-right" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+              {list.isLoading &&
+                Array.from({ length: 5 }).map((_, i) => (
+                  <tr key={i}>
+                    <td colSpan={9} className="px-6 py-5">
+                      <div className="h-4 w-full animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+                    </td>
+                  </tr>
                 ))}
-              </>
-            )}
-            {!list.isLoading && items.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground">
-                  Sin compras registradas todavía.
-                </TableCell>
-              </TableRow>
-            )}
-            {items.map((p) => {
-              // Ronda 7 — invoices viene como array. Mostramos el conteo +
-              // el link del primero (los demás se ven en el detalle).
-              const invoiceCount = p.invoices?.length ?? 0;
-              const firstInvoice = invoiceCount > 0 ? p.invoices![0] : null;
-              const firstUrl = firstInvoice
-                ? publicDocumentUrl(firstInvoice.url)
-                : null;
-              return (
-                <TableRow key={p.id}>
-                  <TableCell>
-                    <Link
-                      href={`/compras/${p.id}`}
-                      className="hover:underline"
-                    >
-                      {new Date(p.date).toLocaleDateString('es-CL', {
-                        dateStyle: 'medium',
-                      })}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="font-medium">{p.supplier?.name ?? '—'}</TableCell>
-                  <TableCell className="text-sm">
-                    {p.warehouse?.name ?? (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
-                    {p.notes ?? '—'}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">
-                    {formatCurrency(p.subtotal)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">
-                    {formatCurrency(p.taxAmount)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums font-medium">
-                    {formatCurrency(p.total)}
-                  </TableCell>
-                  <TableCell className="text-center">
-                    {invoiceCount > 0 && firstUrl ? (
-                      <a
-                        href={firstUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title={
-                          invoiceCount === 1
-                            ? 'Ver factura'
-                            : `${invoiceCount} archivos — abrir primero`
-                        }
-                        className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+
+              {!list.isLoading && items.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="py-12 text-center font-bold text-slate-400">
+                    Ninguna compra coincide con los criterios de búsqueda o filtros.
+                  </td>
+                </tr>
+              )}
+
+              {items.map((p) => {
+                const invoiceCount = p.invoices?.length ?? 0;
+                const firstInvoice = invoiceCount > 0 ? p.invoices![0] : null;
+                const firstUrl = firstInvoice ? publicDocumentUrl(firstInvoice.url) : null;
+                return (
+                  <tr
+                    key={p.id}
+                    onClick={() => router.push(`/compras/${p.id}`)}
+                    className="group cursor-pointer transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-800/10"
+                  >
+                    <td className="py-5 pl-6 font-medium text-slate-500 dark:text-slate-400">
+                      <Link
+                        href={`/compras/${p.id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="hover:underline"
                       >
-                        <Paperclip className="h-4 w-4" />
-                        {invoiceCount > 1 && (
-                          <span className="text-xs">×{invoiceCount}</span>
-                        )}
-                      </a>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
+                        {new Date(p.date).toLocaleDateString('es-CL', { dateStyle: 'medium' })}
+                      </Link>
+                    </td>
+                    <td className="py-5 font-bold text-slate-950 transition-colors group-hover:text-[#2F6BFF] dark:text-white">
+                      {p.supplier?.name ?? '—'}
+                    </td>
+                    <td className="py-5 font-medium text-slate-600 dark:text-slate-400">
+                      {p.warehouse?.name ?? <span className="text-slate-400">—</span>}
+                    </td>
+                    <td className="max-w-[150px] truncate py-5 italic text-slate-500">
+                      {p.notes ?? '—'}
+                    </td>
+                    <td className="py-5 text-right font-mono font-medium text-slate-500">
+                      {formatCurrency(p.subtotal)}
+                    </td>
+                    <td className="py-5 text-right font-mono font-medium text-slate-500">
+                      {formatCurrency(p.taxAmount)}
+                    </td>
+                    <td className="py-5 text-right font-mono text-[13px] font-black text-slate-950 dark:text-white">
+                      {formatCurrency(p.total)}
+                    </td>
+                    <td className="py-5 text-center">
+                      {invoiceCount > 0 && firstUrl ? (
+                        <a
+                          href={firstUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          title={invoiceCount === 1 ? 'Ver factura' : `${invoiceCount} archivos — abrir primero`}
+                          className="inline-flex items-center gap-1 rounded border border-slate-100 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] font-extrabold text-slate-500 hover:text-[#2F6BFF] dark:border-slate-800 dark:bg-[#1C202B] dark:text-slate-400"
+                        >
+                          <Paperclip className="h-3 w-3 text-slate-400" />
+                          <span>×{invoiceCount}</span>
+                        </a>
+                      ) : (
+                        <span className="font-mono text-slate-300 dark:text-slate-600">—</span>
+                      )}
+                    </td>
+                    <td className="py-5 pr-6 text-right">
+                      <Link
+                        href={`/compras/${p.id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        title="Ver detalle"
+                        className="inline-flex items-center justify-center p-2 text-slate-400 transition-colors hover:text-slate-600 dark:hover:text-white"
+                      >
+                        <Eye className="h-[18px] w-[18px]" />
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
+      {/* ============================================================
+          PAGINACIÓN
+          ============================================================ */}
       {total > 0 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
+        <div className="flex items-center justify-between text-xs font-medium text-slate-400 dark:text-slate-500">
           <span>
             {total} compra{total === 1 ? '' : 's'} · página {page} de {totalPages}
           </span>
           <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
+            <button
               onClick={() => setFilter('page', String(Math.max(1, page - 1)))}
               disabled={page === 1}
+              className="cursor-pointer rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2 font-bold text-slate-700 transition-all hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:text-slate-300 dark:hover:bg-slate-900"
             >
               Anterior
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
+            </button>
+            <button
               onClick={() => setFilter('page', String(Math.min(totalPages, page + 1)))}
               disabled={page >= totalPages}
+              className="cursor-pointer rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2 font-bold text-slate-700 transition-all hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:text-slate-300 dark:hover:bg-slate-900"
             >
               Siguiente
-            </Button>
+            </button>
           </div>
         </div>
       )}
@@ -403,27 +422,37 @@ function KpiCard({
   label,
   value,
   hint,
+  accent,
+  truncateValue,
 }: {
   label: string;
   value: string;
   hint?: string;
+  accent?: 'danger';
+  truncateValue?: boolean;
 }) {
   return (
-    <div className="rounded-md border bg-card p-4">
-      <div className="text-xs uppercase tracking-wide text-muted-foreground">
+    <div className="select-none space-y-1 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+      <span className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
         {label}
-      </div>
-      <div className="mt-1 text-xl font-semibold tabular-nums">{value}</div>
+      </span>
+      <span
+        className={`block text-[18px] font-black tracking-tight md:text-[20px] ${
+          truncateValue ? 'truncate ' : ''
+        }${accent === 'danger' ? 'text-rose-500' : 'text-slate-900 dark:text-white'}`}
+      >
+        {value}
+      </span>
       {hint && (
-        <div className="mt-1 text-xs text-muted-foreground">{hint}</div>
+        <span className="block truncate text-[10.5px] font-bold text-slate-400 dark:text-slate-500">
+          {hint}
+        </span>
       )}
     </div>
   );
 }
 
-function buildPurchasesExportQuery(
-  params: Record<string, string | undefined>,
-): string {
+function buildPurchasesExportQuery(params: Record<string, string | undefined>): string {
   const entries = Object.entries(params).filter(
     ([, v]) => v != null && v !== '',
   ) as [string, string][];

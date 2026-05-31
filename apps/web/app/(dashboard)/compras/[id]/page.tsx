@@ -1,67 +1,47 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  ArrowLeft,
-  Paperclip,
-  RotateCcw,
-  Trash2,
-  Upload,
-} from 'lucide-react';
+import { ArrowLeft, Paperclip, Plus, RotateCcw, Trash2, Upload } from 'lucide-react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { SupplierReturnDialog } from '@/components/forms/supplier-return-dialog';
-import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import {
-  publicDocumentUrl,
-  uploadPurchaseInvoice,
-} from '@/lib/cashbox-api';
+import { publicDocumentUrl, uploadPurchaseInvoice } from '@/lib/cashbox-api';
 import { apiErrorMessage } from '@/lib/catalog-api';
 import { formatCurrency } from '@/lib/format';
-import {
-  addPurchaseInvoices,
-  getPurchase,
-  removePurchaseInvoice,
-} from '@/lib/inventory-api';
+import { addPurchaseInvoices, getPurchase, removePurchaseInvoice } from '@/lib/inventory-api';
 
-const ACCEPTED_DOC_MIMES = [
-  'application/pdf',
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-];
+const ACCEPTED_DOC_MIMES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
 const MAX_DOC_BYTES = 10 * 1024 * 1024;
 
+/**
+ * /compras/[id] — Rediseño UI (look de PurchaseDetail).
+ *
+ * SOLO UI/UX. La lógica es idéntica a la versión previa:
+ *  · getPurchase(id) vía useQuery.
+ *  · removeMut (removePurchaseInvoice) + ConfirmDialog para borrar archivo.
+ *  · onSelectFiles → uploadPurchaseInvoice + addPurchaseInvoices (multi-archivo).
+ *  · Apertura del SupplierReturnDialog (incluye ?return=1 para ops rápidas).
+ *
+ * Cambios visuales: header con back redondeado + título + botón "Devolver",
+ * layout 2 columnas (items 2/3 + "Resumen de Valores" 1/3), sección de
+ * facturas en grid de chips y card de notas. Total bruto en azul #2F6BFF.
+ */
 export default function CompraDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const qc = useQueryClient();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
-  // Ronda 11 — dialog para devolución a proveedor. Soporta apertura via
-  // query param `?return=1` para ops rápidas desde /devoluciones.
   const [returnOpen, setReturnOpen] = useState(false);
   const searchParams = useSearchParams();
   useEffect(() => {
     if (searchParams.get('return') === '1') setReturnOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const [deleteTarget, setDeleteTarget] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
 
   const pq = useQuery({
     queryKey: ['purchase', id],
@@ -76,8 +56,7 @@ export default function CompraDetailPage() {
       qc.invalidateQueries({ queryKey: ['purchases'] });
       toast.success('Archivo eliminado');
     },
-    onError: (err) =>
-      toast.error(apiErrorMessage(err, 'No se pudo eliminar el archivo')),
+    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo eliminar el archivo')),
   });
 
   async function onSelectFiles(files: FileList | null) {
@@ -107,7 +86,9 @@ export default function CompraDetailPage() {
         await addPurchaseInvoices(id, uploaded);
         qc.invalidateQueries({ queryKey: ['purchase', id] });
         qc.invalidateQueries({ queryKey: ['purchases'] });
-        toast.success(`${uploaded.length} archivo${uploaded.length === 1 ? '' : 's'} agregado${uploaded.length === 1 ? '' : 's'}`);
+        toast.success(
+          `${uploaded.length} archivo${uploaded.length === 1 ? '' : 's'} agregado${uploaded.length === 1 ? '' : 's'}`,
+        );
       }
     } catch (err) {
       toast.error(apiErrorMessage(err, 'No se pudo subir el archivo'));
@@ -117,10 +98,12 @@ export default function CompraDetailPage() {
     }
   }
 
-  if (pq.isLoading) return <Skeleton className="h-40 w-full" />;
+  if (pq.isLoading) {
+    return <div className="h-40 w-full animate-pulse rounded-3xl bg-slate-100 dark:bg-slate-800" />;
+  }
   if (!pq.data) {
     return (
-      <div className="rounded-md border bg-card p-6 text-sm text-muted-foreground">
+      <div className="rounded-3xl border border-slate-100 bg-white p-6 text-sm font-semibold text-slate-400 dark:border-slate-850 dark:bg-[#11151C]">
         Compra no encontrada.
       </div>
     );
@@ -130,93 +113,133 @@ export default function CompraDetailPage() {
   const invoices = p.invoices ?? [];
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Button asChild variant="ghost" size="icon">
-          <Link href="/compras">
-            <ArrowLeft className="h-4 w-4" />
+    <div className="space-y-6 animate-in fade-in duration-200">
+      {/* ============================================================
+          HEADER
+          ============================================================ */}
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <div className="flex items-center gap-4">
+          <Link
+            href="/compras"
+            title="Volver"
+            className="cursor-pointer rounded-xl border border-slate-100 bg-white p-2.5 text-slate-800 transition-all hover:bg-slate-50 dark:border-slate-800 dark:bg-[#11151C] dark:text-slate-300 dark:hover:bg-[#1E2530]"
+          >
+            <ArrowLeft className="h-5 w-5" />
           </Link>
-        </Button>
-        <div className="flex-1">
-          <h1 className="text-2xl font-semibold">
-            Compra del{' '}
-            {new Date(p.date).toLocaleDateString('es-CL', { dateStyle: 'long' })}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {p.supplier?.name ?? '—'}
-            {p.warehouse?.name ? ` · Bodega ${p.warehouse.name}` : ''}
-          </p>
+          <div className="space-y-0.5">
+            <h1 className="text-xl font-black tracking-tight text-slate-900 dark:text-white md:text-2xl">
+              Compra del{' '}
+              {new Date(p.date).toLocaleDateString('es-CL', { dateStyle: 'long' })}
+            </h1>
+            <p className="text-xs font-medium text-slate-400 dark:text-slate-400">
+              {p.supplier?.name ?? '—'}
+              {p.warehouse?.name ? ` · Bodega ${p.warehouse.name}` : ''}
+            </p>
+          </div>
         </div>
-        {/* Ronda 11 — devolución a proveedor desde el detalle de la compra. */}
-        <Button variant="outline" onClick={() => setReturnOpen(true)}>
-          <RotateCcw className="h-4 w-4" />
-          Devolver a proveedor
-        </Button>
+
+        <button
+          onClick={() => setReturnOpen(true)}
+          className="inline-flex shrink-0 cursor-pointer items-center gap-2 self-start rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-900 shadow-sm transition-all hover:bg-slate-50 dark:border-slate-850 dark:bg-[#11151C] dark:text-white dark:hover:bg-slate-900 sm:self-auto"
+        >
+          <RotateCcw className="h-4 w-4 text-slate-400" />
+          <span>Devolver a proveedor</span>
+        </button>
       </div>
 
-      <SupplierReturnDialog
-        purchase={p}
-        open={returnOpen}
-        onOpenChange={setReturnOpen}
-      />
+      <SupplierReturnDialog purchase={p} open={returnOpen} onOpenChange={setReturnOpen} />
 
-      {/* Items */}
-      <div className="rounded-md border bg-card">
-        <div className="border-b p-4">
-          <h2 className="font-medium">Items</h2>
+      {/* ============================================================
+          ITEMS + RESUMEN
+          ============================================================ */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* Items (2/3) */}
+        <div className="space-y-4 lg:col-span-2">
+          <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+            <div className="select-none border-b border-slate-100 p-5 dark:border-slate-850">
+              <h3 className="text-xs font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                Items Compra
+              </h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[500px] border-collapse text-left text-[12px]">
+                <thead>
+                  <tr className="border-b border-slate-100 bg-slate-50/20 font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-800 dark:text-slate-500">
+                    <th className="w-[20%] py-3 pl-6">SKU</th>
+                    <th className="py-3">Producto</th>
+                    <th className="py-3 text-right">Cantidad</th>
+                    <th className="py-3 text-right">Costo unit.</th>
+                    <th className="w-[20%] py-3 pr-6 text-right">Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium dark:divide-slate-800/60">
+                  {p.items?.map((it) => (
+                    <tr key={it.id} className="hover:bg-slate-50/20 dark:hover:bg-slate-900/10">
+                      <td className="py-4 pl-6 font-mono font-medium text-slate-500 dark:text-slate-400">
+                        {it.product?.sku ?? '—'}
+                      </td>
+                      <td className="py-4 font-bold text-slate-950 dark:text-white">
+                        {it.product?.name ?? '—'}
+                      </td>
+                      <td className="py-4 text-right font-mono font-bold text-slate-800 dark:text-slate-300">
+                        {it.qty}
+                      </td>
+                      <td className="py-4 text-right font-mono text-slate-500">
+                        {formatCurrency(it.unitCost)}
+                      </td>
+                      <td className="py-4 pr-6 text-right font-mono font-extrabold text-slate-900 dark:text-white">
+                        {formatCurrency(it.subtotal)}
+                      </td>
+                    </tr>
+                  ))}
+                  {(p.items?.length ?? 0) === 0 && (
+                    <tr>
+                      <td colSpan={5} className="py-10 text-center font-bold text-slate-400">
+                        Sin ítems.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>SKU</TableHead>
-              <TableHead>Producto</TableHead>
-              <TableHead className="text-right">Cantidad</TableHead>
-              <TableHead className="text-right">Costo unit.</TableHead>
-              <TableHead className="text-right">Subtotal</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {p.items?.map((it) => (
-              <TableRow key={it.id}>
-                <TableCell className="font-mono text-xs">
-                  {it.product?.sku ?? '—'}
-                </TableCell>
-                <TableCell>{it.product?.name ?? '—'}</TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {it.qty}
-                </TableCell>
-                <TableCell className="text-right tabular-nums text-muted-foreground">
-                  {formatCurrency(it.unitCost)}
-                </TableCell>
-                <TableCell className="text-right tabular-nums font-medium">
-                  {formatCurrency(it.subtotal)}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+
+        {/* Resumen de valores (1/3) */}
+        <div className="space-y-4">
+          <div className="select-none space-y-4 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+            <h3 className="border-b border-slate-100 pb-2 text-xs font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-850 dark:text-slate-500">
+              Resumen de Valores
+            </h3>
+            <div className="space-y-2.5 text-xs">
+              <div className="flex items-center justify-between text-slate-500">
+                <span>Subtotal neto</span>
+                <span className="font-mono font-semibold">{formatCurrency(p.subtotal)}</span>
+              </div>
+              <div className="flex items-center justify-between text-slate-500">
+                <span>IVA</span>
+                <span className="font-mono font-semibold">{formatCurrency(p.taxAmount)}</span>
+              </div>
+              <div className="my-2 border-t border-slate-100 dark:border-slate-850" />
+              <div className="flex items-center justify-between text-sm font-bold text-slate-950 dark:text-white">
+                <span>Total bruto</span>
+                <span className="font-mono text-base font-black text-[#2F6BFF]">
+                  {formatCurrency(p.total)}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* Totales */}
-      <div className="ml-auto max-w-md rounded-md border bg-card p-4 space-y-2 text-sm">
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">Subtotal neto</span>
-          <span className="tabular-nums">{formatCurrency(p.subtotal)}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">IVA</span>
-          <span className="tabular-nums">{formatCurrency(p.taxAmount)}</span>
-        </div>
-        <div className="flex justify-between border-t pt-2 font-semibold">
-          <span>Total bruto</span>
-          <span className="tabular-nums">{formatCurrency(p.total)}</span>
-        </div>
-      </div>
-
-      {/* Facturas (multi-archivo, Ronda 7) */}
-      <div className="rounded-md border bg-card p-4 space-y-3">
+      {/* ============================================================
+          FACTURAS ADJUNTAS
+          ============================================================ */}
+      <div className="space-y-4 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
         <div className="flex items-center justify-between">
-          <h2 className="font-medium">Facturas adjuntas</h2>
+          <h3 className="text-xs font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+            Facturas adjuntas
+          </h3>
           <input
             ref={inputRef}
             type="file"
@@ -225,64 +248,65 @@ export default function CompraDetailPage() {
             className="hidden"
             onChange={(e) => onSelectFiles(e.target.files)}
           />
-          <Button
+          <button
             type="button"
-            variant="outline"
-            size="sm"
             disabled={uploading}
             onClick={() => inputRef.current?.click()}
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50/50 px-3.5 py-1.5 text-xs font-bold text-slate-700 transition-all hover:border-[#2F6BFF]/45 hover:text-[#2F6BFF] disabled:opacity-50 dark:border-slate-850 dark:bg-slate-900 dark:text-white"
           >
-            <Upload className="h-4 w-4" />
-            {uploading ? 'Subiendo…' : 'Agregar archivo'}
-          </Button>
+            {uploading ? <Upload className="h-4 w-4 animate-pulse" /> : <Plus className="h-4 w-4" />}
+            <span>{uploading ? 'Subiendo…' : 'Agregar archivo'}</span>
+          </button>
         </div>
+
         {invoices.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Esta compra no tiene archivos adjuntos. Subí PDF o imágenes con
-            el botón de arriba.
+          <p className="text-xs font-semibold leading-relaxed text-slate-400">
+            Esta compra no tiene archivos adjuntos. Subí PDF o imágenes con el botón de arriba.
           </p>
         ) : (
-          <ul className="space-y-2">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
             {invoices.map((inv) => (
-              <li
+              <div
                 key={inv.id}
-                className="flex items-center gap-2 rounded-md border bg-muted/30 p-2 text-sm"
+                className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 dark:border-slate-850 dark:bg-slate-900/50"
               >
-                <Paperclip className="h-4 w-4 shrink-0" />
                 <a
                   href={publicDocumentUrl(inv.url) ?? '#'}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex-1 truncate hover:underline"
                   title={inv.originalName}
+                  className="flex min-w-0 flex-1 items-center gap-2.5 truncate"
                 >
-                  {inv.originalName}
+                  <Paperclip className="h-4 w-4 shrink-0 text-slate-400" />
+                  <span className="truncate text-xs font-bold text-slate-700 hover:underline dark:text-slate-200">
+                    {inv.originalName}
+                  </span>
                 </a>
-                <span className="text-xs text-muted-foreground">
-                  {new Date(inv.uploadedAt).toLocaleDateString('es-CL', {
-                    dateStyle: 'short',
-                  })}
-                </span>
-                <Button
+                <button
                   type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() =>
-                    setDeleteTarget({ id: inv.id, name: inv.originalName })
-                  }
+                  onClick={() => setDeleteTarget({ id: inv.id, name: inv.originalName })}
+                  title="Eliminar factura"
+                  className="shrink-0 cursor-pointer p-1 text-slate-400 transition-colors hover:text-rose-500"
                 >
-                  <Trash2 className="h-4 w-4 text-destructive" />
-                </Button>
-              </li>
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
             ))}
-          </ul>
+          </div>
         )}
       </div>
 
+      {/* ============================================================
+          NOTAS
+          ============================================================ */}
       {p.notes && (
-        <div className="rounded-md border bg-card p-4 text-sm">
-          <div className="mb-1 font-medium">Notas</div>
-          <p className="whitespace-pre-wrap text-muted-foreground">{p.notes}</p>
+        <div className="space-y-1 rounded-2xl border border-slate-100 bg-white p-5 text-sm shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+          <div className="text-xs font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+            Notas
+          </div>
+          <p className="whitespace-pre-wrap text-xs font-semibold leading-relaxed text-slate-600 dark:text-slate-300">
+            {p.notes}
+          </p>
         </div>
       )}
 
@@ -293,8 +317,8 @@ export default function CompraDetailPage() {
         description={
           deleteTarget ? (
             <>
-              Se eliminará <strong>{deleteTarget.name}</strong> de esta
-              compra. El archivo se borra del servidor.
+              Se eliminará <strong>{deleteTarget.name}</strong> de esta compra. El archivo se
+              borra del servidor.
             </>
           ) : null
         }
