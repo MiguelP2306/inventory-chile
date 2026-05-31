@@ -51,7 +51,6 @@ import {
   PanelLeftClose,
   Receipt,
   RotateCcw,
-  ScanLine,
   Settings,
   ShieldAlert,
   ShoppingCart,
@@ -152,7 +151,6 @@ const SECTIONS: NavSection[] = [
     key: 'otros',
     divider: true,
     items: [
-      { href: '/productos?scan=1', label: 'Escaneo rápido', icon: ScanLine, matchPrefix: ['/escanear'] },
       { href: '/usuarios', label: 'Usuarios', icon: UserCog, matchPrefix: ['/usuarios'], adminOnly: true },
       { href: '/configuracion', label: 'Configuración', icon: Settings, matchPrefix: ['/configuracion'], adminOnly: true },
     ],

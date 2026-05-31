@@ -39,12 +39,10 @@ import { z } from 'zod';
 import { ProductImageGallery } from '@/components/product-image-gallery';
 import { Button } from '@/components/ui/button';
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  SoftModal,
+  softDestructiveButtonClass,
+  softSecondaryButtonClass,
+} from '@/components/ui/soft-modal';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -1060,38 +1058,38 @@ export function ProductForm({ product }: Props) {
       {/* ============================================================
           DELETE CONFIRM
           ============================================================ */}
-      <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>¿Eliminar producto?</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
+      <SoftModal
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="¿Eliminar producto?"
+      >
+        <div className="space-y-5 p-5">
+          <p className="text-xs font-medium leading-relaxed text-slate-500 dark:text-slate-400">
             Esta acción es permanente. El producto &ldquo;{product?.name}&rdquo;
             se eliminará del catálogo. Si tiene movimientos de inventario
             asociados, no podrá eliminarse y tendrás que desactivarlo en su
             lugar.
           </p>
-          <DialogFooter>
-            <Button
+          <div className="flex items-center justify-end gap-2">
+            <button
               type="button"
-              variant="outline"
               onClick={() => setConfirmDelete(false)}
               disabled={removeMut.isPending}
+              className={softSecondaryButtonClass}
             >
               Cancelar
-            </Button>
-            <Button
+            </button>
+            <button
               type="button"
-              variant="outline"
-              className="border-destructive/40 text-destructive hover:bg-destructive/10"
               onClick={() => removeMut.mutate()}
               disabled={removeMut.isPending}
+              className={softDestructiveButtonClass}
             >
               {removeMut.isPending ? 'Eliminando…' : 'Eliminar'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </button>
+          </div>
+        </div>
+      </SoftModal>
     </form>
   );
 }

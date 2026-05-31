@@ -8,14 +8,13 @@ import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  SoftModal,
+  softInputClass,
+  softLabelClass,
+  softPrimaryButtonClass,
+  softSecondaryButtonClass,
+} from '@/components/ui/soft-modal';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -270,34 +269,47 @@ export function SimpleNameList({
         }}
       />
 
-      <Dialog open={open} onOpenChange={(v) => (v ? setOpen(true) : closeDialog())}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {editing ? `Editar ${resourceLabel}` : `Nueva ${resourceLabel}`}
-            </DialogTitle>
-          </DialogHeader>
-          <form onSubmit={onSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Nombre</Label>
-              <Input
-                id="name"
-                autoFocus
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={closeDialog}>
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={createMut.isPending || updateMut.isPending}>
-                {editing ? 'Guardar' : 'Crear'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <SoftModal
+        open={open}
+        onOpenChange={(v) => (v ? setOpen(true) : closeDialog())}
+        title={editing ? `Editar ${resourceLabel}` : `Nueva ${resourceLabel}`}
+        subtitle={
+          editing
+            ? `Actualizá el nombre de la ${resourceLabel}`
+            : `Registrá una nueva ${resourceLabel} en el sistema`
+        }
+      >
+        <form onSubmit={onSubmit} className="space-y-4 p-5">
+          <div className="space-y-1">
+            <label htmlFor="name" className={softLabelClass}>
+              Nombre
+            </label>
+            <input
+              id="name"
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className={softInputClass}
+            />
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={closeDialog}
+              className={softSecondaryButtonClass}
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={createMut.isPending || updateMut.isPending || !name.trim()}
+              className={`${softPrimaryButtonClass} w-auto px-5`}
+            >
+              {editing ? 'Guardar' : 'Crear'}
+            </button>
+          </div>
+        </form>
+      </SoftModal>
     </div>
   );
 }

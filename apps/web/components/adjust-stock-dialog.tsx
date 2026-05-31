@@ -4,16 +4,13 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Equal, Minus, Plus } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Button } from '@/components/ui/button';
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+  SoftModal,
+  softInputClass,
+  softLabelClass,
+  softPrimaryButtonClass,
+  softSecondaryButtonClass,
+} from '@/components/ui/soft-modal';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { apiErrorMessage } from '@/lib/catalog-api';
 import { invalidateProductCaches } from '@/lib/invalidate-product-caches';
@@ -104,29 +101,30 @@ export function AdjustStockDialog({
     mode === 'set' ? 'ej: 42' : 'ej: 10';
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Ajustar stock — {product.name}</DialogTitle>
-        </DialogHeader>
+    <SoftModal
+      open={open}
+      onOpenChange={onOpenChange}
+      title={`Ajustar stock — ${product.name}`}
+      subtitle={`Movimiento de inventario en ${warehouseName}`}
+    >
         <form
           onSubmit={(e) => {
             e.preventDefault();
             if (valid) mut.mutate();
           }}
-          className="space-y-4"
+          className="space-y-4 p-5"
         >
-          <div className="rounded-md bg-muted p-3 text-sm space-y-1">
+          <div className="space-y-1 rounded-2xl border border-slate-100 bg-slate-50/60 p-3.5 text-xs font-medium text-slate-600 dark:border-slate-800 dark:bg-slate-900/20 dark:text-slate-300">
             <div>
               SKU: <span className="font-mono">{product.sku}</span>
             </div>
             <div>
               Bodega:{' '}
-              <span className="font-semibold">{warehouseName}</span>
+              <span className="font-bold text-slate-800 dark:text-slate-100">{warehouseName}</span>
             </div>
             <div>
               Stock actual en esta bodega:{' '}
-              <span className="font-semibold">{currentQty}</span>
+              <span className="font-bold text-slate-800 dark:text-slate-100">{currentQty}</span>
             </div>
           </div>
 
@@ -147,9 +145,9 @@ export function AdjustStockDialog({
             </TabsList>
           </Tabs>
 
-          <div className="space-y-2">
-            <Label htmlFor="qty">{inputLabel}</Label>
-            <Input
+          <div className="space-y-1">
+            <label htmlFor="qty" className={softLabelClass}>{inputLabel}</label>
+            <input
               id="qty"
               type="number"
               min={0}
@@ -158,6 +156,7 @@ export function AdjustStockDialog({
               placeholder={inputPlaceholder}
               value={qty}
               onChange={(e) => setQty(e.target.value)}
+              className={softInputClass}
             />
             {qtyValid && (
               <div className="text-sm">
@@ -193,30 +192,38 @@ export function AdjustStockDialog({
             )}
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="reason">Motivo</Label>
-            <Input
+          <div className="space-y-1">
+            <label htmlFor="reason" className={softLabelClass}>Motivo</label>
+            <input
               id="reason"
               placeholder="ej: Conteo físico, merma por inspección, etc."
               value={reason}
               onChange={(e) => setReason(e.target.value)}
+              className={softInputClass}
             />
           </div>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              className={softSecondaryButtonClass}
+            >
               Cancelar
-            </Button>
-            <Button type="submit" disabled={!valid || mut.isPending}>
+            </button>
+            <button
+              type="submit"
+              disabled={!valid || mut.isPending}
+              className={`${softPrimaryButtonClass} w-auto px-5`}
+            >
               {mut.isPending
                 ? 'Ajustando...'
                 : isNoChange
                   ? 'Sin cambios'
                   : `Ajustar stock en ${warehouseName}`}
-            </Button>
-          </DialogFooter>
+            </button>
+          </div>
         </form>
-      </DialogContent>
-    </Dialog>
+      </SoftModal>
   );
 }

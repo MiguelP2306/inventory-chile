@@ -1,25 +1,13 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Camera, Plus, Search } from 'lucide-react';
+import { Plus, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { toast } from 'sonner';
-import { CameraScanner } from '@/components/camera-scanner';
 import { ProductThumbnail } from '@/components/product-thumbnail';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
+import { SoftModal, softInputClass } from '@/components/ui/soft-modal';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  listProducts,
-  lookupProductByCode,
-  publicImageUrl,
-} from '@/lib/catalog-api';
+import { listProducts, publicImageUrl } from '@/lib/catalog-api';
 import { formatCurrency } from '@/lib/format';
 import type { ProductDto } from '@inventory/shared';
 
@@ -32,33 +20,9 @@ const PAGE_SIZE = 10;
 
 export function ProductPicker({ onPick, buttonLabel = 'Agregar producto' }: Props) {
   const [open, setOpen] = useState(false);
-  const [scannerOpen, setScannerOpen] = useState(false);
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
   const [page, setPage] = useState(1);
-
-  // Fase 11 — al escanear un código (USB con ENTER o cámara) hacemos lookup
-  // exacto. Si hay match, lo agregamos directamente y cerramos el picker
-  // sin pasar por la lista. Si no, ofrecemos buscar con LIKE.
-  const handleScannedCode = async (code: string) => {
-    try {
-      const match = await lookupProductByCode(code);
-      if (match) {
-        onPick(match);
-        setOpen(false);
-        toast.success(`Agregado: ${match.name}`);
-      } else {
-        // Caemos a búsqueda libre para que el operador vea matches parciales.
-        setQ(code);
-        toast.warning(
-          `Sin match exacto para "${code}" — mostramos resultados similares.`,
-        );
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      toast.error(`No se pudo buscar: ${msg}`);
-    }
-  };
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q.trim()), 200);
@@ -100,39 +64,23 @@ export function ProductPicker({ onPick, buttonLabel = 'Agregar producto' }: Prop
         <Plus className="h-4 w-4" />
         {buttonLabel}
       </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Elegir producto</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Search className="h-4 w-4 text-muted-foreground" />
-              <Input
+      <SoftModal
+        open={open}
+        onOpenChange={setOpen}
+        title="Elegir producto"
+        subtitle="Buscá por SKU, código de barras o nombre"
+        size="xl"
+      >
+        <div className="space-y-3 p-5">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
                 autoFocus
-                placeholder="SKU, código de barras o nombre · Enter escanea"
+                placeholder="SKU, código de barras o nombre"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                onKeyDown={(e) => {
-                  // Fase 11 — al apretar Enter con texto cargado, intentamos
-                  // lookup exacto primero (caso típico: lector USB termina con
-                  // ENTER). Si hay match, agrega y cierra. Si no, sigue el
-                  // flujo normal (la búsqueda LIKE ya mostró matches debajo).
-                  if (e.key === 'Enter' && q.trim()) {
-                    e.preventDefault();
-                    handleScannedCode(q.trim());
-                  }
-                }}
+                className={`${softInputClass} pl-10`}
               />
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                onClick={() => setScannerOpen(true)}
-                title="Escanear con cámara"
-              >
-                <Camera className="h-4 w-4" />
-              </Button>
             </div>
             <div className="max-h-[420px] space-y-1 overflow-y-auto">
               {results.isLoading && (
@@ -207,17 +155,7 @@ export function ProductPicker({ onPick, buttonLabel = 'Agregar producto' }: Prop
               </div>
             )}
           </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Fase 11 — scanner de cámara reutilizado. Al detectar un código,
-          ejecuta `handleScannedCode` (lookup exacto → agregar al picker). */}
-      <CameraScanner
-        open={scannerOpen}
-        onOpenChange={setScannerOpen}
-        onDetected={handleScannedCode}
-        hint="Apuntá al código de barras del producto a agregar."
-      />
+      </SoftModal>
     </>
   );
 }

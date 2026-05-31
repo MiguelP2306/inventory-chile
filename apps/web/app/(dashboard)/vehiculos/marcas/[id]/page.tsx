@@ -13,14 +13,12 @@ import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+  SoftModal,
+  softInputClass,
+  softLabelClass,
+  softPrimaryButtonClass,
+  softSecondaryButtonClass,
+} from '@/components/ui/soft-modal';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -206,54 +204,60 @@ export default function VehicleMakeDetailPage() {
       </div>
 
       {/* Dialog crear/editar modelo */}
-      <Dialog open={modelDialogOpen} onOpenChange={setModelDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {editing ? `Editar ${editing.name}` : 'Nuevo modelo'}
-            </DialogTitle>
-          </DialogHeader>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!modelName.trim()) return;
-              if (editing) updateMut.mutate();
-              else createMut.mutate();
-            }}
-            className="space-y-3"
-          >
-            <div className="space-y-1">
-              <Label htmlFor="model-name">Nombre del modelo</Label>
-              <Input
-                id="model-name"
-                autoFocus
-                value={modelName}
-                onChange={(e) => setModelName(e.target.value)}
-                placeholder="ej: Corolla, Hilux, S10"
-              />
-            </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setModelDialogOpen(false)}
-              >
-                Cancelar
-              </Button>
-              <Button
-                type="submit"
-                disabled={
-                  !modelName.trim() ||
-                  createMut.isPending ||
-                  updateMut.isPending
-                }
-              >
-                {editing ? 'Guardar' : 'Crear'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <SoftModal
+        open={modelDialogOpen}
+        onOpenChange={setModelDialogOpen}
+        title={editing ? `Editar ${editing.name}` : 'Nuevo modelo'}
+        subtitle={
+          editing
+            ? 'Actualizá el nombre del modelo'
+            : `Agregá un modelo a ${make?.name ?? 'la marca'}`
+        }
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!modelName.trim()) return;
+            if (editing) updateMut.mutate();
+            else createMut.mutate();
+          }}
+          className="space-y-4 p-5"
+        >
+          <div className="space-y-1">
+            <label htmlFor="model-name" className={softLabelClass}>
+              Nombre del modelo
+            </label>
+            <input
+              id="model-name"
+              autoFocus
+              value={modelName}
+              onChange={(e) => setModelName(e.target.value)}
+              placeholder="ej: Corolla, Hilux, S10"
+              className={softInputClass}
+            />
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setModelDialogOpen(false)}
+              className={softSecondaryButtonClass}
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={
+                !modelName.trim() ||
+                createMut.isPending ||
+                updateMut.isPending
+              }
+              className={`${softPrimaryButtonClass} w-auto px-5`}
+            >
+              {editing ? 'Guardar' : 'Crear'}
+            </button>
+          </div>
+        </form>
+      </SoftModal>
 
       <ConfirmDialog
         open={!!deleteTarget}

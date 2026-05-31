@@ -1,15 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { Button } from '@/components/ui/button';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  SoftModal,
+  softDestructiveButtonClass,
+  softPrimaryButtonClass,
+  softSecondaryButtonClass,
+} from '@/components/ui/soft-modal';
 
 /**
  * Ronda 7 — modal reutilizable para confirmaciones destructivas (eliminar,
@@ -71,33 +68,40 @@ export function ConfirmDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !isLoading && onOpenChange(o)}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          {description && (
-            <DialogDescription className="pt-2">{description}</DialogDescription>
-          )}
-        </DialogHeader>
-        <DialogFooter className="gap-2 sm:gap-0">
-          <Button
+    <SoftModal
+      open={open}
+      onOpenChange={(o) => !isLoading && onOpenChange(o)}
+      title={title}
+    >
+      <div className="space-y-5 p-5">
+        {description && (
+          <div className="text-xs font-medium leading-relaxed text-slate-500 dark:text-slate-400">
+            {description}
+          </div>
+        )}
+        <div className="flex items-center justify-end gap-2">
+          <button
             type="button"
-            variant="outline"
             onClick={() => onOpenChange(false)}
             disabled={isLoading}
+            className={softSecondaryButtonClass}
           >
             {cancelLabel}
-          </Button>
-          <Button
+          </button>
+          <button
             type="button"
-            variant={variant === 'destructive' ? 'destructive' : 'default'}
             onClick={handleConfirm}
             disabled={isLoading}
+            className={
+              variant === 'destructive'
+                ? softDestructiveButtonClass
+                : `${softPrimaryButtonClass} w-auto px-4 py-2.5`
+            }
           >
             {isLoading ? 'Procesando…' : confirmLabel}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </button>
+        </div>
+      </div>
+    </SoftModal>
   );
 }

@@ -27,14 +27,12 @@ import { ConfirmDialog } from '@/components/confirm-dialog';
 import { ProductThumbnail } from '@/components/product-thumbnail';
 import { Button } from '@/components/ui/button';
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+  SoftModal,
+  softInputClass,
+  softLabelClass,
+  softPrimaryButtonClass,
+  softSecondaryButtonClass,
+} from '@/components/ui/soft-modal';
 import {
   Select,
   SelectContent,
@@ -567,56 +565,64 @@ export default function CategoriaDetailPage() {
       {/* ============================================================
           DIALOG — crear / editar subcategoría
           ============================================================ */}
-      <Dialog open={subDialogOpen} onOpenChange={setSubDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {subEditing
-                ? `Editar "${subEditing.name}"`
-                : `Nueva subcategoría de ${category?.name ?? '—'}`}
-            </DialogTitle>
-          </DialogHeader>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!subName.trim()) return;
-              if (subEditing) updateSubMut.mutate();
-              else createSubMut.mutate();
-            }}
-            className="space-y-4"
-          >
-            <div className="space-y-2">
-              <Label htmlFor="sub-name">Nombre</Label>
-              <Input
-                id="sub-name"
-                autoFocus
-                value={subName}
-                onChange={(e) => setSubName(e.target.value)}
-                placeholder="ej: Lubricantes sintéticos"
-              />
-            </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setSubDialogOpen(false)}
-              >
-                Cancelar
-              </Button>
-              <Button
-                type="submit"
-                disabled={
-                  !subName.trim() ||
-                  createSubMut.isPending ||
-                  updateSubMut.isPending
-                }
-              >
-                {subEditing ? 'Guardar' : 'Crear'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <SoftModal
+        open={subDialogOpen}
+        onOpenChange={setSubDialogOpen}
+        title={
+          subEditing
+            ? `Editar "${subEditing.name}"`
+            : `Nueva subcategoría de ${category?.name ?? '—'}`
+        }
+        subtitle={
+          subEditing
+            ? 'Actualizá el nombre de la subcategoría'
+            : 'Agregá una subcategoría para organizar mejor los productos'
+        }
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!subName.trim()) return;
+            if (subEditing) updateSubMut.mutate();
+            else createSubMut.mutate();
+          }}
+          className="space-y-4 p-5"
+        >
+          <div className="space-y-1">
+            <label htmlFor="sub-name" className={softLabelClass}>
+              Nombre
+            </label>
+            <input
+              id="sub-name"
+              autoFocus
+              value={subName}
+              onChange={(e) => setSubName(e.target.value)}
+              placeholder="ej: Lubricantes sintéticos"
+              className={softInputClass}
+            />
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setSubDialogOpen(false)}
+              className={softSecondaryButtonClass}
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={
+                !subName.trim() ||
+                createSubMut.isPending ||
+                updateSubMut.isPending
+              }
+              className={`${softPrimaryButtonClass} w-auto px-5`}
+            >
+              {subEditing ? 'Guardar' : 'Crear'}
+            </button>
+          </div>
+        </form>
+      </SoftModal>
 
       <ConfirmDialog
         open={!!subDeleteTarget}
@@ -638,46 +644,50 @@ export default function CategoriaDetailPage() {
       {/* ============================================================
           DIALOG — editar nombre de la categoría actual
           ============================================================ */}
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Editar "{category?.name ?? '—'}"</DialogTitle>
-          </DialogHeader>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!editName.trim()) return;
-              updateCatMut.mutate();
-            }}
-            className="space-y-4"
-          >
-            <div className="space-y-2">
-              <Label htmlFor="cat-name">Nombre</Label>
-              <Input
-                id="cat-name"
-                autoFocus
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-              />
-            </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setEditOpen(false)}
-              >
-                Cancelar
-              </Button>
-              <Button
-                type="submit"
-                disabled={!editName.trim() || updateCatMut.isPending}
-              >
-                Guardar
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <SoftModal
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        title={`Editar "${category?.name ?? '—'}"`}
+        subtitle="Actualizá el nombre de la categoría"
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!editName.trim()) return;
+            updateCatMut.mutate();
+          }}
+          className="space-y-4 p-5"
+        >
+          <div className="space-y-1">
+            <label htmlFor="cat-name" className={softLabelClass}>
+              Nombre
+            </label>
+            <input
+              id="cat-name"
+              autoFocus
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              className={softInputClass}
+            />
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setEditOpen(false)}
+              className={softSecondaryButtonClass}
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={!editName.trim() || updateCatMut.isPending}
+              className={`${softPrimaryButtonClass} w-auto px-5`}
+            >
+              Guardar
+            </button>
+          </div>
+        </form>
+      </SoftModal>
 
       <ConfirmDialog
         open={deleteOpen}

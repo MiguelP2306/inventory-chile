@@ -36,7 +36,6 @@ import {
   Info,
   PackageX,
   RefreshCw,
-  ScanLine,
   Send,
   ShieldAlert,
   ShoppingCart,
@@ -424,7 +423,6 @@ function QuickActions() {
       <QuickAction href="/cotizaciones?new=1" icon={FileText} label="Cotización" />
       <QuickAction href="/compras/nuevo" icon={Truck} label="Compra" />
       <QuickAction href="/inventario" icon={ShieldAlert} label="Ajustar stock" />
-      <QuickAction href="/productos" icon={ScanLine} label="Escanear" />
     </div>
   );
 }

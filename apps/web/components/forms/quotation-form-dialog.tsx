@@ -1,11 +1,6 @@
 'use client';
 
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { SoftModal, softFormFieldsClass } from '@/components/ui/soft-modal';
 import { QuotationForm, type QuotationBagItem } from '@/components/forms/quotation-form';
 import type { QuotationDto } from '@inventory/shared';
 
@@ -31,15 +26,18 @@ export function QuotationFormDialog({
   onSaved,
 }: Props) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>
-            {mode === 'edit'
-              ? `Editar cotización${initialData ? ` ${initialData.number}` : ''}`
-              : 'Nueva cotización'}
-          </DialogTitle>
-        </DialogHeader>
+    <SoftModal
+      open={open}
+      onOpenChange={onOpenChange}
+      title={
+        mode === 'edit'
+          ? `Editar cotización${initialData ? ` ${initialData.number}` : ''}`
+          : 'Nueva cotización'
+      }
+      subtitle="Generá una cotización para enviarle al cliente"
+      size="4xl"
+    >
+      <div className={`p-5 ${softFormFieldsClass}`}>
         {/* key fuerza un remount limpio cada vez que se abre el modal con
             distinto target (create vs edit X) */}
         <QuotationForm
@@ -54,7 +52,7 @@ export function QuotationFormDialog({
           }}
           onCancel={() => onOpenChange(false)}
         />
-      </DialogContent>
-    </Dialog>
+      </div>
+    </SoftModal>
   );
 }

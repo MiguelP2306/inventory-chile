@@ -1,11 +1,6 @@
 'use client';
 
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { SoftModal, softFormFieldsClass } from '@/components/ui/soft-modal';
 import { SaleForm } from '@/components/forms/sale-form';
 import type { CustomerDto, SaleDto } from '@inventory/shared';
 
@@ -47,15 +42,14 @@ export function SaleFormDialog({
   onSaved,
 }: Props) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>
-            {prefillFromQuotation
-              ? `Nueva venta · desde cotización`
-              : 'Nueva venta'}
-          </DialogTitle>
-        </DialogHeader>
+    <SoftModal
+      open={open}
+      onOpenChange={onOpenChange}
+      title={prefillFromQuotation ? 'Nueva venta · desde cotización' : 'Nueva venta'}
+      subtitle="Registrá una venta y descontá stock automáticamente"
+      size="4xl"
+    >
+      <div className={`p-5 ${softFormFieldsClass}`}>
         <SaleForm
           key={`new:${prefillFromQuotation?.quotationId ?? 'fresh'}:${open ? '1' : '0'}`}
           prefillFromQuotation={prefillFromQuotation}
@@ -65,7 +59,7 @@ export function SaleFormDialog({
           }}
           onCancel={() => onOpenChange(false)}
         />
-      </DialogContent>
-    </Dialog>
+      </div>
+    </SoftModal>
   );
 }

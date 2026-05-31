@@ -16,14 +16,12 @@ import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+  SoftModal,
+  softInputClass,
+  softLabelClass,
+  softPrimaryButtonClass,
+  softSecondaryButtonClass,
+} from '@/components/ui/soft-modal';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   apiErrorMessage,
@@ -315,46 +313,53 @@ export default function CategoriasPage() {
       {/* ============================================================
           DIALOGS — crear / editar / eliminar
           ============================================================ */}
-      <Dialog
+      <SoftModal
         open={open}
         onOpenChange={(v) => (v ? setOpen(true) : closeDialog())}
+        title={editing ? `Editar "${editing.name}"` : 'Nueva categoría'}
+        subtitle={
+          editing
+            ? 'Actualizá el nombre de la categoría'
+            : 'Creá una categoría para organizar tus productos'
+        }
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {editing ? `Editar "${editing.name}"` : 'Nueva categoría'}
-            </DialogTitle>
-          </DialogHeader>
-          <form onSubmit={onSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="cat-name">Nombre</Label>
-              <Input
-                id="cat-name"
-                autoFocus
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="ej: Frenos"
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Entre 2 y 60 caracteres. Debe ser único.
-              </p>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={closeDialog}>
-                Cancelar
-              </Button>
-              <Button
-                type="submit"
-                disabled={
-                  createMut.isPending || updateMut.isPending || !name.trim()
-                }
-              >
-                {editing ? 'Guardar' : 'Crear categoría'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+        <form onSubmit={onSubmit} className="space-y-4 p-5">
+          <div className="space-y-1">
+            <label htmlFor="cat-name" className={softLabelClass}>
+              Nombre
+            </label>
+            <input
+              id="cat-name"
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="ej: Frenos"
+              className={softInputClass}
+            />
+            <p className="text-[11px] text-slate-400">
+              Entre 2 y 60 caracteres. Debe ser único.
+            </p>
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={closeDialog}
+              className={softSecondaryButtonClass}
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={
+                createMut.isPending || updateMut.isPending || !name.trim()
+              }
+              className={`${softPrimaryButtonClass} w-auto px-5`}
+            >
+              {editing ? 'Guardar' : 'Crear categoría'}
+            </button>
+          </div>
+        </form>
+      </SoftModal>
 
       <ConfirmDialog
         open={!!deleteTarget}

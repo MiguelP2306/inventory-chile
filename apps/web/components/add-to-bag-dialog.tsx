@@ -6,12 +6,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { ProductImageLightbox } from '@/components/product-image-lightbox';
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  SoftModal,
+  softPrimaryButtonClass,
+  softSecondaryButtonClass,
+} from '@/components/ui/soft-modal';
 import {
   getProduct,
   listProductImages,
@@ -118,15 +116,14 @@ export function AddToBagDialog({ productId, onClose }: Props) {
 
   return (
     <>
-      <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-        <DialogContent className="max-w-2xl overflow-hidden p-0">
-          <DialogHeader className="border-b px-5 py-3.5">
-            <DialogTitle className="flex items-center gap-2 text-base">
-              <Box className="h-4 w-4 text-[#2F6BFF]" />
-              Agregar al bolso
-            </DialogTitle>
-          </DialogHeader>
-
+      <SoftModal
+        open={open}
+        onOpenChange={(o) => !o && onClose()}
+        title="Agregar al bolso"
+        subtitle="Revisá precio, stock y cantidad antes de agregar"
+        icon={<Box className="h-5 w-5" />}
+        size="xl"
+      >
           {product.isLoading ? (
             <div className="flex items-center justify-center px-6 py-16 text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
@@ -281,11 +278,11 @@ export function AddToBagDialog({ productId, onClose }: Props) {
             </div>
           )}
 
-          <DialogFooter className="border-t bg-muted/30 px-5 py-3">
+          <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/50 px-5 py-3.5 dark:border-slate-800 dark:bg-slate-900/10">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg border bg-background px-3 py-2 text-xs font-bold hover:bg-muted"
+              className={softSecondaryButtonClass}
             >
               Cancelar
             </button>
@@ -293,14 +290,13 @@ export function AddToBagDialog({ productId, onClose }: Props) {
               type="button"
               onClick={handleAdd}
               disabled={!product.data}
-              className="inline-flex items-center gap-2 rounded-lg bg-[#2F6BFF] px-4 py-2 text-xs font-extrabold text-white shadow-sm hover:bg-[#2F6BFF]/90 disabled:opacity-60"
+              className={`${softPrimaryButtonClass} inline-flex w-auto items-center gap-2 px-4 py-2.5`}
             >
               <ShoppingBag className="h-3.5 w-3.5" />
               Agregar al bolso
             </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </div>
+      </SoftModal>
 
       <ProductImageLightbox
         open={lightboxIndex != null}

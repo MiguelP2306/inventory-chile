@@ -1,27 +1,8 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, Eye, Plus } from 'lucide-react';
+import { Eye, Plus } from 'lucide-react';
 import Link from 'next/link';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { TransferStatusBadge } from '@/components/transfer-status-badge';
 import { listTransfers } from '@/lib/transfers-api';
 import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
@@ -36,6 +17,20 @@ const STATUS_OPTIONS: { value: TransferStatusDto; label: string }[] = [
   { value: 'CANCELLED', label: 'Cancelada' },
 ];
 
+/**
+ * /transferencias — Rediseño UI (look de TransferList).
+ *
+ * SOLO UI/UX. La lógica es idéntica a la versión previa:
+ *  · useUrlFilters (status, from, to, q, dateFrom, dateTo, page).
+ *  · useDebouncedUrlFilter para el search.
+ *  · listWarehouses('all') para poblar Origen/Destino (incluye inactivas).
+ *  · listTransfers con todos los filtros + paginación server-side.
+ *
+ * Cambios visuales: Tailwind puro, grid de filtros redondeados, tabla en
+ * "sheet" rounded-3xl con filas clickeables, badges de estado y footer de
+ * paginación. El badge de estado se pinta inline (emerald/rose) para calzar
+ * con el mock — si preferís reusar <TransferStatusBadge>, avisame.
+ */
 export default function TransferenciasPage() {
   const filters = useUrlFilters({
     status: '',
@@ -65,16 +60,13 @@ export default function TransferenciasPage() {
     dateTo !== '' ||
     search.value !== '';
 
-  // En filtros mostramos TODAS las bodegas (activas + inactivas) para que el
-  // operador pueda filtrar transferencias antiguas hacia bodegas hoy inactivas.
   const warehouses = useQuery({
     queryKey: ['warehouses', 'all'],
     queryFn: () => listWarehouses(),
   });
-  const warehouseList =
-    (Array.isArray(warehouses.data)
-      ? warehouses.data
-      : warehouses.data?.items ?? []) as WarehouseDto[];
+  const warehouseList = (Array.isArray(warehouses.data)
+    ? warehouses.data
+    : warehouses.data?.items ?? []) as WarehouseDto[];
 
   const list = useQuery({
     queryKey: ['transfers', { status, fromW, toW, debouncedQ, dateFrom, dateTo, page }],
@@ -95,202 +87,244 @@ export default function TransferenciasPage() {
   const total = list.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  const fieldCls =
+    'w-full text-xs font-semibold px-3 py-3 bg-white dark:bg-[#11151C] text-slate-700 dark:text-white border border-slate-200 dark:border-slate-850 rounded-2xl focus:outline-none focus:border-[#2F6BFF] transition-all';
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Transferencias entre bodegas</h1>
-        <div className="flex items-center gap-2">
+    <div className="space-y-6 animate-in fade-in duration-200">
+      {/* ============================================================
+          HEADER
+          ============================================================ */}
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">
+          Transferencias entre bodegas
+        </h1>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
           {filtersActive && (
-            <Button variant="ghost" size="sm" onClick={clear}>
+            <button
+              onClick={clear}
+              className="cursor-pointer rounded-xl px-3 py-2 text-xs font-bold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            >
               Limpiar filtros
-            </Button>
+            </button>
           )}
-          <Button asChild>
-            <Link href="/transferencias/nueva">
-              <Plus className="h-4 w-4" />
-              Nueva transferencia
-            </Link>
-          </Button>
+          <Link
+            href="/transferencias/nueva"
+            className="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-xs font-bold text-white shadow-md transition-colors hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-50"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Nueva transferencia</span>
+          </Link>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-7">
-        <Input
+      {/* ============================================================
+          FILTROS
+          ============================================================ */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+        <input
+          type="text"
           placeholder="Buscar (número o bodega)"
           value={search.value}
           onChange={(e) => search.setValue(e.target.value)}
-          className="md:col-span-2"
+          className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-xs font-medium text-slate-700 transition-all focus:border-[#2F6BFF] focus:outline-none dark:border-slate-850 dark:bg-[#11151C] dark:text-white"
         />
-        <Select
+        <select
           value={status}
-          onValueChange={(v) => {
-            setFilter('status', v === ALL ? null : v);
+          onChange={(e) => {
+            setFilter('status', e.target.value === ALL ? null : e.target.value);
             setFilter('page', null);
           }}
+          className={fieldCls}
         >
-          <SelectTrigger>
-            <SelectValue placeholder="Estado" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Todos los estados</SelectItem>
-            {STATUS_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
+          <option value={ALL}>Todos los estados</option>
+          {STATUS_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <select
           value={fromW}
-          onValueChange={(v) => {
-            setFilter('from', v === ALL ? null : v);
+          onChange={(e) => {
+            setFilter('from', e.target.value === ALL ? null : e.target.value);
             setFilter('page', null);
           }}
+          className={fieldCls}
         >
-          <SelectTrigger>
-            <SelectValue placeholder="Origen" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Todos los orígenes</SelectItem>
-            {warehouseList.map((w) => (
-              <SelectItem key={w.id} value={w.id}>
-                {w.name}
-                {!w.isActive ? ' (inactiva)' : ''}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
+          <option value={ALL}>Todos los orígenes</option>
+          {warehouseList.map((w) => (
+            <option key={w.id} value={w.id}>
+              {w.name}
+              {!w.isActive ? ' (inactiva)' : ''}
+            </option>
+          ))}
+        </select>
+        <select
           value={toW}
-          onValueChange={(v) => {
-            setFilter('to', v === ALL ? null : v);
+          onChange={(e) => {
+            setFilter('to', e.target.value === ALL ? null : e.target.value);
             setFilter('page', null);
           }}
+          className={fieldCls}
         >
-          <SelectTrigger>
-            <SelectValue placeholder="Destino" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Todos los destinos</SelectItem>
-            {warehouseList.map((w) => (
-              <SelectItem key={w.id} value={w.id}>
-                {w.name}
-                {!w.isActive ? ' (inactiva)' : ''}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Input
+          <option value={ALL}>Todos los destinos</option>
+          {warehouseList.map((w) => (
+            <option key={w.id} value={w.id}>
+              {w.name}
+              {!w.isActive ? ' (inactiva)' : ''}
+            </option>
+          ))}
+        </select>
+        <input
           type="date"
           value={dateFrom}
           onChange={(e) => {
             setFilter('dateFrom', e.target.value || null);
             setFilter('page', null);
           }}
+          className="w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-xs font-medium text-slate-700 transition-all focus:border-[#2F6BFF] focus:outline-none dark:border-slate-850 dark:bg-[#11151C] dark:text-white"
         />
-        <Input
+        <input
           type="date"
           value={dateTo}
           onChange={(e) => {
             setFilter('dateTo', e.target.value || null);
             setFilter('page', null);
           }}
+          className="w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-xs font-medium text-slate-700 transition-all focus:border-[#2F6BFF] focus:outline-none dark:border-slate-850 dark:bg-[#11151C] dark:text-white"
         />
       </div>
 
-      <div className="rounded-md border bg-card">
-        <Table stickyFirstColumn>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Número</TableHead>
-              <TableHead>Fecha</TableHead>
-              <TableHead>Origen → Destino</TableHead>
-              <TableHead className="text-right">Items</TableHead>
-              <TableHead>Estado</TableHead>
-              <TableHead className="w-[80px]" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {list.isLoading && (
-              <>
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <TableRow key={i}>
-                    <TableCell colSpan={6}>
-                      <Skeleton className="h-4 w-full" />
-                    </TableCell>
-                  </TableRow>
+      {/* ============================================================
+          TABLA
+          ============================================================ */}
+      <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[700px] border-collapse text-left text-[12px]">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/50 font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-800 dark:bg-slate-900/10 dark:text-slate-500">
+                <th className="py-4 pl-6">Número</th>
+                <th className="py-4">Fecha</th>
+                <th className="py-4">Origen → Destino</th>
+                <th className="py-4">Items</th>
+                <th className="py-4 text-left">Estado</th>
+                <th className="w-[60px] py-4 pr-6 text-right" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+              {list.isLoading &&
+                Array.from({ length: 5 }).map((_, i) => (
+                  <tr key={i}>
+                    <td colSpan={6} className="px-6 py-5">
+                      <div className="h-4 w-full animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+                    </td>
+                  </tr>
                 ))}
-              </>
-            )}
-            {!list.isLoading && items.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
-                  Sin transferencias.
-                </TableCell>
-              </TableRow>
-            )}
-            {items.map((t) => (
-              <TableRow key={t.id}>
-                <TableCell className="font-mono text-xs">
-                  <Link href={`/transferencias/${t.id}`} className="hover:underline">
-                    {t.number}
-                  </Link>
-                </TableCell>
-                <TableCell>
-                  {new Date(t.date).toLocaleDateString('es-CL', {
-                    dateStyle: 'short',
-                  })}
-                </TableCell>
-                <TableCell className="text-sm">
-                  <span className="font-medium">{t.fromWarehouse?.name ?? '—'}</span>
-                  <ArrowRight className="mx-2 inline h-3 w-3 text-muted-foreground" />
-                  <span className="font-medium">{t.toWarehouse?.name ?? '—'}</span>
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {t.items?.length ?? 0}
-                </TableCell>
-                <TableCell>
-                  <TransferStatusBadge status={t.status} />
-                </TableCell>
-                <TableCell className="text-right">
-                  <Button asChild variant="ghost" size="icon" title="Ver detalle">
-                    <Link href={`/transferencias/${t.id}`}>
-                      <Eye className="h-4 w-4" />
+
+              {!list.isLoading && items.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center font-bold text-slate-400">
+                    Ninguna transferencia coincide con los criterios de búsqueda o filtros.
+                  </td>
+                </tr>
+              )}
+
+              {items.map((t) => (
+                <tr
+                  key={t.id}
+                  onClick={() => {
+                    window.location.href = `/transferencias/${t.id}`;
+                  }}
+                  className="group cursor-pointer transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-800/10"
+                >
+                  <td className="py-5 pl-6 font-mono font-medium text-slate-900 dark:text-white">
+                    <Link
+                      href={`/transferencias/${t.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="hover:underline"
+                    >
+                      {t.number}
                     </Link>
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+                  </td>
+                  <td className="py-5 font-medium text-slate-500 dark:text-slate-400">
+                    {new Date(t.date).toLocaleDateString('es-CL', { dateStyle: 'short' })}
+                  </td>
+                  <td className="py-5">
+                    <span className="font-bold text-slate-950 dark:text-slate-100">
+                      {t.fromWarehouse?.name ?? '—'}
+                    </span>{' '}
+                    <span className="mx-1 font-mono font-medium text-slate-400">→</span>{' '}
+                    <span className="font-bold text-slate-950 dark:text-slate-100">
+                      {t.toWarehouse?.name ?? '—'}
+                    </span>
+                  </td>
+                  <td className="py-5 pl-1 font-mono font-semibold text-slate-600 dark:text-slate-400">
+                    {t.items?.length ?? 0}
+                  </td>
+                  <td className="py-5">
+                    <StatusBadge status={t.status} />
+                  </td>
+                  <td className="py-5 pr-6 text-right">
+                    <Link
+                      href={`/transferencias/${t.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      title="Ver detalle"
+                      className="inline-flex items-center justify-center p-2 text-slate-400 transition-colors hover:text-slate-600 dark:hover:text-white"
+                    >
+                      <Eye className="h-[18px] w-[18px]" />
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <span>
+      {/* ============================================================
+          PAGINACIÓN
+          ============================================================ */}
+      <div className="flex items-center justify-between text-xs font-medium text-slate-400 dark:text-slate-500">
+        <div>
           {total} transferencia{total === 1 ? '' : 's'}
           {total > 0 ? ` · página ${page} de ${totalPages}` : ''}
-        </span>
+        </div>
         {total > 0 && (
           <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
+            <button
               onClick={() => setFilter('page', String(Math.max(1, page - 1)))}
               disabled={page === 1}
+              className="cursor-pointer rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2 font-bold text-slate-700 transition-all hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:text-slate-300 dark:hover:bg-slate-900"
             >
               Anterior
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
+            </button>
+            <button
               onClick={() => setFilter('page', String(Math.min(totalPages, page + 1)))}
               disabled={page >= totalPages}
+              className="cursor-pointer rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2 font-bold text-slate-700 transition-all hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:text-slate-300 dark:hover:bg-slate-900"
             >
               Siguiente
-            </Button>
+            </button>
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+/* Badge de estado inline (emerald = Completada, rose = Cancelada). */
+function StatusBadge({ status }: { status: TransferStatusDto }) {
+  if (status === 'CANCELLED') {
+    return (
+      <span className="inline-flex items-center rounded-lg bg-rose-50 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider text-rose-500 dark:bg-rose-950/20 dark:text-rose-400">
+        Cancelada
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center rounded-lg bg-emerald-50 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider text-emerald-600 dark:bg-emerald-950/20 dark:text-emerald-400">
+      Completada
+    </span>
   );
 }
