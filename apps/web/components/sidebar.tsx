@@ -466,13 +466,13 @@ export function Sidebar() {
             ) : (
               <span />
             )}
-            <a
-              href="mailto:soporte@pyme.cl"
+            <Link
+              href="/ayuda"
               className="flex items-center gap-1.5 transition-colors hover:text-slate-900 dark:hover:text-white"
             >
               <HelpCircle className="h-4 w-4" />
               <span>Ayuda</span>
-            </a>
+            </Link>
           </div>
         )}
       </div>
