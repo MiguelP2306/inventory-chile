@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import { Portal } from '@/components/ui/portal';
 import { apiErrorMessage } from '@/lib/catalog-api';
 import {
   createWarehouse,
@@ -286,8 +287,9 @@ export default function AlmacenesPage() {
           MODAL crear / editar (custom)
           ============================================================ */}
       {open && (
+        <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="w-full max-w-md overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-xl animate-in zoom-in-95 duration-200 dark:border-slate-800 dark:bg-[#11151C]">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-3xl border border-slate-100 bg-white shadow-xl animate-in zoom-in-95 duration-200 dark:border-slate-800 dark:bg-[#11151C]">
             <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/50 p-5 dark:border-slate-800 dark:bg-slate-900/10">
               <div>
                 <h4 className="text-sm font-black text-slate-900 dark:text-white">
@@ -346,6 +348,7 @@ export default function AlmacenesPage() {
             </form>
           </div>
         </div>
+        </Portal>
       )}
 
       {/* ============================================================

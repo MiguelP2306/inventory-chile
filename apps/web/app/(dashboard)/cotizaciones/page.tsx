@@ -10,11 +10,7 @@ import { QuotationStatusBadge } from '@/components/quotation-status-badge';
 import { apiAbsoluteUrl } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
 import { listQuotations } from '@/lib/quotations-api';
-import {
-  clearProductBag,
-  clearProductBagItems,
-  useProductBag,
-} from '@/lib/use-product-bag';
+import { clearProductBagItems, useProductBag } from '@/lib/use-product-bag';
 import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
 import type { QuotationStatusDto } from '@inventory/shared';
@@ -380,12 +376,15 @@ export default function CotizacionesPage() {
               }))
             : undefined
         }
-        onSaved={() => {
+        onSaved={(saved) => {
           qc.invalidateQueries({ queryKey: ['quotations'] });
           if (bagPrefillActive) {
-            // Quitamos del bolso solo los productos convertidos.
-            if (bagIds && bagIds.length > 0) clearProductBagItems(bagIds);
-            else clearProductBag();
+            // Quitamos del bolso SOLO los productos que quedaron en la
+            // cotización creada (los temporales no tienen productId; se ignoran).
+            const involvedIds = (saved.items ?? [])
+              .map((it) => it.productId)
+              .filter((id): id is string => !!id);
+            if (involvedIds.length > 0) clearProductBagItems(involvedIds);
             setBagPrefillActive(false);
             setBagIds(null);
           }

@@ -226,7 +226,7 @@ export default function ProductosPage() {
           TAB BAR — links a tus rutas + sello CLP
           ============================================================ */}
       <div className="flex flex-col items-start justify-between gap-4 rounded-2xl border border-slate-100 bg-white px-4 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:flex-row sm:items-center">
-        <div className="flex items-center gap-1.5 rounded-xl bg-slate-50 p-0.5 text-xs dark:bg-slate-950">
+        <div className="flex max-w-full items-center gap-1.5 overflow-x-auto rounded-xl bg-slate-50 p-0.5 text-xs [scrollbar-width:none] dark:bg-slate-950 [&::-webkit-scrollbar]:hidden">
           {CATALOG_TABS.map((t) => {
             const active = pathname === t.href;
             const Icon = t.icon;
@@ -235,7 +235,7 @@ export default function ProductosPage() {
                 key={t.href}
                 href={t.href}
                 className={cn(
-                  'flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[11.5px] font-bold transition-all',
+                  'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3.5 py-1.5 text-[11.5px] font-bold transition-all',
                   active
                     ? 'bg-white text-[#2F6BFF] shadow-sm dark:bg-slate-800 dark:text-blue-400'
                     : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200',

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import { Portal } from '@/components/ui/portal';
 import { apiAbsoluteUrl } from '@/lib/api';
 import { apiErrorMessage } from '@/lib/catalog-api';
 import {
@@ -299,9 +300,10 @@ export default function ProveedoresPage() {
           MODAL crear / editar (custom, look del mock)
           ============================================================ */}
       {open && (
+        <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-2xl animate-in zoom-in-95 duration-200 dark:border-slate-850 dark:bg-[#11151C]">
-            <div className="flex items-center justify-between border-b border-slate-100 p-5 dark:border-slate-850">
+          <div className="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-2xl animate-in zoom-in-95 duration-200 dark:border-slate-850 dark:bg-[#11151C]">
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-100 p-5 dark:border-slate-850">
               <h2 className="text-base font-black text-slate-900 dark:text-white">
                 {editing ? `Editar proveedor: ${editing.name}` : 'Nuevo proveedor'}
               </h2>
@@ -313,7 +315,7 @@ export default function ProveedoresPage() {
               </button>
             </div>
 
-            <form onSubmit={onSubmit} className="space-y-4 p-6 text-xs font-semibold">
+            <form onSubmit={onSubmit} className="flex-1 space-y-4 overflow-y-auto p-6 text-xs font-semibold">
               {/* Nombre */}
               <div className="space-y-1">
                 <label className="text-[10px] font-black uppercase tracking-wider text-slate-400">
@@ -460,6 +462,7 @@ export default function ProveedoresPage() {
             </form>
           </div>
         </div>
+        </Portal>
       )}
 
       <ConfirmDialog

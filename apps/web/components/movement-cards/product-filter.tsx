@@ -92,7 +92,11 @@ export function ProductFilter({ value, onChange }: Props) {
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[360px] p-0" align="start">
+      <PopoverContent
+        className="w-[calc(100vw-1.5rem)] max-w-[360px] p-0"
+        align="start"
+        collisionPadding={12}
+      >
         <div className="p-3">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -105,7 +109,7 @@ export function ProductFilter({ value, onChange }: Props) {
             />
           </div>
         </div>
-        <div className="max-h-[300px] overflow-y-auto border-t">
+        <div className="max-h-[45vh] overflow-y-auto border-t sm:max-h-[300px]">
           {products.isLoading && (
             <div className="space-y-1 p-2">
               {Array.from({ length: 5 }).map((_, i) => (

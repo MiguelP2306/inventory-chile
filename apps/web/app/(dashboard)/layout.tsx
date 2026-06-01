@@ -111,8 +111,10 @@ export default async function DashboardLayout({
             </nav>
           </div>
 
-          {/* Centro: buscador (tu QuickSearch) centrado, ancho controlado */}
-          <div className="mx-auto hidden w-full max-w-md sm:block">
+          {/* Centro: buscador (tu QuickSearch) centrado, ancho controlado.
+              En móvil se colapsa a un botón con solo ícono (lo maneja el
+              propio QuickSearch) pero permanece visible. */}
+          <div className="mx-auto w-full min-w-0 max-w-md">
             <QuickSearch />
           </div>
 

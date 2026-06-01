@@ -620,7 +620,7 @@ export function SaleForm({
                   return (
                     <TableRow
                       key={`${it.productId}-${idx}`}
-                      className={exceeds ? 'bg-destructive/5' : ''}
+                      className={cn('[&>td]:align-top', exceeds && 'bg-destructive/5')}
                     >
                       <TableCell className="font-mono text-xs">{it.sku}</TableCell>
                       <TableCell className="max-w-[260px] truncate">
@@ -645,7 +645,7 @@ export function SaleForm({
                           {available != null && (
                             <div
                               className={cn(
-                                'text-xs tabular-nums',
+                                'whitespace-nowrap text-xs tabular-nums',
                                 exceeds
                                   ? 'font-medium text-destructive'
                                   : 'text-muted-foreground',

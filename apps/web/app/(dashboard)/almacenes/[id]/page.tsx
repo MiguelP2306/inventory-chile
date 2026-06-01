@@ -168,12 +168,12 @@ export default function AlmacenDetailPage() {
       {/* ============================================================
           TAB BAR
           ============================================================ */}
-      <div className="flex max-w-sm select-none rounded-2xl border border-slate-200 bg-slate-100/70 p-1 shadow-sm dark:border-slate-800 dark:bg-slate-900/80 sm:max-w-2xl">
+      <div className="flex select-none overflow-x-auto rounded-2xl border border-slate-200 bg-slate-100/70 p-1 shadow-sm [scrollbar-width:none] dark:border-slate-800 dark:bg-slate-900/80 sm:max-w-2xl [&::-webkit-scrollbar]:hidden">
         {TABS.map((t) => (
           <button
             key={t.key}
             onClick={() => setActiveTab(t.key)}
-            className={`flex-1 cursor-pointer rounded-xl px-4 py-2.5 text-center text-[12px] font-bold transition-all ${
+            className={`shrink-0 cursor-pointer whitespace-nowrap rounded-xl px-4 py-2.5 text-center text-[12px] font-bold transition-all sm:flex-1 ${
               activeTab === t.key
                 ? 'bg-white text-slate-950 shadow-sm dark:bg-slate-950 dark:text-white'
                 : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'

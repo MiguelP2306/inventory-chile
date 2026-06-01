@@ -121,7 +121,11 @@ export function ContactFilter({ value, onChange }: Props) {
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[360px] p-0" align="start">
+      <PopoverContent
+        className="w-[calc(100vw-1.5rem)] max-w-[360px] p-0"
+        align="start"
+        collisionPadding={12}
+      >
         <div className="space-y-2 p-3">
           <Tabs value={tab} onValueChange={(v) => setTab(v as ContactKind)}>
             <TabsList className="grid w-full grid-cols-2">
@@ -142,7 +146,7 @@ export function ContactFilter({ value, onChange }: Props) {
             />
           </div>
         </div>
-        <div className="max-h-[300px] overflow-y-auto border-t">
+        <div className="max-h-[45vh] overflow-y-auto border-t sm:max-h-[300px]">
           {tab === 'customer' && (
             <>
               {customers.isLoading && (

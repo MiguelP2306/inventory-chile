@@ -7,6 +7,7 @@ import { useParams } from 'next/navigation';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import { Portal } from '@/components/ui/portal';
 import {
   apiErrorMessage,
   createVehicleModel,
@@ -206,7 +207,7 @@ export default function VehicleMakeDetailPage() {
                     </Link>
                   </td>
                   <td className="py-4 pr-6 pl-3 text-right">
-                    <div className="flex items-center justify-end gap-2 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                    <div className="flex items-center justify-end gap-2 opacity-100 transition-opacity focus-within:opacity-100 group-hover:opacity-100 sm:opacity-0">
                       <button
                         type="button"
                         onClick={() => startEdit(m)}
@@ -316,8 +317,9 @@ export default function VehicleMakeDetailPage() {
           MODAL — crear / editar modelo (custom, reemplaza SoftModal)
           ============================================================ */}
       {modelDialogOpen && (
+        <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="w-full max-w-md overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-xl animate-in zoom-in-95 duration-200 dark:border-slate-800 dark:bg-[#11151C]">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-3xl border border-slate-100 bg-white shadow-xl animate-in zoom-in-95 duration-200 dark:border-slate-800 dark:bg-[#11151C]">
             <div className="flex items-start justify-between gap-3 border-b border-slate-100 bg-slate-50/50 p-5 dark:border-slate-800 dark:bg-slate-900/10">
               <div>
                 <h4 className="text-sm font-black text-slate-900 dark:text-white">
@@ -377,6 +379,7 @@ export default function VehicleMakeDetailPage() {
             </form>
           </div>
         </div>
+        </Portal>
       )}
 
       <ConfirmDialog

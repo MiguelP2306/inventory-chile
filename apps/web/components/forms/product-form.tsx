@@ -491,8 +491,8 @@ export function ProductForm({ product }: Props) {
                 '!h-auto !w-full !rounded-none !bg-transparent !p-0 !text-foreground',
                 // Nuestro layout: fila horizontal con border-bottom como underline.
                 'flex justify-start gap-1 border-b border-border',
-                // Evita que ningún ancestro le agregue scroll vertical.
-                'overflow-visible',
+                // En móvil las 5 pestañas no caben: scroll horizontal sin barra visible.
+                'flex-nowrap overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
               )}
             >
               <TabPill
@@ -818,10 +818,11 @@ export function ProductForm({ product }: Props) {
                           : 'hover:bg-accent/30',
                       )}
                     >
-                      <div className="grid grid-cols-[28px_minmax(0,1fr)_110px_110px_36px] items-center gap-3 px-3.5 py-2.5">
-                        <span className="font-mono text-[10px] text-muted-foreground">
+                      <div className="flex flex-wrap items-center gap-3 px-3.5 py-2.5 sm:flex-nowrap">
+                        <span className="w-7 shrink-0 font-mono text-[10px] text-muted-foreground">
                           {String(idx + 1).padStart(2, '0')}
                         </span>
+                        <div className="min-w-[160px] flex-1">
                         <Controller
                           control={form.control}
                           name={`fitments.${idx}.modelId`}
@@ -843,6 +844,9 @@ export function ProductForm({ product }: Props) {
                             </Select>
                           )}
                         />
+                        </div>
+                        <div className="flex w-full items-center gap-3 sm:w-auto">
+                        <div className="flex-1 sm:w-[110px]">
                         <Controller
                           control={form.control}
                           name={`fitments.${idx}.yearFrom`}
@@ -873,6 +877,8 @@ export function ProductForm({ product }: Props) {
                             </Select>
                           )}
                         />
+                        </div>
+                        <div className="flex-1 sm:w-[110px]">
                         <Controller
                           control={form.control}
                           name={`fitments.${idx}.yearTo`}
@@ -903,14 +909,16 @@ export function ProductForm({ product }: Props) {
                             </Select>
                           )}
                         />
+                        </div>
                         <button
                           type="button"
                           onClick={() => fitments.remove(idx)}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                           aria-label="Eliminar fila"
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
+                        </div>
                       </div>
                       {hasErr && (
                         <p className="flex items-center gap-1.5 border-t border-destructive/30 bg-destructive/5 px-3.5 py-2 text-xs text-destructive">
@@ -1123,7 +1131,7 @@ function TabPill({
     <TabsTrigger
       value={value}
       className={cn(
-        'group relative -mb-px inline-flex h-11 items-center gap-2 rounded-t-md border-b-2 border-transparent bg-transparent px-4 text-sm font-medium text-muted-foreground shadow-none transition-colors',
+        'group relative -mb-px inline-flex h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-t-md border-b-2 border-transparent bg-transparent px-4 text-sm font-medium text-muted-foreground shadow-none transition-colors',
         'data-[state=active]:border-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold data-[state=active]:bg-transparent data-[state=active]:shadow-none',
         'hover:bg-accent/60 hover:text-foreground',
       )}

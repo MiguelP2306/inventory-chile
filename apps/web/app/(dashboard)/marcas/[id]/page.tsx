@@ -125,8 +125,9 @@ export default function MarcaDetailPage() {
           PRODUCTS TABLE
           ============================================================ */}
       <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+        <div className="overflow-x-auto">
         {/* head */}
-        <div className="grid grid-cols-[60px_120px_minmax(180px,1fr)_160px_120px_40px] items-center gap-3 border-b border-slate-100 bg-slate-50/50 px-5 py-3 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-800 dark:bg-slate-900/10 dark:text-slate-500">
+        <div className="grid min-w-[740px] grid-cols-[60px_120px_minmax(180px,1fr)_160px_120px_40px] items-center gap-3 border-b border-slate-100 bg-slate-50/50 px-5 py-3 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-800 dark:bg-slate-900/10 dark:text-slate-500">
           <span>Imagen</span>
           <span>SKU</span>
           <span>Nombre</span>
@@ -168,7 +169,7 @@ export default function MarcaDetailPage() {
             return (
               <div
                 key={p.id}
-                className="group grid grid-cols-[60px_120px_minmax(180px,1fr)_160px_120px_40px] items-center gap-3 border-b border-slate-100 px-5 py-3 text-xs transition-colors last:border-b-0 hover:bg-slate-50/60 dark:border-slate-800/80 dark:hover:bg-slate-800/10"
+                className="group grid min-w-[740px] grid-cols-[60px_120px_minmax(180px,1fr)_160px_120px_40px] items-center gap-3 border-b border-slate-100 px-5 py-3 text-xs transition-colors last:border-b-0 hover:bg-slate-50/60 dark:border-slate-800/80 dark:hover:bg-slate-800/10"
               >
                 <Link href={`/productos/${p.id}`} className="inline-block">
                   <div className="overflow-hidden rounded-lg border border-slate-100 dark:border-slate-800">
@@ -203,6 +204,7 @@ export default function MarcaDetailPage() {
               </div>
             );
           })}
+        </div>
 
         {!productsQ.isLoading && total > 0 && (
           <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50/50 px-5 py-3.5 text-[11.5px] font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-900/10 dark:text-slate-400">

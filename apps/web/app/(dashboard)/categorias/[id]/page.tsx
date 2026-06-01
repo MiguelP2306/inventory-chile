@@ -24,6 +24,7 @@ import { useParams } from 'next/navigation';
 import { useMemo, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import { Portal } from '@/components/ui/portal';
 import { ProductThumbnail } from '@/components/product-thumbnail';
 import {
   Select,
@@ -473,7 +474,7 @@ export default function CategoriaDetailPage() {
                           '—'
                         )}
                       </span>
-                      <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                      <div className="flex items-center gap-1 opacity-100 transition-opacity focus-within:opacity-100 group-hover:opacity-100 sm:opacity-0">
                         <button
                           type="button"
                           onClick={() => startEditSub(s)}
@@ -596,8 +597,9 @@ export default function CategoriaDetailPage() {
           PRODUCTS TABLE
           ============================================================ */}
       <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+        <div className="overflow-x-auto">
         {/* head */}
-        <div className="grid grid-cols-[40px_60px_120px_minmax(180px,1fr)_140px_120px_40px] items-center gap-3 border-b border-slate-100 bg-slate-50/50 px-5 py-3 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-800 dark:bg-slate-900/10 dark:text-slate-500">
+        <div className="grid min-w-[780px] grid-cols-[40px_60px_120px_minmax(180px,1fr)_140px_120px_40px] items-center gap-3 border-b border-slate-100 bg-slate-50/50 px-5 py-3 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-800 dark:bg-slate-900/10 dark:text-slate-500">
           <button
             type="button"
             onClick={toggleAllOnPage}
@@ -652,7 +654,7 @@ export default function CategoriaDetailPage() {
               <div
                 key={p.id}
                 className={cn(
-                  'group grid grid-cols-[40px_60px_120px_minmax(180px,1fr)_140px_120px_40px] items-center gap-3 border-b border-slate-100 px-5 py-3 text-xs transition-colors last:border-b-0 dark:border-slate-800/80',
+                  'group grid min-w-[780px] grid-cols-[40px_60px_120px_minmax(180px,1fr)_140px_120px_40px] items-center gap-3 border-b border-slate-100 px-5 py-3 text-xs transition-colors last:border-b-0 dark:border-slate-800/80',
                   isOn
                     ? 'bg-[#2F6BFF]/[0.04] dark:bg-blue-950/10'
                     : 'hover:bg-slate-50/60 dark:hover:bg-slate-800/10',
@@ -704,6 +706,7 @@ export default function CategoriaDetailPage() {
               </div>
             );
           })}
+        </div>
 
         {!productsQ.isLoading && total > 0 && (
           <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50/50 px-5 py-3.5 text-[11.5px] font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-900/10 dark:text-slate-400">
@@ -744,8 +747,9 @@ export default function CategoriaDetailPage() {
           MODAL — crear / editar subcategoría (custom)
           ============================================================ */}
       {subDialogOpen && (
+        <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="w-full max-w-md overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-xl animate-in zoom-in-95 duration-200 dark:border-slate-800 dark:bg-[#11151C]">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-3xl border border-slate-100 bg-white shadow-xl animate-in zoom-in-95 duration-200 dark:border-slate-800 dark:bg-[#11151C]">
             <div className="flex items-start justify-between gap-3 border-b border-slate-100 bg-slate-50/50 p-5 dark:border-slate-800 dark:bg-slate-900/10">
               <div>
                 <h4 className="text-sm font-black text-slate-900 dark:text-white">
@@ -806,6 +810,7 @@ export default function CategoriaDetailPage() {
             </form>
           </div>
         </div>
+        </Portal>
       )}
 
       <ConfirmDialog
@@ -828,8 +833,9 @@ export default function CategoriaDetailPage() {
           MODAL — editar nombre de la categoría actual (custom)
           ============================================================ */}
       {editOpen && (
+        <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="w-full max-w-md overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-xl animate-in zoom-in-95 duration-200 dark:border-slate-800 dark:bg-[#11151C]">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-3xl border border-slate-100 bg-white shadow-xl animate-in zoom-in-95 duration-200 dark:border-slate-800 dark:bg-[#11151C]">
             <div className="flex items-start justify-between gap-3 border-b border-slate-100 bg-slate-50/50 p-5 dark:border-slate-800 dark:bg-slate-900/10">
               <div>
                 <h4 className="text-sm font-black text-slate-900 dark:text-white">
@@ -884,6 +890,7 @@ export default function CategoriaDetailPage() {
             </form>
           </div>
         </div>
+        </Portal>
       )}
 
       <ConfirmDialog
@@ -974,15 +981,15 @@ export default function CategoriaDetailPage() {
       >
         <div
           className={cn(
-            'flex items-center gap-1 rounded-2xl border border-white/10 bg-[#2F6BFF] p-1.5 text-white shadow-2xl shadow-[#2F6BFF]/40',
+            'flex max-w-[calc(100vw-1.5rem)] items-center gap-1 rounded-2xl border border-white/10 bg-[#2F6BFF] p-1.5 text-white shadow-2xl shadow-[#2F6BFF]/40',
             selected.size > 0 && 'pointer-events-auto',
           )}
         >
-          <div className="flex items-center gap-2 px-3 py-1.5">
+          <div className="flex items-center gap-2 px-2 py-1.5 sm:px-3">
             <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-white/20 px-1.5 font-mono text-[11px] font-black tabular-nums">
               {selected.size}
             </span>
-            <span className="text-[12.5px] font-bold">
+            <span className="hidden text-[12.5px] font-bold sm:inline">
               {selected.size === 1 ? 'seleccionado' : 'seleccionados'}
             </span>
           </div>

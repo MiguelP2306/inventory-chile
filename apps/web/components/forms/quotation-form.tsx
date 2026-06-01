@@ -941,11 +941,10 @@ export function QuotationForm({
                   return (
                     <TableRow
                       key={`${it.productId ?? 'temp'}-${idx}`}
-                      className={
-                        exceeds
-                          ? 'bg-amber-500/5 hover:bg-amber-500/10'
-                          : undefined
-                      }
+                      className={cn(
+                        '[&>td]:align-top',
+                        exceeds && 'bg-amber-500/5 hover:bg-amber-500/10',
+                      )}
                     >
                       <TableCell className="font-mono text-xs">
                         {it.sku ?? '—'}
@@ -979,7 +978,7 @@ export function QuotationForm({
                           {stockLoaded && (
                             <div
                               className={cn(
-                                'text-xs tabular-nums',
+                                'whitespace-nowrap text-xs tabular-nums',
                                 exceeds
                                   ? 'font-medium text-amber-700 dark:text-amber-300'
                                   : 'text-muted-foreground',

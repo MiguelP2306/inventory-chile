@@ -152,10 +152,13 @@ export default function NuevaVentaPage() {
         initialBagItems={bagPrefill}
         onSuccess={(sale) => {
           // Si la venta arrancó desde el bolso, quitamos del bolso SOLO los
-          // productos convertidos (los no seleccionados quedan para después).
+          // productos que realmente quedaron en la venta creada. Así, si en el
+          // formulario se quitó alguno, ese permanece en el bolso.
           if (fromBag) {
-            const ids = bagItems.map((it) => it.productId);
-            if (ids.length > 0) clearProductBagItems(ids);
+            const involvedIds = (sale.items ?? [])
+              .map((it) => it.productId)
+              .filter((id): id is string => !!id);
+            if (involvedIds.length > 0) clearProductBagItems(involvedIds);
           }
           // Ronda 9 — flujo "convertir y generar guía". Tras confirmar la
           // venta, generamos la guía con datos mínimos y redirigimos a su
