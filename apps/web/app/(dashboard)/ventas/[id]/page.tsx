@@ -21,22 +21,12 @@ import { GenerateDispatchDialog } from '@/components/forms/generate-dispatch-dia
 import { MultiWarrantyDialog } from '@/components/forms/multi-warranty-dialog';
 import { OpenWarrantyDialog } from '@/components/forms/open-warranty-dialog';
 import { SaleStatusBadge } from '@/components/sale-status-badge';
-import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { Permission, useCan } from '@/lib/current-user-context';
 import { getActiveDispatchBySale } from '@/lib/dispatch-api';
 import { formatCurrency } from '@/lib/format';
@@ -51,20 +41,26 @@ const METHOD_LABELS: Record<string, string> = {
   PAYMENT_LINK: 'Link de pago',
 };
 
+const CARD =
+  'rounded-2xl border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-850 dark:bg-[#11151C]';
+const BTN_OUTLINE =
+  'inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:bg-[#11151C] dark:text-slate-300 dark:hover:bg-slate-900';
+const BTN_DANGER =
+  'inline-flex cursor-pointer items-center gap-2 rounded-xl border border-rose-100 bg-rose-50/50 px-4 py-2.5 text-xs font-bold text-rose-500 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-rose-950/30 dark:bg-rose-950/15 dark:text-rose-400';
+const BTN_PRIMARY =
+  'inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#2F6BFF] px-4 py-2.5 text-xs font-bold text-white shadow-md transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40';
+const LABEL = 'text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500';
+
 export default function VentaDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const [cancelOpen, setCancelOpen] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
   const [dispatchOpen, setDispatchOpen] = useState(false);
-  // Ronda 9 — dialog multi-item para garantías.
   const [multiWarrantyOpen, setMultiWarrantyOpen] = useState(false);
   const canSeeBreakdown = useCan(Permission.SALE_VIEW_FINANCIAL_BREAKDOWN);
 
-  // Ronda 9 — query params para ops rápidas. Cuando la pantalla se abre
-  // con `?return=1` / `?warranty=1` / `?dispatch=1`, dispara el dialog
-  // correspondiente automáticamente (lo usan los botones "Nueva ..." de
-  // los listados de /devoluciones, /garantias, /guias).
+  // Ronda 9 — query params para ops rápidas (?return / ?warranty / ?dispatch).
   const searchParams = useSearchParams();
   useEffect(() => {
     if (searchParams.get('return') === '1') setReturnOpen(true);
@@ -72,12 +68,9 @@ export default function VentaDetailPage() {
     if (searchParams.get('dispatch') === '1') setDispatchOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const [warrantyTargetItemId, setWarrantyTargetItemId] = useState<string | null>(
-    null,
-  );
+  const [warrantyTargetItemId, setWarrantyTargetItemId] = useState<string | null>(null);
 
-  // Si la venta ya tiene guía activa, mostramos "Ver guía DESP-XXX" en lugar
-  // de "Generar guía". El backend rechaza generar otra mientras haya activa.
+  // Si la venta ya tiene guía activa, mostramos "Ver guía DESP-XXX".
   const activeDispatch = useQuery({
     queryKey: ['active-dispatch-by-sale', id],
     queryFn: () => getActiveDispatchBySale(id),
@@ -91,11 +84,11 @@ export default function VentaDetailPage() {
   });
 
   if (sale.isLoading) {
-    return <Skeleton className="h-40 w-full" />;
+    return <div className="h-40 w-full animate-pulse rounded-3xl bg-slate-100 dark:bg-slate-800" />;
   }
   if (!sale.data) {
     return (
-      <div className="rounded-md border bg-card p-6 text-sm text-muted-foreground">
+      <div className="rounded-3xl border border-slate-100 bg-white p-6 text-sm font-semibold text-slate-400 dark:border-slate-850 dark:bg-[#11151C]">
         Venta no encontrada.
       </div>
     );
@@ -105,93 +98,77 @@ export default function VentaDetailPage() {
   const canCancel = s.status !== 'CANCELLED';
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Button asChild variant="ghost" size="icon">
-            <Link href="/ventas">
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-          </Button>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-semibold">{s.number}</h1>
+    <div className="space-y-6 animate-in fade-in duration-200">
+      {/* HEADER */}
+      <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
+        <div className="flex items-start gap-4">
+          <Link
+            href="/ventas"
+            title="Volver"
+            className="cursor-pointer rounded-xl border border-slate-200 bg-white p-2 transition-colors hover:bg-slate-50 dark:border-slate-850 dark:bg-[#11151C] dark:hover:bg-slate-800"
+          >
+            <ArrowLeft className="h-5 w-5 text-slate-500" />
+          </Link>
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="font-mono text-2xl font-black tracking-tight text-slate-900 dark:text-white">
+                {s.number}
+              </h1>
               <SaleStatusBadge status={s.status} />
             </div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
               Registrada el{' '}
-              {new Date(s.date).toLocaleString('es-CL', {
-                dateStyle: 'long',
-                timeStyle: 'short',
-              })}
+              {new Date(s.date).toLocaleString('es-CL', { dateStyle: 'long', timeStyle: 'short' })}
               {s.user ? ` por ${s.user.name}` : ''}
             </p>
           </div>
         </div>
+
         <div className="flex flex-wrap items-center gap-2">
           {canCancel && (
             <>
               {activeDispatch.data ? (
-                <Button asChild variant="outline">
-                  <Link href={`/guias/${activeDispatch.data.id}`}>
-                    <Truck className="h-4 w-4" />
-                    Ver guía {activeDispatch.data.number}
-                  </Link>
-                </Button>
+                <Link href={`/guias/${activeDispatch.data.id}`} className={BTN_OUTLINE}>
+                  <Truck className="h-4 w-4 text-slate-400" />
+                  Ver guía {activeDispatch.data.number}
+                </Link>
               ) : (
-                <Button variant="outline" onClick={() => setDispatchOpen(true)}>
-                  <Truck className="h-4 w-4" />
+                <button type="button" className={BTN_OUTLINE} onClick={() => setDispatchOpen(true)}>
+                  <Truck className="h-4 w-4 text-slate-400" />
                   Generar guía de despacho
-                </Button>
+                </button>
               )}
-              <Button variant="outline" onClick={() => setReturnOpen(true)}>
-                <RotateCcw className="h-4 w-4" />
+              <button type="button" className={BTN_OUTLINE} onClick={() => setReturnOpen(true)}>
+                <RotateCcw className="h-4 w-4 text-slate-400" />
                 Crear devolución
-              </Button>
-              {/* Ronda 9 — botón visible para garantías (antes era ícono
-                  pequeño en cada fila). Abre dialog multi-item. */}
-              <Button
-                variant="outline"
-                onClick={() => setMultiWarrantyOpen(true)}
-              >
-                <ShieldAlert className="h-4 w-4" />
+              </button>
+              <button type="button" className={BTN_OUTLINE} onClick={() => setMultiWarrantyOpen(true)}>
+                <ShieldAlert className="h-4 w-4 text-slate-400" />
                 Crear garantía
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => setCancelOpen(true)}
-                className="text-destructive hover:text-destructive"
-              >
+              </button>
+              <button type="button" className={BTN_DANGER} onClick={() => setCancelOpen(true)}>
                 <Ban className="h-4 w-4" />
                 Venta a nota crédito
-              </Button>
+              </button>
             </>
           )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button>
+              <button type="button" className={BTN_PRIMARY}>
                 <Printer className="h-4 w-4" />
                 Imprimir
                 <ChevronDown className="h-4 w-4" />
-              </Button>
+              </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem asChild>
-                <a
-                  href={getSalePdfUrl(s.id, 'letter')}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
+                <a href={getSalePdfUrl(s.id, 'letter')} target="_blank" rel="noopener noreferrer">
                   <FileText className="h-4 w-4" />
                   Carta (A4)
                 </a>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
-                <a
-                  href={getSalePdfUrl(s.id, 'thermal80')}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
+                <a href={getSalePdfUrl(s.id, 'thermal80')} target="_blank" rel="noopener noreferrer">
                   <FileText className="h-4 w-4" />
                   Térmica 80mm
                 </a>
@@ -201,194 +178,164 @@ export default function VentaDetailPage() {
         </div>
       </div>
 
+      {/* BANNER cancelada */}
       {s.status === 'CANCELLED' && (
-        <div className="rounded-md border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm">
-          <div className="font-medium text-destructive">Venta cancelada</div>
+        <div className="space-y-2 rounded-3xl border border-rose-100 bg-rose-50/50 p-5 dark:border-rose-950/20 dark:bg-rose-950/5">
+          <h4 className="text-sm font-black text-rose-500">Venta cancelada</h4>
           {s.cancelledAt && (
-            <div className="text-xs text-muted-foreground">
-              {new Date(s.cancelledAt).toLocaleString('es-CL', {
-                dateStyle: 'long',
-                timeStyle: 'short',
-              })}
+            <p className="text-xs font-medium text-slate-500">
+              {new Date(s.cancelledAt).toLocaleString('es-CL', { dateStyle: 'long', timeStyle: 'short' })}
               {s.cancelledBy ? ` por ${s.cancelledBy.name}` : ''}
-            </div>
+            </p>
           )}
           {s.cancelReason && (
-            <div className="mt-2 whitespace-pre-wrap text-sm">
-              <span className="text-muted-foreground">Motivo: </span>
-              {s.cancelReason}
-            </div>
+            <p className="whitespace-pre-wrap text-xs font-bold text-slate-800 dark:text-slate-200">
+              Motivo:{' '}
+              <span className="font-semibold text-slate-600 dark:text-slate-400">{s.cancelReason}</span>
+            </p>
           )}
         </div>
       )}
 
+      {/* CLIENTE + PAGO */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <div className="rounded-md border bg-card p-4 space-y-1">
-          <h2 className="text-sm font-semibold text-muted-foreground">Cliente</h2>
-          <div className="text-sm space-y-1 pt-2">
-            <div className="font-medium">{s.customer?.name ?? '—'}</div>
-            {s.customer?.taxId && (
-              <div className="text-muted-foreground">RUT {s.customer.taxId}</div>
-            )}
-            {s.customer?.email && (
-              <div className="text-muted-foreground">{s.customer.email}</div>
-            )}
-            {s.customer?.phone && (
-              <div className="text-muted-foreground">{s.customer.phone}</div>
-            )}
+        <div className={`space-y-2 ${CARD}`}>
+          <h2 className={LABEL}>Cliente</h2>
+          <div className="space-y-1 text-xs">
+            <div className="text-sm font-black text-slate-900 dark:text-white">
+              {s.customer?.name ?? '—'}
+            </div>
+            {s.customer?.taxId && <div className="font-mono text-slate-500">RUT {s.customer.taxId}</div>}
+            {s.customer?.email && <div className="text-slate-500">{s.customer.email}</div>}
+            {s.customer?.phone && <div className="text-slate-500">{s.customer.phone}</div>}
             {s.customer && (
-              <Button asChild variant="link" size="sm" className="px-0">
-                <Link href={`/clientes/${s.customer.id}`}>
-                  Ver cliente
-                  <ExternalLink className="h-3 w-3" />
-                </Link>
-              </Button>
+              <Link
+                href={`/clientes/${s.customer.id}`}
+                className="inline-flex items-center gap-1 pt-1 text-[11px] font-bold text-[#2F6BFF] hover:underline"
+              >
+                Ver cliente <ExternalLink className="h-3 w-3" />
+              </Link>
             )}
           </div>
         </div>
-        <div className="rounded-md border bg-card p-4 space-y-1">
-          <h2 className="text-sm font-semibold text-muted-foreground">
-            {canSeeBreakdown ? 'Pago' : 'Detalles'}
-          </h2>
-          <div className="text-sm space-y-1 pt-2">
+
+        <div className={`space-y-2 ${CARD}`}>
+          <h2 className={LABEL}>{canSeeBreakdown ? 'Pago' : 'Detalles'}</h2>
+          <div className="space-y-1.5 text-xs text-slate-500 dark:text-slate-400">
             {canSeeBreakdown && s.paymentMethod && (
               <div>
-                <span className="text-muted-foreground">Método: </span>
-                <span className="font-medium">
+                Método:{' '}
+                <span className="font-bold text-slate-800 dark:text-slate-200">
                   {METHOD_LABELS[s.paymentMethod] ?? s.paymentMethod}
                 </span>
               </div>
             )}
             {canSeeBreakdown && Number(s.commissionAmount ?? 0) > 0 && (
-              <div className="text-muted-foreground">
+              <div>
                 Comisión tarjeta:{' '}
-                <span className="tabular-nums">
-                  {formatCurrency(s.commissionAmount)}
-                </span>
+                <span className="font-mono tabular-nums">{formatCurrency(s.commissionAmount)}</span>
               </div>
             )}
-            {s.warehouse && (
-              <div className="text-muted-foreground">
-                Bodega: {s.warehouse.name}
-              </div>
-            )}
+            {s.warehouse && <div>Bodega: <span className="font-semibold text-slate-700 dark:text-slate-300">{s.warehouse.name}</span></div>}
             {s.quotation && (
-              <div className="pt-1">
-                <Button asChild variant="link" size="sm" className="px-0">
-                  <Link href={`/cotizaciones/${s.quotation.id}`}>
-                    Desde cotización {s.quotation.number}
-                    <ExternalLink className="h-3 w-3" />
-                  </Link>
-                </Button>
-              </div>
+              <Link
+                href={`/cotizaciones/${s.quotation.id}`}
+                className="inline-flex items-center gap-1 pt-1 text-[11px] font-bold text-[#2F6BFF] hover:underline"
+              >
+                Desde cotización {s.quotation.number} <ExternalLink className="h-3 w-3" />
+              </Link>
             )}
           </div>
         </div>
       </div>
 
-      <div className="rounded-md border bg-card">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>SKU</TableHead>
-              <TableHead>Producto</TableHead>
-              <TableHead className="text-right">Cant.</TableHead>
-              <TableHead className="text-right">P. Unit (bruto)</TableHead>
-              <TableHead className="text-right">Desc.</TableHead>
-              <TableHead className="text-right">Subtotal</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(s.items ?? []).map((it) => (
-              <TableRow key={it.id}>
-                <TableCell className="font-mono text-xs">
-                  {it.product?.sku ?? '—'}
-                </TableCell>
-                <TableCell className="max-w-[300px]">
-                  {it.product?.name ?? '—'}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">{it.qty}</TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {formatCurrency(it.unitPrice)}
-                </TableCell>
-                <TableCell className="text-right tabular-nums text-muted-foreground">
-                  {it.discountPercent
-                    ? `${Number(it.discountPercent).toFixed(0)}%`
-                    : Number(it.discount) > 0
-                      ? formatCurrency(it.discount)
-                      : '—'}
-                </TableCell>
-                <TableCell className="text-right tabular-nums font-medium">
-                  {formatCurrency(it.subtotal)}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+      {/* ITEMS */}
+      <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] border-collapse text-left text-[12px]">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/50 font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-800 dark:bg-slate-900/10 dark:text-slate-500">
+                <th className="w-[16%] py-4 pl-6">SKU</th>
+                <th className="py-4">Producto</th>
+                <th className="py-4 text-right">Cant.</th>
+                <th className="py-4 text-right">P. Unit (bruto)</th>
+                <th className="py-4 text-right">Desc.</th>
+                <th className="py-4 pr-6 text-right">Subtotal</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 font-medium dark:divide-slate-800/80">
+              {(s.items ?? []).map((it) => (
+                <tr key={it.id} className="transition-colors hover:bg-slate-50/40 dark:hover:bg-slate-900/10">
+                  <td className="py-4 pl-6 font-mono text-slate-500 dark:text-slate-400">
+                    {it.product?.sku ?? '—'}
+                  </td>
+                  <td className="max-w-[300px] truncate py-4 font-bold text-slate-950 dark:text-white">
+                    {it.product?.name ?? '—'}
+                  </td>
+                  <td className="py-4 text-right font-mono text-slate-700 dark:text-slate-300">{it.qty}</td>
+                  <td className="py-4 text-right font-mono text-slate-500 dark:text-slate-400">
+                    {formatCurrency(it.unitPrice)}
+                  </td>
+                  <td className="py-4 text-right font-mono text-slate-400">
+                    {it.discountPercent
+                      ? `${Number(it.discountPercent).toFixed(0)}%`
+                      : Number(it.discount) > 0
+                        ? formatCurrency(it.discount)
+                        : '—'}
+                  </td>
+                  <td className="py-4 pr-6 text-right font-mono font-black text-slate-900 dark:text-white">
+                    {formatCurrency(it.subtotal)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
+      {/* NOTAS + TOTALES */}
       <div className="flex flex-wrap items-start gap-4">
         {s.notes && (
-          <div className="flex-1 min-w-[300px] rounded-md border bg-card p-4">
-            <h2 className="text-sm font-semibold text-muted-foreground">Notas</h2>
-            <p className="mt-2 whitespace-pre-wrap text-sm">{s.notes}</p>
+          <div className={`min-w-[300px] flex-1 space-y-2 ${CARD}`}>
+            <h2 className={LABEL}>Notas</h2>
+            <p className="whitespace-pre-wrap text-xs font-semibold leading-relaxed text-slate-600 dark:text-slate-300">
+              {s.notes}
+            </p>
           </div>
         )}
-        <div className="ml-auto min-w-[280px] rounded-md border bg-card p-4 space-y-2 text-sm">
+        <div className={`ml-auto min-w-[280px] space-y-2 text-xs ${CARD}`}>
           {canSeeBreakdown && s.subtotal != null && (
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Subtotal neto</span>
-              <span className="tabular-nums">{formatCurrency(s.subtotal)}</span>
+            <div className="flex justify-between text-slate-500 dark:text-slate-400">
+              <span>Subtotal neto</span>
+              <span className="font-mono font-semibold">{formatCurrency(s.subtotal)}</span>
             </div>
           )}
           {canSeeBreakdown && s.taxAmount != null && (
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">IVA</span>
-              <span className="tabular-nums">{formatCurrency(s.taxAmount)}</span>
+            <div className="flex justify-between text-slate-500 dark:text-slate-400">
+              <span>IVA</span>
+              <span className="font-mono font-semibold">{formatCurrency(s.taxAmount)}</span>
             </div>
           )}
           <div
             className={cn(
-              'flex justify-between font-semibold',
-              canSeeBreakdown && 'border-t pt-2',
+              'flex justify-between text-sm font-bold text-slate-950 dark:text-white',
+              canSeeBreakdown && 'border-t border-slate-100 pt-2 dark:border-slate-850',
             )}
           >
             <span>Total</span>
-            <span className="tabular-nums">{formatCurrency(s.total)}</span>
+            <span className="font-mono text-base font-black text-[#2F6BFF]">{formatCurrency(s.total)}</span>
           </div>
         </div>
       </div>
 
-      <CancelSaleDialog
-        sale={s}
-        open={cancelOpen}
-        onOpenChange={setCancelOpen}
-      />
-
-      <CustomerReturnDialog
-        sale={s}
-        open={returnOpen}
-        onOpenChange={setReturnOpen}
-      />
-
-      <GenerateDispatchDialog
-        sale={s}
-        open={dispatchOpen}
-        onOpenChange={setDispatchOpen}
-      />
-
-      {/* Ronda 9 — dialog primario para abrir garantías. */}
-      <MultiWarrantyDialog
-        sale={s}
-        open={multiWarrantyOpen}
-        onOpenChange={setMultiWarrantyOpen}
-      />
+      <CancelSaleDialog sale={s} open={cancelOpen} onOpenChange={setCancelOpen} />
+      <CustomerReturnDialog sale={s} open={returnOpen} onOpenChange={setReturnOpen} />
+      <GenerateDispatchDialog sale={s} open={dispatchOpen} onOpenChange={setDispatchOpen} />
+      <MultiWarrantyDialog sale={s} open={multiWarrantyOpen} onOpenChange={setMultiWarrantyOpen} />
 
       {warrantyTargetItemId &&
         (() => {
-          const item = (s.items ?? []).find(
-            (i) => i.id === warrantyTargetItemId,
-          );
+          const item = (s.items ?? []).find((i) => i.id === warrantyTargetItemId);
           if (!item) return null;
           return (
             <OpenWarrantyDialog

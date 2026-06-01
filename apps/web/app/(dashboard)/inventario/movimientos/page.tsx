@@ -272,7 +272,7 @@ export default function MovimientosPage() {
           ============================================================ */}
       <div className="flex flex-col gap-3">
         {/* Search */}
-        <div className="relative">
+        <div className="relative max-w-[480px]">
           <Search className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400 dark:text-slate-500" />
           <input
             type="text"

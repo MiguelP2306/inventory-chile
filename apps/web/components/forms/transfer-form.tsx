@@ -1,29 +1,10 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowRight, Send, Trash2 } from 'lucide-react';
+import { ArrowRight, ChevronDown, Send, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { ProductPicker } from '@/components/product-picker';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Textarea } from '@/components/ui/textarea';
 import { apiErrorMessage } from '@/lib/catalog-api';
 import { getAvailableStock, type AvailableStockRow } from '@/lib/sales-api';
 import { createTransfer } from '@/lib/transfers-api';
@@ -48,10 +29,26 @@ interface Props {
   onCancel?: () => void;
 }
 
+/* Tokens de estilo del rediseño (look compras/nuevo). */
+const CARD =
+  'rounded-2xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]';
+const LABEL =
+  'text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500';
+const SELECT =
+  'w-full appearance-none rounded-xl border border-transparent bg-slate-50 px-3.5 py-3 pr-10 text-xs font-semibold text-slate-850 transition-all focus:border-[#2F6BFF] focus:outline-none focus:ring-2 focus:ring-[#2F6BFF]/15 dark:bg-slate-900 dark:text-white';
+const BTN_OUTLINE =
+  'inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 px-4 py-3 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:text-slate-300 dark:hover:bg-slate-900';
+const BTN_PRIMARY =
+  'inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#2F6BFF] px-5 py-3 text-xs font-bold text-white shadow-md transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40';
+
 /**
  * Form de nueva transferencia entre bodegas (Fase 7.5). Mismo patrón que
  * SaleForm: selecciona bodega origen + destino, agrega productos del catálogo
  * con cantidad, valida stock disponible en la bodega origen (bloqueante).
+ *
+ * SOLO UI/UX (look compras/nuevo): cards rounded-2xl, selects nativos con
+ * chevron, tabla de ítems en "sheet", inputs soft y botones azul/outline. La
+ * lógica (validación de stock, mutación, etc.) es idéntica.
  *
  * Decisiones:
  *  - El stock se chequea en la bodega ORIGEN (no destino — el destino solo
@@ -149,54 +146,72 @@ export function TransferForm({ onSuccess, onCancel }: Props) {
       }}
       className="space-y-6"
     >
-      <div className="rounded-md border bg-card p-6 space-y-4">
+      {/* ============================================================
+          ORIGEN → DESTINO
+          ============================================================ */}
+      <div className={`space-y-4 p-6 ${CARD}`}>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_auto_1fr]">
-          <div className="space-y-2">
-            <Label>Bodega origen</Label>
-            <Select value={fromId} onValueChange={setFromId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Seleccioná origen" />
-              </SelectTrigger>
-              <SelectContent>
+          <div className="space-y-1.5">
+            <span className={LABEL}>Bodega origen</span>
+            <div className="relative">
+              <select
+                value={fromId}
+                onChange={(e) => setFromId(e.target.value)}
+                className={SELECT}
+              >
+                <option value="">Seleccioná origen</option>
                 {activeWarehouses.map((w) => (
-                  <SelectItem key={w.id} value={w.id} disabled={w.id === toId}>
+                  <option key={w.id} value={w.id} disabled={w.id === toId}>
                     {w.name}
-                  </SelectItem>
+                  </option>
                 ))}
-              </SelectContent>
-            </Select>
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            </div>
           </div>
-          <div className="flex items-end pb-2 text-muted-foreground">
+          <div className="flex items-end justify-center pb-3 text-slate-300 dark:text-slate-600">
             <ArrowRight className="h-5 w-5" />
           </div>
-          <div className="space-y-2">
-            <Label>Bodega destino</Label>
-            <Select value={toId} onValueChange={setToId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Seleccioná destino" />
-              </SelectTrigger>
-              <SelectContent>
+          <div className="space-y-1.5">
+            <span className={LABEL}>Bodega destino</span>
+            <div className="relative">
+              <select
+                value={toId}
+                onChange={(e) => setToId(e.target.value)}
+                className={SELECT}
+              >
+                <option value="">Seleccioná destino</option>
                 {activeWarehouses.map((w) => (
-                  <SelectItem key={w.id} value={w.id} disabled={w.id === fromId}>
+                  <option key={w.id} value={w.id} disabled={w.id === fromId}>
                     {w.name}
-                  </SelectItem>
+                  </option>
                 ))}
-              </SelectContent>
-            </Select>
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            </div>
           </div>
         </div>
 
         {activeWarehouses.length < 2 && (
-          <p className="text-sm text-amber-700 dark:text-amber-300">
+          <p className="rounded-xl border border-amber-100 bg-amber-50/60 px-3.5 py-2.5 text-[11px] font-semibold text-amber-600 dark:border-amber-950/30 dark:bg-amber-950/10 dark:text-amber-400">
             Necesitás al menos 2 bodegas activas para hacer una transferencia.
-            Activá una desde <a href="/almacenes" className="underline">Almacenes</a>.
+            Activá una desde{' '}
+            <a href="/almacenes" className="underline">
+              Almacenes
+            </a>
+            .
           </p>
         )}
       </div>
 
-      <div className="rounded-md border bg-card">
-        <div className="flex items-center justify-between border-b p-4">
-          <h2 className="font-medium">Productos a transferir</h2>
+      {/* ============================================================
+          PRODUCTOS
+          ============================================================ */}
+      <div className={`overflow-hidden ${CARD}`}>
+        <div className="flex select-none items-center justify-between border-b border-slate-100 p-5 dark:border-slate-850">
+          <h3 className="text-xs font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+            Productos a transferir
+          </h3>
           <ProductPicker
             buttonLabel="Agregar producto"
             onPick={(p) => {
@@ -215,134 +230,151 @@ export function TransferForm({ onSuccess, onCancel }: Props) {
             }}
           />
         </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>SKU</TableHead>
-              <TableHead>Producto</TableHead>
-              <TableHead className="w-[160px] text-right">Cant. / Stock origen</TableHead>
-              <TableHead className="w-[60px]" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground">
-                  Agregá al menos un producto.
-                </TableCell>
-              </TableRow>
-            )}
-            {items.map((it, idx) => {
-              const available = stockMap.get(it.productId);
-              const stockLoaded = available != null;
-              const exceeds = stockLoaded && it.qty > available;
-              return (
-                <TableRow
-                  key={`${it.productId}-${idx}`}
-                  className={exceeds ? 'bg-destructive/5' : ''}
-                >
-                  <TableCell className="font-mono text-xs">{it.sku}</TableCell>
-                  <TableCell className="max-w-[300px] truncate">{it.name}</TableCell>
-                  <TableCell className="text-right">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-1">
-                        <Input
-                          type="number"
-                          min={1}
-                          value={it.qty}
-                          onChange={(e) =>
-                            updateItem(idx, {
-                              qty: Math.max(1, Number(e.target.value) || 0),
-                            })
-                          }
-                          className={cn(
-                            'text-right',
-                            exceeds && 'border-destructive',
-                          )}
-                        />
-                        {/* Ronda 7 — botón Max autocompleta con el stock
-                            disponible en la bodega origen. Si todavía no se
-                            cargó (loading) o el stock es 0, queda deshabilitado. */}
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-9 shrink-0 px-2 text-xs"
-                          disabled={!stockLoaded || (available ?? 0) <= 0}
-                          onClick={() =>
-                            stockLoaded &&
-                            available > 0 &&
-                            updateItem(idx, { qty: available })
-                          }
-                          title="Llenar con el stock disponible en la bodega origen"
-                        >
-                          Max
-                        </Button>
-                      </div>
-                      {stockLoaded && (
-                        <div
-                          className={cn(
-                            'text-xs tabular-nums',
-                            exceeds
-                              ? 'font-medium text-destructive'
-                              : 'text-muted-foreground',
-                          )}
-                        >
-                          Stock origen: {available}
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[600px] border-collapse text-left text-[12px]">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/20 font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-850 dark:text-slate-500">
+                <th className="w-[18%] py-3 pl-6">SKU</th>
+                <th className="py-3">Producto</th>
+                <th className="w-[210px] py-3 text-right">Cant. / Stock origen</th>
+                <th className="w-[70px] py-3 pr-6 text-center">Acción</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 font-medium dark:divide-slate-850">
+              {items.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="select-none py-12 text-center text-xs font-bold text-slate-400">
+                    Agregá al menos un producto.
+                  </td>
+                </tr>
+              )}
+              {items.map((it, idx) => {
+                const available = stockMap.get(it.productId);
+                const stockLoaded = available != null;
+                const exceeds = stockLoaded && it.qty > available;
+                return (
+                  <tr
+                    key={`${it.productId}-${idx}`}
+                    className={cn(
+                      'transition-colors hover:bg-slate-50/40 dark:hover:bg-slate-900/10',
+                      exceeds && 'bg-rose-50/40 dark:bg-rose-950/5',
+                    )}
+                  >
+                    <td className="py-4 pl-6 font-mono text-slate-500 dark:text-slate-400">
+                      {it.sku ?? '—'}
+                    </td>
+                    <td className="max-w-[300px] truncate py-4 font-bold text-slate-950 dark:text-white">
+                      {it.name}
+                    </td>
+                    <td className="py-4 text-right">
+                      <div className="flex flex-col items-end gap-1">
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="number"
+                            min={1}
+                            value={it.qty}
+                            onChange={(e) =>
+                              updateItem(idx, {
+                                qty: Math.max(1, Number(e.target.value) || 0),
+                              })
+                            }
+                            className={cn(
+                              'w-20 rounded-lg border bg-white px-2 py-1.5 text-right font-mono text-xs font-bold focus:border-[#2F6BFF] focus:outline-none dark:bg-slate-900',
+                              exceeds
+                                ? 'border-rose-300 dark:border-rose-800'
+                                : 'border-slate-200 dark:border-slate-800',
+                            )}
+                          />
+                          {/* Ronda 7 — botón Max autocompleta con el stock
+                              disponible en la bodega origen. */}
+                          <button
+                            type="button"
+                            disabled={!stockLoaded || (available ?? 0) <= 0}
+                            onClick={() =>
+                              stockLoaded &&
+                              available > 0 &&
+                              updateItem(idx, { qty: available })
+                            }
+                            title="Llenar con el stock disponible en la bodega origen"
+                            className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] font-bold text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+                          >
+                            Max
+                          </button>
                         </div>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() =>
-                        setItems((prev) => prev.filter((_, i) => i !== idx))
-                      }
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
+                        {stockLoaded && (
+                          <div
+                            className={cn(
+                              'font-mono text-[11px] tabular-nums',
+                              exceeds ? 'font-bold text-rose-500' : 'text-slate-400',
+                            )}
+                          >
+                            Stock origen: {available}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-4 pr-6 text-center">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setItems((prev) => prev.filter((_, i) => i !== idx))
+                        }
+                        title="Quitar producto"
+                        className="cursor-pointer p-1.5 text-slate-400 transition-colors hover:text-rose-500"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {stockShortages.length > 0 && (
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="rounded-2xl border border-rose-100 bg-rose-50/50 px-4 py-3 text-xs font-semibold text-rose-500 dark:border-rose-950/30 dark:bg-rose-950/10 dark:text-rose-400">
           Hay items que exceden el stock disponible en la bodega origen. Ajustá
           las cantidades antes de confirmar.
         </div>
       )}
 
-      <div className="rounded-md border bg-card p-6 space-y-2">
-        <Label htmlFor="notes">Notas (opcional)</Label>
-        <Textarea
-          id="notes"
+      {/* ============================================================
+          NOTAS
+          ============================================================ */}
+      <div className={`space-y-1.5 p-6 ${CARD}`}>
+        <span className={LABEL}>Notas (opcional)</span>
+        <textarea
           rows={3}
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           placeholder="Motivo de la transferencia, número de remito, etc."
+          className="w-full rounded-xl border border-transparent bg-slate-50 px-3.5 py-3 text-xs font-medium text-slate-800 transition-all placeholder:text-slate-400 focus:border-[#2F6BFF] focus:outline-none focus:ring-2 focus:ring-[#2F6BFF]/15 dark:bg-slate-900 dark:text-white"
         />
       </div>
 
-      <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
-        <Button
+      {/* ============================================================
+          ACCIONES
+          ============================================================ */}
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <button
           type="button"
-          variant="outline"
+          className={BTN_OUTLINE}
           onClick={() => onCancel?.()}
           disabled={createMut.isPending}
         >
           Cancelar
-        </Button>
-        <Button type="submit" variant="brand" disabled={!formValid || createMut.isPending}>
+        </button>
+        <button
+          type="submit"
+          className={BTN_PRIMARY}
+          disabled={!formValid || createMut.isPending}
+        >
           <Send className="h-4 w-4" />
-          {createMut.isPending ? 'Registrando...' : 'Confirmar transferencia'}
-        </Button>
+          {createMut.isPending ? 'Registrando…' : 'Confirmar transferencia'}
+        </button>
       </div>
     </form>
   );

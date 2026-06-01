@@ -61,7 +61,7 @@ const CAROUSEL_SLIDES = [
   },
 ];
 
-const ACCENT = '#4E44E7';
+const ACCENT = '#2F6BFF';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -103,7 +103,7 @@ export default function LoginPage() {
   };
 
   const inputCls =
-    'w-full text-xs font-semibold px-4 py-3 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-900/50 text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-[#4E44E7] transition-all';
+    'w-full text-xs font-semibold px-4 py-3 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-900/50 text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-[#2F6BFF] transition-all';
 
   return (
     <div className="flex min-h-screen w-full items-center justify-center bg-[#F3F4F6] p-3 font-sans dark:bg-[#0B0E14] sm:p-6">
@@ -140,7 +140,7 @@ export default function LoginPage() {
             {serverError && (
               <div className="mb-5 flex items-center gap-2 rounded-xl border border-rose-100 bg-rose-50 p-3 text-xs font-semibold text-rose-600 animate-in fade-in slide-in-from-top-1 dark:border-rose-900/30 dark:bg-rose-950/20 dark:text-rose-400">
                 <AlertCircle className="h-4 w-4 shrink-0" />
-                <span>{serverError}</span>
+                <span className='text-[11px]'>{serverError}</span>
               </div>
             )}
 
@@ -261,7 +261,7 @@ export default function LoginPage() {
           className="relative flex h-[380px] w-full flex-col justify-end overflow-hidden bg-slate-950 p-8 dark:bg-black sm:p-10 md:h-auto md:w-1/2"
           style={{
             backgroundImage:
-              'radial-gradient(120% 80% at 80% 0%, rgba(78,68,231,0.35), transparent 60%), radial-gradient(100% 90% at 0% 100%, rgba(40,40,60,0.6), transparent 60%), linear-gradient(160deg, #1a1d2e 0%, #0b0e14 100%)',
+              'radial-gradient(120% 80% at 80% 0%, rgba(47,107,255,0.35), transparent 60%), radial-gradient(100% 90% at 0% 100%, rgba(40,40,60,0.6), transparent 60%), linear-gradient(160deg, #131a2e 0%, #0b0e14 100%)',
             backgroundSize: 'cover',
           }}
         >

@@ -238,7 +238,7 @@ export default function InventarioPage() {
       {/* ============================================================
           SEARCH
           ============================================================ */}
-      <div className="relative">
+      <div className="relative max-w-[480px]">
         <Search className="absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400" />
         <input
           type="text"

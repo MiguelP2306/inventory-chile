@@ -2,35 +2,17 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Trash2, X } from 'lucide-react';
+import { ChevronDown, Trash2, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { CommuneSelect } from '@/components/commune-select';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { LifecycleBadge } from '@/components/lifecycle-badge';
 import { MarkLostDialog } from '@/components/mark-lost-dialog';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  apiErrorMessage,
-} from '@/lib/catalog-api';
+import { apiErrorMessage } from '@/lib/catalog-api';
 import {
   createCustomer,
   deleteCustomer,
@@ -48,6 +30,21 @@ const CUSTOMER_SOURCES: { value: CustomerSourceDto; label: string }[] = [
   { value: 'IN_PERSON', label: 'En persona' },
   { value: 'OTHER', label: 'Otro' },
 ];
+
+/* Tokens de estilo del rediseño (look compras/nuevo). */
+const CARD =
+  'rounded-2xl border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-850 dark:bg-[#11151C]';
+const LABEL =
+  'text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500';
+const INPUT =
+  'w-full rounded-xl border border-transparent bg-slate-50 px-3.5 py-3 text-xs font-semibold text-slate-850 transition-all placeholder:text-slate-400 focus:border-[#2F6BFF] focus:outline-none focus:ring-2 focus:ring-[#2F6BFF]/15 dark:bg-slate-900 dark:text-white';
+const SELECT = `${INPUT} appearance-none pr-10`;
+const BTN_OUTLINE =
+  'inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 px-4 py-3 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:text-slate-300 dark:hover:bg-slate-900';
+const BTN_DANGER =
+  'inline-flex cursor-pointer items-center gap-2 rounded-xl border border-rose-100 bg-rose-50/50 px-4 py-3 text-xs font-bold text-rose-500 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-rose-950/30 dark:bg-rose-950/15 dark:text-rose-400';
+const BTN_PRIMARY =
+  'inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#2F6BFF] px-5 py-3 text-xs font-bold text-white shadow-md transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40';
 
 const schema = z.object({
   name: z.string().min(1, 'Nombre obligatorio').max(180),
@@ -182,13 +179,16 @@ export function CustomerForm({ customer }: Props) {
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-      <div className="flex items-center justify-between">
+      {/* ============================================================
+          HEADER
+          ============================================================ */}
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
         <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-semibold">
+          <h1 className="text-xl font-black tracking-tight text-slate-900 dark:text-white md:text-2xl">
             {customer ? 'Editar cliente' : 'Nuevo cliente'}
           </h1>
           {customer && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500 dark:text-slate-400">
               <LifecycleBadge status={customer.lifecycleStatus} />
               {customer.lastContactAt && (
                 <span>
@@ -201,58 +201,62 @@ export function CustomerForm({ customer }: Props) {
               {customer.lifecycleStatus === 'LOST' && customer.lostReason && (
                 <span>
                   · Motivo:{' '}
-                  <em className="text-foreground">{customer.lostReason}</em>
+                  <em className="text-slate-700 dark:text-slate-200">
+                    {customer.lostReason}
+                  </em>
                 </span>
               )}
             </div>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {canMarkLost && (
-            <Button
+            <button
               type="button"
-              variant="outline"
-              className="border-destructive/40 text-destructive hover:bg-destructive/10"
+              className={BTN_DANGER}
               onClick={() => setMarkLostOpen(true)}
               disabled={submitting}
             >
               <X className="h-4 w-4" />
               Marcar perdido
-            </Button>
+            </button>
           )}
           {customer && (
-            <Button
+            <button
               type="button"
-              variant="outline"
-              className="border-destructive/40 text-destructive hover:bg-destructive/10"
+              className={BTN_DANGER}
               onClick={() => setConfirmDelete(true)}
               disabled={submitting || removeMut.isPending}
             >
               <Trash2 className="h-4 w-4" />
               Eliminar
-            </Button>
+            </button>
           )}
-          <Button
+          <button
             type="button"
-            variant="outline"
+            className={BTN_OUTLINE}
             onClick={() => router.back()}
             disabled={submitting}
           >
             Cancelar
-          </Button>
-          <Button type="submit" disabled={submitting}>
-            {submitting ? 'Guardando...' : customer ? 'Guardar' : 'Crear'}
-          </Button>
+          </button>
+          <button type="submit" className={BTN_PRIMARY} disabled={submitting}>
+            {submitting ? 'Guardando…' : customer ? 'Guardar' : 'Crear'}
+          </button>
         </div>
       </div>
 
-      <div className="space-y-4 rounded-md border bg-card p-6">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      {/* ============================================================
+          CARD: datos
+          ============================================================ */}
+      <div className={`space-y-6 ${CARD}`}>
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
           <Field label="Nombre o razón social" error={errors.name?.message}>
-            <Input
+            <input
               {...form.register('name')}
               autoFocus
               placeholder="ej: Juan Pérez / Distribuidora ABC"
+              className={INPUT}
             />
           </Field>
           <Field
@@ -260,9 +264,10 @@ export function CustomerForm({ customer }: Props) {
             error={errors.taxId?.message}
             hint="Requerido para emitir notas de venta. Podés crear el cliente sin RUT y completarlo después."
           >
-            <Input
+            <input
               {...form.register('taxId')}
               placeholder="12.345.678-9"
+              className={INPUT}
               onBlur={(e) => {
                 const v = e.target.value.trim();
                 if (!v) return;
@@ -273,16 +278,18 @@ export function CustomerForm({ customer }: Props) {
             />
           </Field>
           <Field label="Correo (opcional)" error={errors.email?.message}>
-            <Input
+            <input
               type="email"
               {...form.register('email')}
               placeholder="cliente@correo.cl"
+              className={INPUT}
             />
           </Field>
           <Field label="Teléfono (opcional)" error={errors.phone?.message}>
-            <Input
+            <input
               {...form.register('phone')}
               placeholder="+56 9 1234 5678"
+              className={INPUT}
               onBlur={(e) => {
                 const v = e.target.value.trim();
                 if (!v) return;
@@ -294,13 +301,11 @@ export function CustomerForm({ customer }: Props) {
               }}
             />
           </Field>
-          <Field
-            label="WhatsApp (opcional)"
-            error={errors.whatsappPhone?.message}
-          >
-            <Input
+          <Field label="WhatsApp (opcional)" error={errors.whatsappPhone?.message}>
+            <input
               {...form.register('whatsappPhone')}
               placeholder="+56 9 1234 5678"
+              className={INPUT}
               onBlur={(e) => {
                 const v = e.target.value.trim();
                 if (!v) return;
@@ -311,9 +316,9 @@ export function CustomerForm({ customer }: Props) {
                 }
               }}
             />
-            <p className="text-xs text-muted-foreground">
-              Si el WhatsApp es distinto al teléfono general. Lo usa la
-              bandeja de seguimiento para construir los enlaces wa.me.
+            <p className="text-[11px] text-slate-400">
+              Si el WhatsApp es distinto al teléfono general. Lo usa la bandeja de
+              seguimiento para construir los enlaces wa.me.
             </p>
           </Field>
           <Field label="Canal de origen">
@@ -321,36 +326,41 @@ export function CustomerForm({ customer }: Props) {
               control={form.control}
               name="source"
               render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Canal" />
-                  </SelectTrigger>
-                  <SelectContent>
+                <div className="relative">
+                  <select
+                    value={field.value}
+                    onChange={(e) => field.onChange(e.target.value)}
+                    className={SELECT}
+                  >
                     {CUSTOMER_SOURCES.map((s) => (
-                      <SelectItem key={s.value} value={s.value}>
+                      <option key={s.value} value={s.value}>
                         {s.label}
-                      </SelectItem>
+                      </option>
                     ))}
-                  </SelectContent>
-                </Select>
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                </div>
               )}
             />
           </Field>
         </div>
 
-        <div className="space-y-2">
-          <Label className="text-sm font-medium">Dirección (opcional)</Label>
+        {/* Dirección */}
+        <div className="space-y-1.5">
+          <span className={LABEL}>Dirección (opcional)</span>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
             <div className="md:col-span-5">
-              <Input
+              <input
                 {...form.register('addressStreet')}
                 placeholder="Calle"
+                className={INPUT}
               />
             </div>
             <div className="md:col-span-2">
-              <Input
+              <input
                 {...form.register('addressNumber')}
                 placeholder="Número"
+                className={INPUT}
               />
             </div>
             <div className="md:col-span-5">
@@ -369,56 +379,41 @@ export function CustomerForm({ customer }: Props) {
           </div>
         </div>
 
+        {/* Notas */}
         <Field label="Notas internas">
           <textarea
             {...form.register('internalNotes')}
             rows={3}
-            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="w-full rounded-xl border border-transparent bg-slate-50 px-3.5 py-3 text-xs font-medium text-slate-800 transition-all placeholder:text-slate-400 focus:border-[#2F6BFF] focus:outline-none focus:ring-2 focus:ring-[#2F6BFF]/15 dark:bg-slate-900 dark:text-white"
             placeholder="Texto libre solo visible para el equipo (no se imprime en cotizaciones ni ventas)."
           />
         </Field>
       </div>
 
       <MarkLostDialog
-        customer={
-          customer ? { id: customer.id, name: customer.name } : null
-        }
+        customer={customer ? { id: customer.id, name: customer.name } : null}
         open={markLostOpen}
         onOpenChange={setMarkLostOpen}
         invalidateKeys={[['customers'], ['customer'], ['follow-ups']]}
       />
 
-      <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>¿Eliminar cliente?</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Esta acción es permanente. El cliente &ldquo;{customer?.name}&rdquo; se eliminará.
-            Si tiene cotizaciones o ventas asociadas (cuando esos módulos existan), no podrá
-            eliminarse.
-          </p>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setConfirmDelete(false)}
-              disabled={removeMut.isPending}
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="border-destructive/40 text-destructive hover:bg-destructive/10"
-              onClick={() => removeMut.mutate()}
-              disabled={removeMut.isPending}
-            >
-              {removeMut.isPending ? 'Eliminando...' : 'Eliminar'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="¿Eliminar cliente?"
+        description={
+          <>
+            Esta acción es permanente. El cliente{' '}
+            <strong>{customer?.name}</strong> se eliminará. Si tiene cotizaciones
+            o ventas asociadas, no podrá eliminarse.
+          </>
+        }
+        confirmLabel="Eliminar"
+        variant="destructive"
+        onConfirm={async () => {
+          await removeMut.mutateAsync();
+        }}
+      />
     </form>
   );
 }
@@ -435,13 +430,11 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
+    <div className="space-y-1.5">
+      <span className={LABEL}>{label}</span>
       {children}
-      {hint && !error && (
-        <p className="text-xs text-muted-foreground">{hint}</p>
-      )}
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {hint && !error && <p className="text-[11px] text-slate-400">{hint}</p>}
+      {error && <p className="text-[11px] font-bold text-rose-500">{error}</p>}
     </div>
   );
 }

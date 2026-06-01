@@ -21,33 +21,17 @@ import Link from 'next/link';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { QuotationFormDialog } from '@/components/forms/quotation-form-dialog';
 import { QuotationStatusBadge } from '@/components/quotation-status-badge';
 import { SendContactDialog } from '@/components/quotations/send-contact-dialog';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Textarea } from '@/components/ui/textarea';
+import { SoftModal } from '@/components/ui/soft-modal';
 import { apiErrorMessage } from '@/lib/catalog-api';
 import { formatCurrency } from '@/lib/format';
 import {
@@ -61,6 +45,16 @@ import {
   sendWhatsapp,
 } from '@/lib/quotations-api';
 import { formatPhonePretty } from '@/lib/validators/phone';
+
+const CARD =
+  'rounded-2xl border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-850 dark:bg-[#11151C]';
+const BTN_OUTLINE =
+  'inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:bg-[#11151C] dark:text-slate-300 dark:hover:bg-slate-900';
+const BTN_DANGER =
+  'inline-flex cursor-pointer items-center gap-2 rounded-xl border border-rose-100 bg-rose-50/50 px-4 py-2.5 text-xs font-bold text-rose-500 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-rose-950/30 dark:bg-rose-950/15 dark:text-rose-400';
+const BTN_PRIMARY =
+  'inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#2F6BFF] px-4 py-2.5 text-xs font-bold text-white shadow-md transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40';
+const LABEL = 'text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500';
 
 export default function QuotationDetailPage() {
   const router = useRouter();
@@ -180,10 +174,10 @@ export default function QuotationDetailPage() {
 
   if (detail.isLoading) {
     return (
-      <div className="space-y-4">
-        <Skeleton className="h-10 w-1/3" />
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-64 w-full" />
+      <div className="space-y-4 animate-in fade-in duration-200">
+        <div className="h-10 w-1/3 animate-pulse rounded-2xl bg-slate-100 dark:bg-slate-800" />
+        <div className="h-32 w-full animate-pulse rounded-3xl bg-slate-100 dark:bg-slate-800" />
+        <div className="h-64 w-full animate-pulse rounded-3xl bg-slate-100 dark:bg-slate-800" />
       </div>
     );
   }
@@ -191,13 +185,11 @@ export default function QuotationDetailPage() {
   if (!detail.data) {
     return (
       <div className="space-y-4">
-        <p className="text-muted-foreground">Cotización no encontrada.</p>
-        <Button variant="outline" asChild>
-          <Link href="/cotizaciones">
-            <ArrowLeft className="h-4 w-4" />
-            Volver al listado
-          </Link>
-        </Button>
+        <p className="text-sm font-semibold text-slate-400">Cotización no encontrada.</p>
+        <Link href="/cotizaciones" className={BTN_OUTLINE}>
+          <ArrowLeft className="h-4 w-4" />
+          Volver al listado
+        </Link>
       </div>
     );
   }
@@ -208,6 +200,8 @@ export default function QuotationDetailPage() {
   const phone = q.customerView.phone;
   const email = q.customerView.email;
   const customerLabel = q.customerView.name?.trim() || 'Sin cliente';
+  const showActionBar =
+    canSend || q.status === 'SENT' || q.status === 'APPROVED';
 
   function copyPublicUrl() {
     if (!q.publicUrl) return;
@@ -233,253 +227,230 @@ export default function QuotationDetailPage() {
     }
   }
 
+  const hasTempItems = (q.items ?? []).some((it) => it.isTemporary);
+  const convertBusy = convertMut.isPending || convertAndDispatchMut.isPending;
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/cotizaciones">
-                <ArrowLeft className="h-4 w-4" />
-                Volver
-              </Link>
-            </Button>
+    <div className="space-y-6 animate-in fade-in duration-200">
+      {/* ============================================================
+          HEADER
+          ============================================================ */}
+      <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
+        <div className="flex items-start gap-4">
+          <Link
+            href="/cotizaciones"
+            title="Volver"
+            className="cursor-pointer rounded-xl border border-slate-200 bg-white p-2 transition-colors hover:bg-slate-50 dark:border-slate-850 dark:bg-[#11151C] dark:hover:bg-slate-800"
+          >
+            <ArrowLeft className="h-5 w-5 text-slate-500" />
+          </Link>
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="font-mono text-2xl font-black tracking-tight text-slate-900 dark:text-white">
+                {q.number}
+              </h1>
+              <QuotationStatusBadge status={q.status} />
+            </div>
+            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+              Fecha:{' '}
+              {new Date(q.date).toLocaleDateString('es-CL', { dateStyle: 'long' })}
+              {q.validUntil
+                ? ` · Vence: ${new Date(q.validUntil).toLocaleDateString('es-CL', { dateStyle: 'long' })}`
+                : ''}
+            </p>
           </div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold font-mono">{q.number}</h1>
-            <QuotationStatusBadge status={q.status} />
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Fecha:{' '}
-            {new Date(q.date).toLocaleDateString('es-CL', {
-              dateStyle: 'long',
-            })}
-            {q.validUntil
-              ? ` · Vence: ${new Date(q.validUntil).toLocaleDateString('es-CL', { dateStyle: 'long' })}`
-              : ''}
-          </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {editable && (
-            <Button variant="outline" onClick={() => setEditOpen(true)}>
-              <Pencil className="h-4 w-4" />
+            <button type="button" className={BTN_OUTLINE} onClick={() => setEditOpen(true)}>
+              <Pencil className="h-4 w-4 text-slate-400" />
               Editar
-            </Button>
+            </button>
           )}
-          <Button
-            asChild
-            variant="outline"
+          <a
+            href={getPdfUrl(q.id, 'letter')}
+            target="_blank"
+            rel="noopener noreferrer"
             title="Imprimir Carta"
+            className={BTN_OUTLINE}
           >
-            <a
-              href={getPdfUrl(q.id, 'letter')}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <Printer className="h-4 w-4" />
-              Imprimir Carta
-            </a>
-          </Button>
-          <Button
-            asChild
-            variant="outline"
+            <Printer className="h-4 w-4 text-slate-400" />
+            Imprimir Carta
+          </a>
+          <a
+            href={getPdfUrl(q.id, 'thermal80')}
+            target="_blank"
+            rel="noopener noreferrer"
             title="Imprimir 80mm"
+            className={BTN_OUTLINE}
           >
-            <a
-              href={getPdfUrl(q.id, 'thermal80')}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <FileDown className="h-4 w-4" />
-              Imprimir 80mm
-            </a>
-          </Button>
-          <Button variant="outline" onClick={copyPublicUrl}>
-            <Copy className="h-4 w-4" />
+            <FileDown className="h-4 w-4 text-slate-400" />
+            Imprimir 80mm
+          </a>
+          <button type="button" className={BTN_OUTLINE} onClick={copyPublicUrl}>
+            <Copy className="h-4 w-4 text-slate-400" />
             Copiar link público
-          </Button>
+          </button>
           {q.status === 'DRAFT' && (
-            <Button
-              variant="outline"
-              className="border-destructive/40 text-destructive hover:bg-destructive/10"
-              onClick={() => setDeleteOpen(true)}
-            >
+            <button type="button" className={BTN_DANGER} onClick={() => setDeleteOpen(true)}>
               <Trash2 className="h-4 w-4" />
               Eliminar
-            </Button>
+            </button>
           )}
         </div>
       </div>
 
-      {(canSend ||
-        q.status === 'SENT' ||
-        q.status === 'APPROVED') && (
-        <div className="flex flex-wrap gap-2 rounded-md border bg-card p-4">
+      {/* ============================================================
+          BARRA DE ACCIONES (enviar / aprobar / convertir)
+          ============================================================ */}
+      {showActionBar && (
+        <div className={`flex flex-wrap gap-2 ${CARD}`}>
           {canSend && (
             <>
-              <Button
+              <button
+                type="button"
+                className={BTN_PRIMARY}
                 onClick={handleSendEmail}
                 disabled={sendEmailMut.isPending}
               >
                 <Mail className="h-4 w-4" />
-                {sendEmailMut.isPending
-                  ? 'Enviando...'
-                  : 'Enviar por email'}
-              </Button>
-              <Button
+                {sendEmailMut.isPending ? 'Enviando…' : 'Enviar por email'}
+              </button>
+              <button
+                type="button"
+                className={BTN_PRIMARY}
                 onClick={handleSendWhatsapp}
                 disabled={sendWaMut.isPending}
               >
                 <MessageCircle className="h-4 w-4" />
-                {sendWaMut.isPending ? 'Enviando...' : 'Enviar por WhatsApp'}
-              </Button>
+                {sendWaMut.isPending ? 'Enviando…' : 'Enviar por WhatsApp'}
+              </button>
             </>
           )}
           {q.status === 'SENT' && (
             <>
-              <Button
-                variant="outline"
+              <button
+                type="button"
+                className={BTN_OUTLINE}
                 onClick={() => approveMut.mutate()}
                 disabled={approveMut.isPending}
               >
-                <Check className="h-4 w-4" />
+                <Check className="h-4 w-4 text-emerald-500" />
                 Marcar aprobada
-              </Button>
-              <Button
-                variant="outline"
+              </button>
+              <button
+                type="button"
+                className={BTN_DANGER}
                 onClick={() => setRejectOpen(true)}
                 disabled={rejectMut.isPending}
               >
                 <X className="h-4 w-4" />
                 Marcar rechazada
-              </Button>
+              </button>
             </>
           )}
           {/* La conversión a venta se permite desde BORRADOR, ENVIADA o
-              APROBADA (el backend acepta esos estados). Así el operador puede
-              vender directo sin tener que enviar/aprobar primero. */}
+              APROBADA (el backend acepta esos estados). */}
           {(q.status === 'DRAFT' ||
             q.status === 'SENT' ||
             q.status === 'APPROVED') && (
             <>
-              {/* Ronda 9 — split button: Convertir a venta + opción
-                  "Convertir y generar guía". Si la cotización tiene items
-                  temporales (productos no del catálogo), ambas opciones
-                  se deshabilitan con tooltip explicativo. */}
-              {(() => {
-                const hasTempItems = (q.items ?? []).some(
-                  (it) => it.isTemporary,
-                );
-                const busy =
-                  convertMut.isPending || convertAndDispatchMut.isPending;
-                return (
-                  <div className="inline-flex">
-                    <Button
-                      onClick={() => convertMut.mutate()}
-                      disabled={busy || hasTempItems}
-                      title={
-                        hasTempItems
-                          ? 'Hay productos temporales. Registralos en el catálogo o quitalos antes de convertir.'
-                          : undefined
-                      }
-                      className="rounded-r-none"
+              {/* Ronda 9 — split button: Convertir a venta + "Convertir y
+                  generar guía". Con items temporales ambas se deshabilitan. */}
+              <div className="inline-flex">
+                <button
+                  type="button"
+                  onClick={() => convertMut.mutate()}
+                  disabled={convertBusy || hasTempItems}
+                  title={
+                    hasTempItems
+                      ? 'Hay productos temporales. Registralos en el catálogo o quitalos antes de convertir.'
+                      : undefined
+                  }
+                  className={`${BTN_PRIMARY} rounded-r-none`}
+                >
+                  <ShoppingCart className="h-4 w-4" />
+                  {convertBusy ? 'Procesando…' : 'Convertir a venta'}
+                </button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      disabled={convertBusy || hasTempItems}
+                      title="Más opciones"
+                      className={`${BTN_PRIMARY} rounded-l-none border-l border-white/25 px-2`}
                     >
-                      <ShoppingCart className="h-4 w-4" />
-                      {busy ? 'Procesando...' : 'Convertir a venta'}
-                    </Button>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          disabled={busy || hasTempItems}
-                          className="rounded-l-none border-l border-primary-foreground/20 px-2"
-                          title="Más opciones"
-                        >
-                          <ChevronDown className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={() => convertAndDispatchMut.mutate()}
-                          disabled={busy || hasTempItems}
-                        >
-                          <Truck className="mr-2 h-4 w-4" />
-                          Convertir y generar guía
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                );
-              })()}
+                      <ChevronDown className="h-4 w-4" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      onClick={() => convertAndDispatchMut.mutate()}
+                      disabled={convertBusy || hasTempItems}
+                    >
+                      <Truck className="mr-2 h-4 w-4" />
+                      Convertir y generar guía
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
               {q.status === 'APPROVED' && (
-                <Button
-                  variant="outline"
+                <button
+                  type="button"
+                  className={BTN_DANGER}
                   onClick={() => setRejectOpen(true)}
                   disabled={rejectMut.isPending}
                 >
                   <X className="h-4 w-4" />
                   Marcar rechazada
-                </Button>
+                </button>
               )}
             </>
           )}
         </div>
       )}
 
+      {/* ============================================================
+          CLIENTE + TOTALES
+          ============================================================ */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <div className="space-y-2 rounded-md border bg-card p-4">
-          <h2 className="font-medium">Datos del cliente</h2>
-          <div className="text-sm space-y-1">
-            <div>
-              <span className="text-muted-foreground">Tipo: </span>
+        <div className={`space-y-3 ${CARD}`}>
+          <h2 className={LABEL}>Datos del cliente</h2>
+          <dl className="space-y-2 text-xs">
+            <Row label="Tipo">
               {q.customerView.fromCatalog ? 'Cliente del catálogo' : 'Cliente libre'}
-            </div>
-            <div>
-              <span className="text-muted-foreground">Nombre: </span>
-              <span
-                className={
-                  q.customerView.name ? '' : 'italic text-muted-foreground'
-                }
-              >
+            </Row>
+            <Row label="Nombre">
+              <span className={q.customerView.name ? '' : 'italic text-slate-400'}>
                 {customerLabel}
               </span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">RUT: </span>
-              {q.customerView.taxId || '—'}
-            </div>
-            <div>
-              <span className="text-muted-foreground">Email: </span>
-              {q.customerView.email || '—'}
-            </div>
-            <div>
-              <span className="text-muted-foreground">Teléfono: </span>
-              {phone ? formatPhonePretty(phone) : '—'}
-            </div>
-          </div>
+            </Row>
+            <Row label="RUT">{q.customerView.taxId || '—'}</Row>
+            <Row label="Email">{q.customerView.email || '—'}</Row>
+            <Row label="Teléfono">{phone ? formatPhonePretty(phone) : '—'}</Row>
+          </dl>
         </div>
 
-        <div className="space-y-2 rounded-md border bg-card p-4">
-          <h2 className="font-medium">Totales</h2>
-          <div className="text-sm space-y-1">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Subtotal neto</span>
-              <span className="tabular-nums">
-                {formatCurrency(q.subtotal)}
-              </span>
+        <div className={`space-y-3 ${CARD}`}>
+          <h2 className={LABEL}>Totales</h2>
+          <div className="space-y-2 text-xs">
+            <div className="flex justify-between text-slate-500 dark:text-slate-400">
+              <span>Subtotal neto</span>
+              <span className="font-mono font-semibold">{formatCurrency(q.subtotal)}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">IVA</span>
-              <span className="tabular-nums">
-                {formatCurrency(q.taxAmount)}
-              </span>
+            <div className="flex justify-between text-slate-500 dark:text-slate-400">
+              <span>IVA</span>
+              <span className="font-mono font-semibold">{formatCurrency(q.taxAmount)}</span>
             </div>
-            <div className="flex justify-between border-t pt-2 font-semibold">
+            <div className="flex justify-between border-t border-slate-100 pt-2 text-sm font-bold text-slate-950 dark:border-slate-850 dark:text-white">
               <span>Total</span>
-              <span className="tabular-nums">{formatCurrency(q.total)}</span>
+              <span className="font-mono text-base font-black text-[#2F6BFF]">
+                {formatCurrency(q.total)}
+              </span>
             </div>
             {q.sentAt && (
-              <div className="pt-2 text-xs text-muted-foreground">
+              <div className="pt-1 text-[11px] text-slate-400">
                 Enviada{' '}
                 {new Date(q.sentAt).toLocaleString('es-CL', {
                   dateStyle: 'short',
@@ -491,140 +462,141 @@ export default function QuotationDetailPage() {
         </div>
       </div>
 
-      <div className="rounded-md border bg-card">
-        <div className="border-b p-4">
-          <h2 className="font-medium">Items</h2>
+      {/* ============================================================
+          ITEMS
+          ============================================================ */}
+      <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+        <div className="select-none border-b border-slate-100 p-5 dark:border-slate-850">
+          <h2 className={LABEL}>Items</h2>
         </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>SKU</TableHead>
-              <TableHead>Producto</TableHead>
-              <TableHead className="text-right">Cant.</TableHead>
-              <TableHead className="text-right">P. Unit</TableHead>
-              <TableHead className="text-right">Descuento</TableHead>
-              <TableHead className="text-right">Subtotal</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(q.items ?? []).length === 0 && (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
-                  Sin items.
-                </TableCell>
-              </TableRow>
-            )}
-            {(q.items ?? []).map((it) => (
-              <TableRow key={it.id}>
-                <TableCell className="font-mono text-xs">
-                  {it.product?.sku ?? it.tempProductSku ?? '—'}
-                </TableCell>
-                <TableCell className="max-w-[280px] truncate">
-                  {it.product?.name ?? it.tempProductName ?? '—'}
-                  {it.isTemporary && (
-                    <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:bg-amber-950 dark:text-amber-300">
-                      Temporal
-                    </span>
-                  )}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {it.qty}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {formatCurrency(it.unitPrice)}
-                </TableCell>
-                <TableCell className="text-right tabular-nums text-muted-foreground">
-                  {it.discountPercent
-                    ? `${Number(it.discountPercent).toFixed(0)}%`
-                    : Number(it.discount) > 0
-                      ? formatCurrency(it.discount)
-                      : '—'}
-                </TableCell>
-                <TableCell className="text-right tabular-nums font-medium">
-                  {formatCurrency(it.subtotal)}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] border-collapse text-left text-[12px]">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/20 font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-850 dark:text-slate-500">
+                <th className="w-[16%] py-3 pl-6">SKU</th>
+                <th className="py-3">Producto</th>
+                <th className="py-3 text-right">Cant.</th>
+                <th className="py-3 text-right">P. Unit</th>
+                <th className="py-3 text-right">Descuento</th>
+                <th className="py-3 pr-6 text-right">Subtotal</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 font-medium dark:divide-slate-850">
+              {(q.items ?? []).length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-10 text-center font-bold text-slate-400">
+                    Sin items.
+                  </td>
+                </tr>
+              )}
+              {(q.items ?? []).map((it) => (
+                <tr
+                  key={it.id}
+                  className="transition-colors hover:bg-slate-50/40 dark:hover:bg-slate-900/10"
+                >
+                  <td className="py-4 pl-6 font-mono text-slate-500 dark:text-slate-400">
+                    {it.product?.sku ?? it.tempProductSku ?? '—'}
+                  </td>
+                  <td className="max-w-[280px] truncate py-4 font-bold text-slate-950 dark:text-white">
+                    {it.product?.name ?? it.tempProductName ?? '—'}
+                    {it.isTemporary && (
+                      <span className="ml-2 rounded bg-amber-50 px-1.5 py-0.5 text-[9.5px] font-extrabold uppercase tracking-wide text-amber-600 dark:bg-amber-950/30 dark:text-amber-400">
+                        Temporal
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-4 text-right font-mono text-slate-700 dark:text-slate-300">
+                    {it.qty}
+                  </td>
+                  <td className="py-4 text-right font-mono text-slate-500 dark:text-slate-400">
+                    {formatCurrency(it.unitPrice)}
+                  </td>
+                  <td className="py-4 text-right font-mono text-slate-400">
+                    {it.discountPercent
+                      ? `${Number(it.discountPercent).toFixed(0)}%`
+                      : Number(it.discount) > 0
+                        ? formatCurrency(it.discount)
+                        : '—'}
+                  </td>
+                  <td className="py-4 pr-6 text-right font-mono font-black text-slate-900 dark:text-white">
+                    {formatCurrency(it.subtotal)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
+      {/* ============================================================
+          NOTAS
+          ============================================================ */}
       {q.notes && (
-        <div className="rounded-md border bg-card p-4">
-          <h2 className="font-medium mb-2 flex items-center gap-2">
-            <FileText className="h-4 w-4" />
+        <div className={`space-y-2 ${CARD}`}>
+          <h2 className={`flex items-center gap-2 ${LABEL}`}>
+            <FileText className="h-3.5 w-3.5" />
             Notas
           </h2>
-          <p className="whitespace-pre-wrap text-sm text-muted-foreground">
+          <p className="whitespace-pre-wrap text-xs font-semibold leading-relaxed text-slate-600 dark:text-slate-300">
             {q.notes}
           </p>
         </div>
       )}
 
-      <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Marcar como rechazada</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">
-              Podés agregar un motivo (opcional) para registrar por qué se rechazó.
-            </p>
-            <Textarea
-              value={rejectNotes}
-              onChange={(e) => setRejectNotes(e.target.value)}
-              placeholder="Motivo del rechazo (opcional)"
-              rows={4}
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
+      {/* ============================================================
+          DIÁLOGOS
+          ============================================================ */}
+      <SoftModal
+        open={rejectOpen}
+        onOpenChange={setRejectOpen}
+        title="Marcar como rechazada"
+        subtitle="Podés registrar un motivo (opcional)"
+      >
+        <div className="space-y-4 p-5">
+          <textarea
+            value={rejectNotes}
+            onChange={(e) => setRejectNotes(e.target.value)}
+            placeholder="Motivo del rechazo (opcional)"
+            rows={4}
+            className="w-full rounded-xl border border-transparent bg-slate-50 px-3.5 py-3 text-xs font-medium text-slate-800 transition-all placeholder:text-slate-400 focus:border-[#2F6BFF] focus:outline-none focus:ring-2 focus:ring-[#2F6BFF]/15 dark:bg-slate-900 dark:text-white"
+          />
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              className={BTN_OUTLINE}
               onClick={() => setRejectOpen(false)}
               disabled={rejectMut.isPending}
             >
               Cancelar
-            </Button>
-            <Button
-              variant="outline"
-              className="border-destructive/40 text-destructive hover:bg-destructive/10"
+            </button>
+            <button
+              type="button"
+              className={BTN_DANGER}
               onClick={() => rejectMut.mutate(rejectNotes.trim() || undefined)}
               disabled={rejectMut.isPending}
             >
-              {rejectMut.isPending ? 'Rechazando...' : 'Confirmar rechazo'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              {rejectMut.isPending ? 'Rechazando…' : 'Confirmar rechazo'}
+            </button>
+          </div>
+        </div>
+      </SoftModal>
 
-      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>¿Eliminar cotización?</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Esta acción es permanente. La cotización {q.number} se eliminará. Solo se
-            pueden eliminar borradores.
-          </p>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDeleteOpen(false)}
-              disabled={deleteMut.isPending}
-            >
-              Cancelar
-            </Button>
-            <Button
-              variant="outline"
-              className="border-destructive/40 text-destructive hover:bg-destructive/10"
-              onClick={() => deleteMut.mutate()}
-              disabled={deleteMut.isPending}
-            >
-              {deleteMut.isPending ? 'Eliminando...' : 'Eliminar'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title="¿Eliminar cotización?"
+        description={
+          <>
+            Esta acción es permanente. La cotización <strong>{q.number}</strong> se
+            eliminará. Solo se pueden eliminar borradores.
+          </>
+        }
+        confirmLabel="Eliminar"
+        variant="destructive"
+        onConfirm={async () => {
+          await deleteMut.mutateAsync();
+        }}
+      />
 
       <QuotationFormDialog
         open={editOpen}
@@ -654,6 +626,17 @@ export default function QuotationDetailPage() {
         busy={sendWaMut.isPending}
         onConfirm={(to) => sendWaMut.mutateAsync(to)}
       />
+    </div>
+  );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="shrink-0 font-semibold text-slate-400">{label}</dt>
+      <dd className="truncate text-right font-bold text-slate-700 dark:text-slate-200">
+        {children}
+      </dd>
     </div>
   );
 }

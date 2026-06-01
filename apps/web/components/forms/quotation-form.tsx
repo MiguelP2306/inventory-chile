@@ -32,7 +32,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
   Popover,
   PopoverContent,
@@ -603,37 +602,41 @@ export function QuotationForm({
 
   const actionButtons = (
     <div className="flex flex-wrap items-center gap-2">
-      <Button
+      <button
         type="button"
-        variant="outline"
         onClick={() => onCancel?.()}
         disabled={submitting}
+        className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:text-slate-300 dark:hover:bg-slate-900"
       >
         Cancelar
-      </Button>
-      <Button
+      </button>
+      <button
         type="button"
-        variant="outline"
         onClick={() => handleSave()}
         disabled={submitting}
+        className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:text-slate-300 dark:hover:bg-slate-900"
       >
-        <Save className="h-4 w-4" />
+        <Save className="h-4 w-4 text-slate-400" />
         {saveMut.isPending
-          ? 'Guardando...'
+          ? 'Guardando…'
           : pendingRetry
             ? 'Guardar cambios'
             : 'Guardar borrador'}
-      </Button>
+      </button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button type="button" disabled={submitting}>
+          <button
+            type="button"
+            disabled={submitting}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-[#2F6BFF] px-4 py-2.5 text-xs font-bold text-white shadow-md transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          >
             {submitting
-              ? 'Procesando...'
+              ? 'Procesando…'
               : pendingRetry
                 ? 'Reintentar envío'
                 : 'Guardar y enviar'}
             <ChevronDown className="h-4 w-4" />
-          </Button>
+          </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem onSelect={() => handleSave('email')}>
@@ -676,7 +679,7 @@ export function QuotationForm({
       )}
 
       {pendingRetry && (
-        <div className="rounded-md border border-amber-500/40 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+        <div className="rounded-2xl border border-amber-100 bg-amber-50/60 px-4 py-3 text-xs font-semibold text-amber-700 dark:border-amber-950/30 dark:bg-amber-950/10 dark:text-amber-400">
           La cotización se guardó pero el envío falló. Verificá los datos del
           cliente y reintentá — no se creará una cotización duplicada.
         </div>
@@ -686,25 +689,35 @@ export function QuotationForm({
         value={activeTab}
         onValueChange={(v) => setActiveTab(v as typeof activeTab)}
       >
-        <TabsList>
+        <TabsList className="h-auto gap-1 rounded-2xl border border-slate-200 bg-slate-100/70 p-1 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
           {/* Ronda 10 — 2 tabs: Cliente + productos en una sola vista,
               Notas en otra. La sección del cliente vive arriba del listado
               y se puede colapsar. */}
-          <TabsTrigger value="principal">
+          <TabsTrigger
+            value="principal"
+            className="rounded-xl px-4 py-2 text-[11.5px] font-bold text-slate-500 transition-all data-[state=active]:bg-[#2F6BFF] data-[state=active]:font-black data-[state=active]:text-white data-[state=active]:shadow-md dark:text-slate-400"
+          >
             Cliente y productos ({items.length})
           </TabsTrigger>
-          <TabsTrigger value="notas">Notas</TabsTrigger>
+          <TabsTrigger
+            value="notas"
+            className="rounded-xl px-4 py-2 text-[11.5px] font-bold text-slate-500 transition-all data-[state=active]:bg-[#2F6BFF] data-[state=active]:font-black data-[state=active]:text-white data-[state=active]:shadow-md dark:text-slate-400"
+          >
+            Notas
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="principal" className="space-y-4">
-          <div className="rounded-md border bg-card">
+          <div className="rounded-2xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
             <button
               type="button"
               onClick={() => setClientOpen((o) => !o)}
               className="flex w-full items-center justify-between border-b p-4 text-left hover:bg-accent/30"
             >
               <div>
-                <h2 className="font-medium">Datos del cliente</h2>
+                <h2 className="text-xs font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                  Datos del cliente
+                </h2>
                 <p className="text-xs text-muted-foreground">
                   {clientType === 'catalog'
                     ? catalogCustomer
@@ -726,20 +739,30 @@ export function QuotationForm({
               name="clientType"
               render={({ field }) => (
                 <div className="flex flex-wrap gap-2">
-                  <Button
+                  <button
                     type="button"
-                    variant={field.value === 'catalog' ? 'default' : 'outline'}
                     onClick={() => field.onChange('catalog')}
+                    className={cn(
+                      'rounded-xl border px-4 py-2.5 text-xs font-bold transition-all',
+                      field.value === 'catalog'
+                        ? 'border-[#2F6BFF] bg-[#2F6BFF] text-white shadow-md'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-850 dark:bg-[#11151C] dark:text-slate-300 dark:hover:bg-slate-900',
+                    )}
                   >
                     Cliente del catálogo
-                  </Button>
-                  <Button
+                  </button>
+                  <button
                     type="button"
-                    variant={field.value === 'free' ? 'default' : 'outline'}
                     onClick={() => field.onChange('free')}
+                    className={cn(
+                      'rounded-xl border px-4 py-2.5 text-xs font-bold transition-all',
+                      field.value === 'free'
+                        ? 'border-[#2F6BFF] bg-[#2F6BFF] text-white shadow-md'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-850 dark:bg-[#11151C] dark:text-slate-300 dark:hover:bg-slate-900',
+                    )}
                   >
                     Cliente libre (sin guardar)
-                  </Button>
+                  </button>
                 </div>
               )}
             />
@@ -749,8 +772,10 @@ export function QuotationForm({
                 control={form.control}
                 name="customerId"
                 render={({ field }) => (
-                  <div className="space-y-2">
-                    <Label>Cliente</Label>
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                      Cliente
+                    </span>
                     <CustomerCombobox
                       value={field.value ?? null}
                       onChange={(id, customer) => {
@@ -832,9 +857,11 @@ export function QuotationForm({
 
           {/* Items debajo del cliente, en el mismo tab (Ronda 10). */}
           <div className="space-y-4">
-          <div className="rounded-md border bg-card">
+          <div className="rounded-2xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b p-4">
-              <h2 className="font-medium">Items de la cotización</h2>
+              <h2 className="text-xs font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                Items de la cotización
+              </h2>
               <div className="flex flex-wrap items-center gap-2">
                 <ProductPicker
                   buttonLabel="Agregar producto"
@@ -1016,16 +1043,16 @@ export function QuotationForm({
                         {formatCurrency(calc?.subtotal.toFixed(2))}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
+                        <button
                           type="button"
-                          variant="ghost"
-                          size="icon"
                           onClick={() =>
                             setItems((prev) => prev.filter((_, i) => i !== idx))
                           }
+                          title="Quitar producto"
+                          className="cursor-pointer p-1.5 text-slate-400 transition-colors hover:text-rose-500"
                         >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
+                          <Trash2 className="h-4 w-4" />
+                        </button>
                       </TableCell>
                     </TableRow>
                   );
@@ -1035,7 +1062,7 @@ export function QuotationForm({
           </div>
 
           {stockShortages.length > 0 && (
-            <div className="rounded-md border border-amber-500/40 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+            <div className="rounded-2xl border border-amber-100 bg-amber-50/60 px-4 py-3 text-xs font-semibold text-amber-700 dark:border-amber-950/30 dark:bg-amber-950/10 dark:text-amber-400">
               <div className="font-medium">
                 {stockShortages.length === 1
                   ? '1 item excede el stock disponible'
@@ -1060,8 +1087,10 @@ export function QuotationForm({
         </TabsContent>
 
         <TabsContent value="notas" className="space-y-2">
-          <div className="rounded-md border bg-card p-6 space-y-2">
-            <Label>Notas (opcional)</Label>
+          <div className="space-y-2 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+            <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+              Notas (opcional)
+            </span>
             <Textarea
               rows={8}
               {...form.register('notes')}
@@ -1075,24 +1104,22 @@ export function QuotationForm({
         </TabsContent>
       </Tabs>
 
-      <div className="ml-auto max-w-md rounded-md border bg-card p-4 space-y-2 text-sm">
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">Subtotal neto</span>
-          <span className="tabular-nums">
+      <div className="ml-auto max-w-md space-y-2 rounded-2xl border border-slate-100 bg-white p-5 text-xs shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+        <div className="flex justify-between text-slate-500 dark:text-slate-400">
+          <span>Subtotal neto</span>
+          <span className="font-mono font-semibold">
             {formatCurrency(subtotalNeto.toFixed(2))}
           </span>
         </div>
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">
-            IVA ({(taxRate * 100).toFixed(0)}%)
-          </span>
-          <span className="tabular-nums">
+        <div className="flex justify-between text-slate-500 dark:text-slate-400">
+          <span>IVA ({(taxRate * 100).toFixed(0)}%)</span>
+          <span className="font-mono font-semibold">
             {formatCurrency(taxAmount.toFixed(2))}
           </span>
         </div>
-        <div className="flex justify-between border-t pt-2 font-semibold">
+        <div className="flex justify-between border-t border-slate-100 pt-2 text-sm font-bold text-slate-950 dark:border-slate-850 dark:text-white">
           <span>Total bruto</span>
-          <span className="tabular-nums">
+          <span className="font-mono text-base font-black text-[#2F6BFF]">
             {formatCurrency(totalBruto.toFixed(2))}
           </span>
         </div>
@@ -1121,10 +1148,12 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
+    <div className="space-y-1.5">
+      <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+        {label}
+      </span>
       {children}
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p className="text-[11px] font-bold text-rose-500">{error}</p>}
     </div>
   );
 }

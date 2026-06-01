@@ -19,7 +19,6 @@ import {
   CommandList,
 } from '@/components/ui/command';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
   Popover,
   PopoverContent,
@@ -379,12 +378,12 @@ export function SaleForm({
       {/* Selector de bodega visible siempre, fuera de los tabs. La bodega
           define contra qué stock se valida la venta y de dónde se descuentan
           los items al confirmar. */}
-      <div className="rounded-md border bg-card p-4">
+      <div className="rounded-2xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C] p-4">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-4">
-          <Label className="flex items-center gap-2 text-sm md:w-44 md:shrink-0">
-            <WarehouseIcon className="h-4 w-4 text-muted-foreground" />
+          <span className="flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 md:w-44 md:shrink-0 dark:text-slate-500">
+            <WarehouseIcon className="h-4 w-4 text-slate-400" />
             Bodega de la venta
-          </Label>
+          </span>
           <Select
             value={warehouseId}
             onValueChange={setWarehouseId}
@@ -409,27 +408,26 @@ export function SaleForm({
       </div>
 
       {stockShortages.length > 0 && (
-        <div className="flex items-start gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
-          <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
-          <div className="flex-1 space-y-1">
-            <p className="font-medium text-amber-700 dark:text-amber-300">
+        <div className="flex items-start gap-3 rounded-2xl border border-amber-100 bg-amber-50/60 p-4 dark:border-amber-950/30 dark:bg-amber-950/10">
+          <AlertTriangle className="h-5 w-5 shrink-0 text-amber-500" />
+          <div className="flex-1 space-y-1 text-xs">
+            <p className="font-bold text-amber-700 dark:text-amber-400">
               Stock insuficiente en{' '}
               <strong>{currentWarehouse?.name ?? 'la bodega elegida'}</strong>{' '}
               para {stockShortages.length}{' '}
               {stockShortages.length === 1 ? 'producto' : 'productos'}.
             </p>
-            <p className="text-amber-700/80 dark:text-amber-300/80">
+            <p className="font-medium text-amber-600/80 dark:text-amber-400/70">
               Probá cambiar la bodega arriba o ajustá las cantidades.
             </p>
           </div>
-          <Button
+          <button
             type="button"
-            variant="outline"
-            size="sm"
             onClick={() => setActiveTab('principal')}
+            className="shrink-0 cursor-pointer rounded-xl border border-amber-200 bg-white px-3 py-2 text-[11px] font-bold text-amber-700 transition-colors hover:bg-amber-50 dark:border-amber-950/40 dark:bg-transparent dark:text-amber-400"
           >
             Ver items
-          </Button>
+          </button>
         </div>
       )}
 
@@ -437,23 +435,33 @@ export function SaleForm({
         value={activeTab}
         onValueChange={(v) => setActiveTab(v as typeof activeTab)}
       >
-        <TabsList>
+        <TabsList className="h-auto gap-1 rounded-2xl border border-slate-200 bg-slate-100/70 p-1 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
           {/* Ronda 10 — cliente+pago e items conviven en la primera tab. */}
-          <TabsTrigger value="principal">
+          <TabsTrigger
+            value="principal"
+            className="rounded-xl px-4 py-2 text-[11.5px] font-bold text-slate-500 transition-all data-[state=active]:bg-[#2F6BFF] data-[state=active]:font-black data-[state=active]:text-white data-[state=active]:shadow-md dark:text-slate-400"
+          >
             Cliente y productos ({items.length})
           </TabsTrigger>
-          <TabsTrigger value="notas">Notas</TabsTrigger>
+          <TabsTrigger
+            value="notas"
+            className="rounded-xl px-4 py-2 text-[11.5px] font-bold text-slate-500 transition-all data-[state=active]:bg-[#2F6BFF] data-[state=active]:font-black data-[state=active]:text-white data-[state=active]:shadow-md dark:text-slate-400"
+          >
+            Notas
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="principal" className="space-y-4">
-          <div className="rounded-md border bg-card">
+          <div className="rounded-2xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
             <button
               type="button"
               onClick={() => setClientOpen((o) => !o)}
               className="flex w-full items-center justify-between border-b p-4 text-left hover:bg-accent/30"
             >
               <div>
-                <h2 className="font-medium">Cliente y forma de pago</h2>
+                <h2 className="text-xs font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                  Cliente y forma de pago
+                </h2>
                 <p className="text-xs text-muted-foreground">
                   {customer
                     ? `${customer.name}${customer.taxId ? ` · ${customer.taxId}` : ''} · ${paymentMethod.replace('CARD_', '').replace('_', ' ').toLowerCase()}`
@@ -467,7 +475,7 @@ export function SaleForm({
             {clientOpen && (
               <div className="space-y-4 p-6">
             <div className="space-y-2">
-              <Label>Cliente</Label>
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">Cliente</span>
 
               {snapshotPending && prefillFromQuotation?.customerSnapshot ? (
                 <FreeCustomerPrompt
@@ -504,7 +512,7 @@ export function SaleForm({
 
             {canSeeBreakdown && (
               <div className="space-y-2">
-                <Label>Método de pago</Label>
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">Método de pago</span>
                 {/* Ronda 9 — 5 opciones: efectivo, transferencia, débito,
                     crédito, link de pago. Cada tarjeta de pago tiene su propia
                     comisión configurable en Configuración. */}
@@ -552,7 +560,7 @@ export function SaleForm({
           </div>
 
           {/* Items debajo del cliente, en el mismo tab (Ronda 10). */}
-          <div className="rounded-md border bg-card">
+          <div className="rounded-2xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
             <div className="flex items-center justify-between border-b p-4">
               <h2 className="font-medium">Items de la venta</h2>
               <ProductPicker
@@ -699,16 +707,16 @@ export function SaleForm({
                         {formatCurrency(calc?.subtotal.toFixed(2))}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
+                        <button
                           type="button"
-                          variant="ghost"
-                          size="icon"
                           onClick={() =>
                             setItems((prev) => prev.filter((_, i) => i !== idx))
                           }
+                          title="Quitar producto"
+                          className="cursor-pointer p-1.5 text-slate-400 transition-colors hover:text-rose-500"
                         >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
+                          <Trash2 className="h-4 w-4" />
+                        </button>
                       </TableCell>
                     </TableRow>
                   );
@@ -717,7 +725,7 @@ export function SaleForm({
             </Table>
           </div>
           {stockShortages.length > 0 && (
-            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            <div className="rounded-2xl border border-rose-100 bg-rose-50/50 px-4 py-3 text-xs font-semibold text-rose-500 dark:border-rose-950/30 dark:bg-rose-950/10 dark:text-rose-400">
               Hay items que exceden el stock disponible. Ajustá las cantidades o
               quitá esas líneas antes de confirmar.
             </div>
@@ -725,8 +733,8 @@ export function SaleForm({
         </TabsContent>
 
         <TabsContent value="notas" className="space-y-2">
-          <div className="rounded-md border bg-card p-6 space-y-2">
-            <Label>Notas (opcional)</Label>
+          <div className="rounded-2xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C] p-6 space-y-2">
+            <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">Notas (opcional)</span>
             <Textarea
               rows={6}
               value={notes}
@@ -740,71 +748,65 @@ export function SaleForm({
         </TabsContent>
       </Tabs>
 
-      <div className="ml-auto max-w-md rounded-md border bg-card p-4 space-y-2 text-sm">
+      <div className="ml-auto max-w-md space-y-2 rounded-2xl border border-slate-100 bg-white p-5 text-xs shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
         {canSeeBreakdown && (
           <>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Subtotal neto</span>
-              <span className="tabular-nums">
-                {formatCurrency(subtotalNeto.toFixed(2))}
-              </span>
+            <div className="flex justify-between text-slate-500 dark:text-slate-400">
+              <span>Subtotal neto</span>
+              <span className="font-mono font-semibold">{formatCurrency(subtotalNeto.toFixed(2))}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">
-                IVA ({(taxRate * 100).toFixed(0)}%)
-              </span>
-              <span className="tabular-nums">
-                {formatCurrency(taxAmount.toFixed(2))}
-              </span>
+            <div className="flex justify-between text-slate-500 dark:text-slate-400">
+              <span>IVA ({(taxRate * 100).toFixed(0)}%)</span>
+              <span className="font-mono font-semibold">{formatCurrency(taxAmount.toFixed(2))}</span>
             </div>
           </>
         )}
         <div
           className={cn(
-            'flex justify-between font-semibold',
-            canSeeBreakdown && 'border-t pt-2',
+            'flex justify-between text-sm font-bold text-slate-950 dark:text-white',
+            canSeeBreakdown && 'border-t border-slate-100 pt-2 dark:border-slate-850',
           )}
         >
           <span>Total a cobrar</span>
-          <span className="tabular-nums">
+          <span className="font-mono text-base font-black text-[#2F6BFF]">
             {formatCurrency(totalBruto.toFixed(2))}
           </span>
         </div>
         {canSeeBreakdown && chargesCommission && commissionAmount > 0 && (
           <>
-            <div className="flex justify-between text-xs text-muted-foreground">
+            <div className="flex justify-between text-[11px] text-slate-400">
               <span>Comisión ({(commissionRate * 100).toFixed(2)}%)</span>
-              <span className="tabular-nums">
-                −{formatCurrency(commissionAmount.toFixed(2))}
-              </span>
+              <span className="font-mono">−{formatCurrency(commissionAmount.toFixed(2))}</span>
             </div>
-            <div className="flex justify-between text-xs font-medium">
+            <div className="flex justify-between text-[11px] font-bold text-slate-600 dark:text-slate-300">
               <span>Neto para caja</span>
-              <span className="tabular-nums">
-                {formatCurrency(netAfterCommission.toFixed(2))}
-              </span>
+              <span className="font-mono">{formatCurrency(netAfterCommission.toFixed(2))}</span>
             </div>
           </>
         )}
       </div>
 
-      <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
-        <Button
+      <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-850">
+        <button
           type="button"
-          variant="outline"
           onClick={() => onCancel?.()}
           disabled={createMut.isPending}
+          className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:text-slate-300 dark:hover:bg-slate-900"
         >
           Cancelar
-        </Button>
-        <Button type="submit" disabled={!formValid || createMut.isPending}>
+        </button>
+        <button
+          type="submit"
+          disabled={!formValid || createMut.isPending}
+          className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#2F6BFF] px-5 py-2.5 text-xs font-bold text-white shadow-md transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+        >
           <Receipt className="h-4 w-4" />
           {createMut.isPending
-            ? 'Confirmando...'
+            ? 'Confirmando…'
             : currentWarehouse
               ? `Confirmar venta en ${currentWarehouse.name}`
               : 'Confirmar venta'}
-        </Button>
+        </button>
       </div>
 
       {prefillFromQuotation?.customerSnapshot && (
@@ -840,9 +842,9 @@ function FreeCustomerPrompt({
     snapshot.name || snapshot.taxId || snapshot.email || snapshot.phone;
   return (
     <div className="space-y-3">
-      <div className="rounded-md border border-amber-500/40 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-        Esta cotización fue creada con <strong>cliente libre</strong>.
-        Registrá al cliente en el catálogo para poder confirmar la venta.
+      <div className="rounded-2xl border border-amber-100 bg-amber-50/60 px-4 py-3 text-xs font-semibold text-amber-700 dark:border-amber-950/30 dark:bg-amber-950/10 dark:text-amber-400">
+        Esta cotización fue creada con <strong>cliente libre</strong>. Registrá
+        al cliente en el catálogo para poder confirmar la venta.
       </div>
 
       <div className="rounded-md border bg-muted/30 p-4">
@@ -865,9 +867,13 @@ function FreeCustomerPrompt({
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="button" onClick={onRegisterClick}>
+        <button
+          type="button"
+          onClick={onRegisterClick}
+          className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-[#2F6BFF] px-4 py-2.5 text-xs font-bold text-white shadow-md transition-all hover:opacity-90"
+        >
           Registrar y continuar
-        </Button>
+        </button>
         <Button
           type="button"
           variant="link"

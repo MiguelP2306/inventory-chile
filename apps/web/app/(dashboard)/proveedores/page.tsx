@@ -181,7 +181,7 @@ export default function ProveedoresPage() {
       {/* ============================================================
           SEARCH
           ============================================================ */}
-      <div className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-white p-3 shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+      <div className="flex max-w-[480px] items-center gap-3 rounded-2xl border border-slate-100 bg-white p-3 shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
         <Search className="ml-1 h-[18px] w-[18px] shrink-0 text-slate-400" />
         <input
           type="text"

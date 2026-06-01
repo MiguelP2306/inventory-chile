@@ -1,23 +1,26 @@
 'use client';
 
+/* ============================================================================
+ *  ReporteIvaPage — REESTILIZADO con el sistema visual del rediseño
+ *  (Inventario / Caja / Gastos). Solo UI/UX.
+ *
+ *  TODA LA LÓGICA SE CONSERVA 1:1 del original:
+ *   · useUrlFilters({ dateFrom, dateTo }) → query params persistentes.
+ *   · getIvaReport(params) + ivaReportCsvUrl(params) para el CSV.
+ *   · balance > 0 → "A pagar"; < 0 → "A favor".
+ *   · Tabs Ventas / Compras (ahora pills locales con useState).
+ * ========================================================================== */
+
 import { useQuery } from '@tanstack/react-query';
-import { Download } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Download, FileSpreadsheet, Receipt, ShoppingCart } from 'lucide-react';
+import { useState } from 'react';
 import { formatCurrency } from '@/lib/format';
 import { getIvaReport, ivaReportCsvUrl } from '@/lib/reports-api';
+import { cn } from '@/lib/utils';
 import { useUrlFilters } from '@/lib/use-url-filters';
+
+const FIELD =
+  'w-44 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-700 outline-none transition-all focus:border-[#2F6BFF] focus:ring-2 focus:ring-[#2F6BFF]/15 dark:border-slate-850 dark:bg-[#11151C] dark:text-white';
 
 export default function ReporteIvaPage() {
   const { values, setFilter } = useUrlFilters({ dateFrom: '', dateTo: '' });
@@ -38,245 +41,328 @@ export default function ReporteIvaPage() {
   // Balance > 0 → a pagar (débito > crédito). < 0 → a favor del contribuyente.
   const balanceN = data ? Number(data.balance) : 0;
 
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold">Reporte de IVA</h1>
-        <p className="text-sm text-muted-foreground">
-          IVA débito (ventas) vs. IVA crédito (compras). Las ventas
-          canceladas no se contabilizan.
-        </p>
-      </div>
+  const [tab, setTab] = useState<'ventas' | 'compras'>('ventas');
 
-      <div className="flex flex-col gap-3 rounded-md border bg-card p-4 md:flex-row md:items-end md:justify-between">
-        <div className="flex flex-col gap-3 md:flex-row md:items-end md:gap-4">
-          <div className="space-y-1">
-            <Label className="text-xs">Desde</Label>
-            <Input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setFilter('dateFrom', e.target.value || null)}
-              className="w-44"
-            />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Hasta</Label>
-            <Input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setFilter('dateTo', e.target.value || null)}
-              className="w-44"
-            />
-          </div>
+  return (
+    <div className="space-y-6 animate-in fade-in duration-200 text-slate-800 dark:text-slate-200">
+      {/* HEADER */}
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
+        <div>
+          <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">
+            Reporte de IVA
+          </h1>
+          <p className="mt-1 max-w-[70ch] text-xs font-medium leading-relaxed text-slate-500 dark:text-slate-400">
+            IVA débito (ventas) vs. IVA crédito (compras). Las ventas canceladas
+            no se contabilizan.
+          </p>
         </div>
+
         <a
           href={ivaReportCsvUrl(params)}
           target="_blank"
           rel="noopener noreferrer"
+          className="inline-flex shrink-0 cursor-pointer items-center gap-2 self-start rounded-2xl bg-[#2F6BFF] px-5 py-3 text-xs font-bold text-white shadow-md transition-colors hover:bg-[#2F6BFF]/90"
         >
-          <Button type="button">
-            <Download className="h-4 w-4" />
-            Descargar CSV
-          </Button>
+          <Download className="h-4 w-4" />
+          Descargar CSV
         </a>
       </div>
 
+      {/* FILTROS */}
+      <div className="flex flex-col gap-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm sm:flex-row sm:items-end sm:gap-4 dark:border-slate-850 dark:bg-[#11151C]">
+        <div className="space-y-1.5">
+          <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+            Desde
+          </label>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setFilter('dateFrom', e.target.value || null)}
+            className={FIELD}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+            Hasta
+          </label>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setFilter('dateTo', e.target.value || null)}
+            className={FIELD}
+          />
+        </div>
+        {(dateFrom || dateTo) && (
+          <button
+            type="button"
+            onClick={() => {
+              setFilter('dateFrom', null);
+              setFilter('dateTo', null);
+            }}
+            className="cursor-pointer rounded-xl px-3 py-2.5 text-xs font-bold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200 sm:ml-auto"
+          >
+            Limpiar
+          </button>
+        )}
+      </div>
+
+      {/* KPIs */}
       {data && (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-          <SummaryCard
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <KpiCard
+            icon={<Receipt className="h-3.5 w-3.5" />}
             label="IVA débito (ventas)"
             value={formatCurrency(data.debit)}
           />
-          <SummaryCard
+          <KpiCard
+            icon={<ShoppingCart className="h-3.5 w-3.5" />}
             label="IVA crédito (compras)"
             value={formatCurrency(data.credit)}
           />
-          <SummaryCard
+          <KpiCard
             label={balanceN >= 0 ? 'A pagar' : 'A favor'}
             value={formatCurrency(Math.abs(balanceN).toFixed(2))}
-            highlight
-            tone={balanceN >= 0 ? 'destructive' : 'positive'}
+            tone={balanceN >= 0 ? 'danger' : 'positive'}
           />
-          <SummaryCard
+          <KpiCard
+            icon={<FileSpreadsheet className="h-3.5 w-3.5" />}
             label="Documentos"
             value={`${data.salesRows.length} v / ${data.purchaseRows.length} c`}
           />
         </div>
       )}
 
-      <Tabs defaultValue="ventas">
-        <TabsList>
-          <TabsTrigger value="ventas">
-            Ventas ({data?.salesRows.length ?? 0})
-          </TabsTrigger>
-          <TabsTrigger value="compras">
-            Compras ({data?.purchaseRows.length ?? 0})
-          </TabsTrigger>
-        </TabsList>
+      {/* TABS */}
+      <div className="flex items-center gap-2">
+        <TabPill
+          active={tab === 'ventas'}
+          onClick={() => setTab('ventas')}
+          count={data?.salesRows.length ?? 0}
+        >
+          Ventas
+        </TabPill>
+        <TabPill
+          active={tab === 'compras'}
+          onClick={() => setTab('compras')}
+          count={data?.purchaseRows.length ?? 0}
+        >
+          Compras
+        </TabPill>
+      </div>
 
-        <TabsContent value="ventas" className="mt-4">
-          <div className="rounded-md border bg-card">
-            <Table stickyFirstColumn>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>N° venta</TableHead>
-                  <TableHead>Fecha</TableHead>
-                  <TableHead>Cliente</TableHead>
-                  <TableHead>RUT</TableHead>
-                  <TableHead className="text-right">Subtotal</TableHead>
-                  <TableHead className="text-right">IVA</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+      {/* TABLA */}
+      <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+        <div className="overflow-x-auto">
+          {tab === 'ventas' ? (
+            <table className="w-full min-w-[820px] border-collapse text-left text-[12px]">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50/50 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-800 dark:bg-slate-900/10 dark:text-slate-500">
+                  <th className="py-4 pl-6">N° venta</th>
+                  <th className="py-4">Fecha</th>
+                  <th className="py-4">Cliente</th>
+                  <th className="py-4">RUT</th>
+                  <th className="py-4 text-right">Subtotal</th>
+                  <th className="py-4 text-right">IVA</th>
+                  <th className="py-4 pr-6 text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
                 {report.isLoading && <SkeletonRows cols={7} />}
-                {!report.isLoading &&
-                  (data?.salesRows.length ?? 0) === 0 && (
-                    <TableRow>
-                      <TableCell
-                        colSpan={7}
-                        className="text-center text-muted-foreground py-8"
-                      >
-                        No hay ventas en el período.
-                      </TableCell>
-                    </TableRow>
-                  )}
+                {!report.isLoading && (data?.salesRows.length ?? 0) === 0 && (
+                  <EmptyRow cols={7} label="No hay ventas en el período." />
+                )}
                 {data?.salesRows.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell className="font-mono text-xs">
+                  <tr
+                    key={r.id}
+                    className="transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-800/10"
+                  >
+                    <td className="py-4 pl-6 font-mono text-[11.5px] font-bold text-slate-900 dark:text-white">
                       {r.number}
-                    </TableCell>
-                    <TableCell>
+                    </td>
+                    <td className="py-4 font-medium text-slate-500 dark:text-slate-400">
                       {new Date(r.date).toLocaleDateString('es-CL', {
                         dateStyle: 'medium',
                       })}
-                    </TableCell>
-                    <TableCell className="max-w-[200px] truncate">
+                    </td>
+                    <td className="max-w-[200px] truncate py-4 font-bold text-slate-800 dark:text-slate-100">
                       {r.customerName}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
+                    </td>
+                    <td className="py-4 font-mono text-[11px] text-slate-400 dark:text-slate-500">
                       {r.customerTaxId ?? '—'}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
+                    </td>
+                    <td className="py-4 text-right font-mono text-[12px] tabular-nums text-slate-500 dark:text-slate-400">
                       {formatCurrency(r.subtotal)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
+                    </td>
+                    <td className="py-4 text-right font-mono text-[12px] tabular-nums text-slate-500 dark:text-slate-400">
                       {formatCurrency(r.taxAmount)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums font-medium">
+                    </td>
+                    <td className="py-4 pr-6 text-right font-mono text-[13px] font-black tabular-nums text-slate-900 dark:text-white">
                       {formatCurrency(r.total)}
-                    </TableCell>
-                  </TableRow>
+                    </td>
+                  </tr>
                 ))}
-              </TableBody>
-            </Table>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="compras" className="mt-4">
-          <div className="rounded-md border bg-card">
-            <Table stickyFirstColumn>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Fecha</TableHead>
-                  <TableHead>Proveedor</TableHead>
-                  <TableHead>RUT</TableHead>
-                  <TableHead className="text-right">Subtotal</TableHead>
-                  <TableHead className="text-right">IVA</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+              </tbody>
+            </table>
+          ) : (
+            <table className="w-full min-w-[760px] border-collapse text-left text-[12px]">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50/50 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-800 dark:bg-slate-900/10 dark:text-slate-500">
+                  <th className="py-4 pl-6">Fecha</th>
+                  <th className="py-4">Proveedor</th>
+                  <th className="py-4">RUT</th>
+                  <th className="py-4 text-right">Subtotal</th>
+                  <th className="py-4 text-right">IVA</th>
+                  <th className="py-4 pr-6 text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
                 {report.isLoading && <SkeletonRows cols={6} />}
                 {!report.isLoading &&
                   (data?.purchaseRows.length ?? 0) === 0 && (
-                    <TableRow>
-                      <TableCell
-                        colSpan={6}
-                        className="text-center text-muted-foreground py-8"
-                      >
-                        No hay compras en el período.
-                      </TableCell>
-                    </TableRow>
+                    <EmptyRow cols={6} label="No hay compras en el período." />
                   )}
                 {data?.purchaseRows.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell>
+                  <tr
+                    key={r.id}
+                    className="transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-800/10"
+                  >
+                    <td className="py-4 pl-6 font-medium text-slate-500 dark:text-slate-400">
                       {new Date(r.date).toLocaleDateString('es-CL', {
                         dateStyle: 'medium',
                       })}
-                    </TableCell>
-                    <TableCell className="max-w-[200px] truncate">
+                    </td>
+                    <td className="max-w-[200px] truncate py-4 font-bold text-slate-800 dark:text-slate-100">
                       {r.supplierName}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
+                    </td>
+                    <td className="py-4 font-mono text-[11px] text-slate-400 dark:text-slate-500">
                       {r.supplierTaxId ?? '—'}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
+                    </td>
+                    <td className="py-4 text-right font-mono text-[12px] tabular-nums text-slate-500 dark:text-slate-400">
                       {formatCurrency(r.subtotal)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
+                    </td>
+                    <td className="py-4 text-right font-mono text-[12px] tabular-nums text-slate-500 dark:text-slate-400">
                       {formatCurrency(r.taxAmount)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums font-medium">
+                    </td>
+                    <td className="py-4 pr-6 text-right font-mono text-[13px] font-black tabular-nums text-slate-900 dark:text-white">
                       {formatCurrency(r.total)}
-                    </TableCell>
-                  </TableRow>
+                    </td>
+                  </tr>
                 ))}
-              </TableBody>
-            </Table>
-          </div>
-        </TabsContent>
-      </Tabs>
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
+/* ============================================================
+   HELPERS DE TABLA
+   ============================================================ */
 function SkeletonRows({ cols }: { cols: number }) {
   return (
     <>
-      {Array.from({ length: 4 }).map((_, i) => (
-        <TableRow key={i}>
-          <TableCell colSpan={cols}>
-            <Skeleton className="h-4 w-full" />
-          </TableCell>
-        </TableRow>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <tr key={i}>
+          <td colSpan={cols} className="px-6 py-5">
+            <div className="h-4 w-full animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+          </td>
+        </tr>
       ))}
     </>
   );
 }
 
-function SummaryCard({
+function EmptyRow({ cols, label }: { cols: number; label: string }) {
+  return (
+    <tr>
+      <td colSpan={cols}>
+        <div className="flex flex-col items-center justify-center gap-2 px-4 py-12 text-center">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-400 dark:bg-slate-800">
+            <Receipt className="h-5 w-5" />
+          </div>
+          <p className="text-sm font-bold text-slate-700 dark:text-slate-200">
+            {label}
+          </p>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+/* ============================================================
+   KPI CARD
+   ============================================================ */
+function KpiCard({
+  icon,
   label,
   value,
-  highlight,
-  tone,
+  tone = 'default',
 }: {
+  icon?: React.ReactNode;
   label: string;
   value: string;
-  highlight?: boolean;
-  tone?: 'destructive' | 'positive';
+  tone?: 'default' | 'danger' | 'positive';
 }) {
-  const toneClass =
-    tone === 'destructive'
-      ? 'text-destructive'
-      : tone === 'positive'
-        ? 'text-emerald-600 dark:text-emerald-400'
-        : '';
   return (
-    <div className="rounded-md border bg-card p-4">
-      <p className="text-xs uppercase tracking-wider text-muted-foreground">
+    <div className="select-none space-y-1.5 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+      <div className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+        {icon}
         {label}
-      </p>
-      <p
-        className={[
-          highlight ? 'mt-1 text-2xl font-semibold' : 'mt-1 text-xl font-semibold',
-          'tabular-nums',
-          toneClass,
-        ].join(' ')}
+      </div>
+      <div
+        className={cn(
+          'text-[22px] font-black tracking-tight tabular-nums',
+          tone === 'danger'
+            ? 'text-rose-500'
+            : tone === 'positive'
+              ? 'text-emerald-500'
+              : 'text-slate-900 dark:text-white',
+        )}
       >
         {value}
-      </p>
+      </div>
     </div>
+  );
+}
+
+/* ============================================================
+   TAB PILL
+   ============================================================ */
+function TabPill({
+  active,
+  onClick,
+  count,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  count: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'inline-flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2 text-[11.5px] font-bold transition-all',
+        active
+          ? 'bg-[#2F6BFF] text-white shadow-md'
+          : 'border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 dark:border-slate-850 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800',
+      )}
+    >
+      {children}
+      <span
+        className={cn(
+          'rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums',
+          active
+            ? 'bg-slate-800 text-white dark:bg-slate-300 dark:text-slate-900'
+            : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500',
+        )}
+      >
+        {count}
+      </span>
+    </button>
   );
 }

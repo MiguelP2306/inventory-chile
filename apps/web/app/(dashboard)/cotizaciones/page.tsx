@@ -1,35 +1,17 @@
 'use client';
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Eye, FileDown, Pencil, Plus } from 'lucide-react';
+import { Download, Eye, Pencil, Plus, Search } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { QuotationFormDialog } from '@/components/forms/quotation-form-dialog';
 import { QuotationStatusBadge } from '@/components/quotation-status-badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { apiAbsoluteUrl } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
 import { listQuotations } from '@/lib/quotations-api';
 import { clearProductBag, useProductBag } from '@/lib/use-product-bag';
+import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
 import type { QuotationStatusDto } from '@inventory/shared';
 
@@ -45,6 +27,19 @@ const STATUS_OPTIONS: { value: QuotationStatusDto; label: string }[] = [
   { value: 'EXPIRED', label: 'Vencida' },
 ];
 
+/**
+ * /cotizaciones — Rediseño UI (look Movimientos / Stock / Transferencias).
+ *
+ * SOLO UI/UX. La lógica es idéntica:
+ *  · useUrlFilters (status, q, dateFrom, dateTo, page) + debounce del search.
+ *  · listQuotations con filtros + paginación server-side.
+ *  · Export Excel respetando filtros.
+ *  · ?new=1 / ?fromBag=1 abren el modal con prefill del bolso.
+ *
+ * Cambios visuales: header font-black, search acotado con ícono, filtros
+ * redondeados, tabla en "sheet" rounded-3xl con filas clickeables, badges de
+ * estado y footer de paginación. Acento azul #2F6BFF.
+ */
 export default function CotizacionesPage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -71,10 +66,7 @@ export default function CotizacionesPage() {
     status !== ALL || dateFrom !== '' || dateTo !== '' || search.value !== '';
 
   const list = useQuery({
-    queryKey: [
-      'quotations',
-      { status, q: debouncedQ, dateFrom, dateTo, page },
-    ],
+    queryKey: ['quotations', { status, q: debouncedQ, dateFrom, dateTo, page }],
     queryFn: () =>
       listQuotations({
         status: status === ALL ? undefined : (status as QuotationStatusDto),
@@ -112,218 +104,241 @@ export default function CotizacionesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
+  const fieldCls =
+    'w-full text-xs font-semibold px-3 py-3 bg-white dark:bg-[#11151C] text-slate-700 dark:text-white border border-slate-200 dark:border-slate-850 rounded-2xl focus:outline-none focus:border-[#2F6BFF] transition-all';
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold">Cotizaciones</h1>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button asChild variant="outline" size="sm">
-            <a
-              href={apiAbsoluteUrl(
-                `quotations/export.xlsx${buildQuotationsExportQuery({
-                  status: status === ALL ? undefined : status,
-                  q: debouncedQ || undefined,
-                  dateFrom: dateFrom || undefined,
-                  dateTo: dateTo || undefined,
-                })}`,
-              )}
-              target="_blank"
-              rel="noopener noreferrer"
+    <div className="space-y-6 animate-in fade-in duration-200">
+      {/* ============================================================
+          HEADER
+          ============================================================ */}
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">
+          Cotizaciones
+        </h1>
+        <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
+          {filtersActive && (
+            <button
+              onClick={clear}
+              className="cursor-pointer rounded-xl px-3 py-2 text-xs font-bold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
             >
-              <FileDown className="h-4 w-4" />
-              Exportar Excel
-            </a>
-          </Button>
-          <Button onClick={() => setDialogOpen(true)}>
+              Limpiar filtros
+            </button>
+          )}
+          <a
+            href={apiAbsoluteUrl(
+              `quotations/export.xlsx${buildQuotationsExportQuery({
+                status: status === ALL ? undefined : status,
+                q: debouncedQ || undefined,
+                dateFrom: dateFrom || undefined,
+                dateTo: dateTo || undefined,
+              })}`,
+            )}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-850 dark:bg-[#11151C] dark:text-slate-300 dark:hover:bg-slate-900"
+          >
+            <Download className="h-4 w-4 text-slate-400" />
+            <span>Exportar Excel</span>
+          </a>
+          <button
+            onClick={() => setDialogOpen(true)}
+            className="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-2xl bg-[#2F6BFF] px-5 py-3 text-xs font-bold text-white shadow-md transition-colors hover:bg-[#2F6BFF]/90"
+          >
             <Plus className="h-4 w-4" />
-            Nueva cotización
-          </Button>
+            <span>Nueva cotización</span>
+          </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
-        <Input
-          placeholder="Buscar (número, cliente, RUT)"
-          value={search.value}
-          onChange={(e) => search.setValue(e.target.value)}
-          className="md:col-span-2"
-        />
-        <Select
+      {/* ============================================================
+          FILTROS
+          ============================================================ */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={search.value}
+            onChange={(e) => search.setValue(e.target.value)}
+            placeholder="Buscar nº, cliente, RUT…"
+            className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-xs font-medium text-slate-700 transition-all placeholder:text-slate-400 focus:border-[#2F6BFF] focus:outline-none dark:border-slate-850 dark:bg-[#11151C] dark:text-white"
+          />
+        </div>
+        <select
           value={status}
-          onValueChange={(v) => {
-            setFilter('status', v === ALL ? null : v);
+          onChange={(e) => {
+            setFilter('status', e.target.value === ALL ? null : e.target.value);
             setFilter('page', null);
           }}
+          className={fieldCls}
         >
-          <SelectTrigger>
-            <SelectValue placeholder="Estado" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Todos los estados</SelectItem>
-            {STATUS_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Input
+          <option value={ALL}>Todos los estados</option>
+          {STATUS_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <input
           type="date"
           value={dateFrom}
           onChange={(e) => {
             setFilter('dateFrom', e.target.value || null);
             setFilter('page', null);
           }}
+          className={fieldCls}
         />
-        <Input
+        <input
           type="date"
           value={dateTo}
           onChange={(e) => {
             setFilter('dateTo', e.target.value || null);
             setFilter('page', null);
           }}
+          className={fieldCls}
         />
-        {filtersActive && (
-          <Button variant="ghost" size="sm" onClick={clear}>
-            Limpiar filtros
-          </Button>
-        )}
       </div>
 
-      <div className="rounded-md border bg-card">
-        <Table stickyFirstColumn>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Número</TableHead>
-              <TableHead>Fecha</TableHead>
-              <TableHead>Cliente</TableHead>
-              <TableHead className="text-right">Items</TableHead>
-              <TableHead className="text-right">Total</TableHead>
-              <TableHead>Estado</TableHead>
-              <TableHead>Vence</TableHead>
-              <TableHead className="w-[100px]" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {list.isLoading && (
-              <>
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <TableRow key={i}>
-                    <TableCell colSpan={8}>
-                      <Skeleton className="h-4 w-full" />
-                    </TableCell>
-                  </TableRow>
+      {/* ============================================================
+          TABLA
+          ============================================================ */}
+      <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[860px] border-collapse text-left text-[12px]">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/50 font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-800 dark:bg-slate-900/10 dark:text-slate-500">
+                <th className="py-4 pl-6">Número</th>
+                <th className="py-4">Fecha</th>
+                <th className="py-4">Cliente</th>
+                <th className="py-4 text-right">Items</th>
+                <th className="py-4 text-right">Total</th>
+                <th className="py-4 pl-8">Estado</th>
+                <th className="py-4">Vence</th>
+                <th className="w-[90px] py-4 pr-6 text-right" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+              {list.isLoading &&
+                Array.from({ length: 6 }).map((_, i) => (
+                  <tr key={i}>
+                    <td colSpan={8} className="px-6 py-5">
+                      <div className="h-4 w-full animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+                    </td>
+                  </tr>
                 ))}
-              </>
-            )}
-            {!list.isLoading && items.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground">
-                  Sin cotizaciones.
-                </TableCell>
-              </TableRow>
-            )}
-            {items.map((q) => {
-              const editable =
-                q.status !== 'CONVERTED' && q.status !== 'EXPIRED';
-              const customerLabel = q.customerView.name?.trim() || 'Sin cliente';
-              return (
-                <TableRow key={q.id}>
-                  <TableCell className="font-mono text-xs">
-                    <Link
-                      href={`/cotizaciones/${q.id}`}
-                      className="hover:underline"
-                    >
-                      {q.number}
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    {new Date(q.date).toLocaleDateString('es-CL', {
-                      dateStyle: 'short',
-                    })}
-                  </TableCell>
-                  <TableCell
-                    className={
-                      'max-w-[260px] truncate' +
-                      (q.customerView.name ? '' : ' text-muted-foreground italic')
-                    }
+
+              {!list.isLoading && items.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="py-12 text-center font-bold text-slate-400">
+                    Ninguna cotización coincide con la búsqueda o filtros.
+                  </td>
+                </tr>
+              )}
+
+              {items.map((q) => {
+                const editable = q.status !== 'CONVERTED' && q.status !== 'EXPIRED';
+                const hasCustomer = !!q.customerView.name?.trim();
+                const customerLabel = q.customerView.name?.trim() || 'Sin cliente';
+                return (
+                  <tr
+                    key={q.id}
+                    onClick={() => {
+                      window.location.href = `/cotizaciones/${q.id}`;
+                    }}
+                    className="group cursor-pointer transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-800/10"
                   >
-                    {customerLabel}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {q.items?.length ?? 0}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums font-medium">
-                    {formatCurrency(q.total)}
-                  </TableCell>
-                  <TableCell>
-                    <QuotationStatusBadge status={q.status} />
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {q.validUntil
-                      ? new Date(q.validUntil).toLocaleDateString('es-CL', {
-                          dateStyle: 'short',
-                        })
-                      : '—'}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
-                      <Button
-                        asChild
-                        variant="ghost"
-                        size="icon"
-                        title="Ver detalle"
+                    <td className="py-5 pl-6 font-mono font-bold text-slate-900 dark:text-white">
+                      <Link
+                        href={`/cotizaciones/${q.id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="hover:underline"
                       >
-                        <Link href={`/cotizaciones/${q.id}`}>
-                          <Eye className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                      {editable && (
-                        <Button
-                          asChild
-                          variant="ghost"
-                          size="icon"
-                          title="Editar"
+                        {q.number}
+                      </Link>
+                    </td>
+                    <td className="py-5 font-medium text-slate-500 dark:text-slate-400">
+                      {new Date(q.date).toLocaleDateString('es-CL', { dateStyle: 'short' })}
+                    </td>
+                    <td className="max-w-[240px] truncate py-5">
+                      <span
+                        className={
+                          hasCustomer
+                            ? 'font-bold text-slate-950 dark:text-white'
+                            : 'font-medium italic text-slate-400'
+                        }
+                      >
+                        {customerLabel}
+                      </span>
+                    </td>
+                    <td className="py-5 text-right font-mono font-semibold text-slate-600 dark:text-slate-400">
+                      {q.items?.length ?? 0}
+                    </td>
+                    <td className="py-5 text-right font-mono text-[13px] font-black text-slate-900 dark:text-white">
+                      {formatCurrency(q.total)}
+                    </td>
+                    <td className="py-5 pl-8">
+                      <QuotationStatusBadge status={q.status} />
+                    </td>
+                    <td className="py-5 font-medium text-slate-500 dark:text-slate-400">
+                      {q.validUntil
+                        ? new Date(q.validUntil).toLocaleDateString('es-CL', { dateStyle: 'short' })
+                        : <span className="text-slate-300 dark:text-slate-600">—</span>}
+                    </td>
+                    <td className="py-5 pr-6 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Link
+                          href={`/cotizaciones/${q.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          title="Ver detalle"
+                          className="inline-flex items-center justify-center p-2 text-slate-400 transition-colors hover:text-slate-600 dark:hover:text-white"
                         >
-                          <Link href={`/cotizaciones/${q.id}?edit=1`}>
-                            <Pencil className="h-4 w-4" />
+                          <Eye className="h-[18px] w-[18px]" />
+                        </Link>
+                        {editable && (
+                          <Link
+                            href={`/cotizaciones/${q.id}?edit=1`}
+                            onClick={(e) => e.stopPropagation()}
+                            title="Editar"
+                            className="inline-flex items-center justify-center p-2 text-slate-400 transition-colors hover:text-[#2F6BFF]"
+                          >
+                            <Pencil className="h-[17px] w-[17px]" />
                           </Link>
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <span>
+      {/* ============================================================
+          PAGINACIÓN
+          ============================================================ */}
+      <div className="flex items-center justify-between text-xs font-medium text-slate-400 dark:text-slate-500">
+        <div>
           {total} cotización{total === 1 ? '' : 'es'}
           {total > 0 ? ` · página ${page} de ${totalPages}` : ''}
-        </span>
+        </div>
         {total > 0 && (
           <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
+            <button
               onClick={() => setFilter('page', String(Math.max(1, page - 1)))}
               disabled={page === 1}
+              className="cursor-pointer rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2 font-bold text-slate-700 transition-all hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:text-slate-300 dark:hover:bg-slate-900"
             >
               Anterior
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                setFilter('page', String(Math.min(totalPages, page + 1)))
-              }
+            </button>
+            <button
+              onClick={() => setFilter('page', String(Math.min(totalPages, page + 1)))}
               disabled={page >= totalPages}
+              className="cursor-pointer rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2 font-bold text-slate-700 transition-all hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:text-slate-300 dark:hover:bg-slate-900"
             >
               Siguiente
-            </Button>
+            </button>
           </div>
         )}
       </div>

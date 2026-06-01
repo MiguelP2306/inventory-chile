@@ -25,14 +25,6 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { ProductThumbnail } from '@/components/product-thumbnail';
-import { Button } from '@/components/ui/button';
-import {
-  SoftModal,
-  softInputClass,
-  softLabelClass,
-  softPrimaryButtonClass,
-  softSecondaryButtonClass,
-} from '@/components/ui/soft-modal';
 import {
   Select,
   SelectContent,
@@ -40,7 +32,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Skeleton } from '@/components/ui/skeleton';
 import {
   apiErrorMessage,
   bulkUpdateProductCategory,
@@ -61,25 +52,23 @@ import type { CategoryDto } from '@inventory/shared';
 const PAGE_SIZE = 50;
 
 /**
- * Detalle de categoría — diseño C1 unificado.
+ * /categorias/[id] — Rediseño UI (look de CategoriasView · vista detalle).
  *
- * Preserva 1:1 toda la lógica de Ronda 7 + Ronda 10:
- *  · `bulkUpdateProductCategory({ productIds, categoryId })` para Desvincular / Mover.
- *  · CRUD de subcategorías (createCategory con parentId, updateCategory, deleteCategory).
- *  · Filtros URL + debounce + paginación.
+ * SOLO UI/UX. Toda la lógica se preserva 1:1 desde page-c3aa73b0:
+ *  · useUrlFilters({ q, page }) + useDebouncedUrlFilter para el search.
+ *  · categoriesQ / categoryDetailQ (stats rolled-up) / productsQ / subcategoriesQ.
+ *  · bulkUpdateProductCategory({ productIds, categoryId }) → Desvincular / Mover.
+ *  · CRUD de subcategorías (createCategory con parentId / updateCategory / deleteCategory).
+ *  · Edición / eliminación de la categoría actual.
+ *  · Selección de productos en memoria + paginación.
  *
- * La UI cambia a:
- *  · Header con back + breadcrumb + acciones (editar nombre / eliminar).
- *  · 4 stat cards: total productos · valor inventario · sin stock · margen.
- *  · Sección Subcategorías + Top productos lado a lado.
- *  · Tabla de productos refinada con bulk actions inline.
- *
- * Ronda 11 — datos:
- *  · `listCategories({ withStats: true })` provee productCount + 4 stats
- *    DIRECTOS por categoría (fallback rápido mientras carga el detalle).
- *  · `getCategory(id, { withStats: true })` provee los stats ROLLED-UP
- *    (categoría + sus subcategorías) + topProducts del mes en curso.
- *  · Cuando llega el detalle, sus valores override los del listado.
+ * Cambios visuales (sistema compartido con Almacenes / Movimientos):
+ *  · Back link + header font-black con stats y acento rojo "requieren reposición".
+ *  · 4 stat cards rounded-2xl con icono, valor grande y subtexto.
+ *  · Subcategorías + Top productos lado a lado en sheets rounded-3xl.
+ *  · Tabla de productos con checkbox custom y barra flotante de bulk actions.
+ *  · Modales crear/editar custom con overlay blur (reemplazan <SoftModal>).
+ *  · <ConfirmDialog> y <Select> (destino de mover) se conservan tal cual.
  */
 
 type CategoryWithStats = CategoryDto & {
@@ -135,8 +124,7 @@ export default function CategoriaDetailPage() {
     queryFn: () => getCategory(id, { withStats: true }),
     enabled: !!id,
   });
-  const categoryFromList =
-    allCategories.find((c) => c.id === id) ?? null;
+  const categoryFromList = allCategories.find((c) => c.id === id) ?? null;
   const category: CategoryWithStats | null =
     (categoryDetailQ.data as CategoryWithStats | undefined) ?? categoryFromList;
 
@@ -196,11 +184,10 @@ export default function CategoriaDetailPage() {
       );
       setSelected(new Set());
     },
-    onError: (err) =>
-      toast.error(apiErrorMessage(err, 'No se pudo actualizar')),
+    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo actualizar')),
   });
 
-  // ---------- Ronda 10 — Subcategorías ----------
+  // ---------- Subcategorías ----------
   const isRoot = category?.parentId == null;
 
   const subcategoriesQ = useQuery({
@@ -213,9 +200,7 @@ export default function CategoriaDetailPage() {
   const [subDialogOpen, setSubDialogOpen] = useState(false);
   const [subEditing, setSubEditing] = useState<CategoryDto | null>(null);
   const [subName, setSubName] = useState('');
-  const [subDeleteTarget, setSubDeleteTarget] = useState<CategoryDto | null>(
-    null,
-  );
+  const [subDeleteTarget, setSubDeleteTarget] = useState<CategoryDto | null>(null);
 
   function startCreateSub() {
     setSubEditing(null);
@@ -244,8 +229,7 @@ export default function CategoriaDetailPage() {
       toast.success('Subcategoría actualizada');
       setSubDialogOpen(false);
     },
-    onError: (err) =>
-      toast.error(apiErrorMessage(err, 'No se pudo actualizar')),
+    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo actualizar')),
   });
   const deleteSubMut = useMutation({
     mutationFn: (cid: string) => deleteCategory(cid),
@@ -265,8 +249,7 @@ export default function CategoriaDetailPage() {
       toast.success('Categoría actualizada');
       setEditOpen(false);
     },
-    onError: (err) =>
-      toast.error(apiErrorMessage(err, 'No se pudo actualizar')),
+    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo actualizar')),
   });
   const deleteCatMut = useMutation({
     mutationFn: () => deleteCategory(id),
@@ -283,7 +266,7 @@ export default function CategoriaDetailPage() {
     setEditOpen(true);
   }
 
-  // Stats opcionales (ver TODO al final)
+  // Stats opcionales
   const inventoryValue =
     category?.inventoryValue != null ? Number(category.inventoryValue) : null;
   const outOfStock = category?.outOfStockCount ?? null;
@@ -291,108 +274,108 @@ export default function CategoriaDetailPage() {
   const avgMargin = category?.avgMarginPct ?? null;
   const topProducts = category?.topProducts ?? null;
 
+  const reposicion = (outOfStock ?? 0) + (lowStock ?? 0);
+  const subSaving = createSubMut.isPending || updateSubMut.isPending;
+
   return (
-    <div className="flex flex-col gap-5">
+    <div className="space-y-6 animate-in fade-in duration-200">
       {/* ============================================================
-          HEADER — back + breadcrumb + title + actions
+          BACK LINK
           ============================================================ */}
       <Link
         href="/categorias"
-        className="inline-flex h-8 w-fit items-center gap-1.5 rounded-md px-2 text-[12.5px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+        className="group inline-flex w-fit items-center gap-2 text-xs font-bold text-slate-500 transition-colors hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"
       >
-        <ArrowLeft className="h-3.5 w-3.5" />
-        Volver a categorías
+        <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" />
+        <span>Volver a categorías</span>
       </Link>
 
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      {/* ============================================================
+          HEADER — breadcrumb + title + stats + acciones
+          ============================================================ */}
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
         <div className="min-w-0">
           {category?.parentName && (
             <Link
               href="/categorias"
-              className="inline-flex items-center gap-1 text-[13px] font-medium text-muted-foreground hover:text-foreground"
+              className="inline-flex items-center gap-1 text-[12px] font-bold text-slate-400 transition-colors hover:text-slate-700 dark:hover:text-slate-200"
             >
               {category.parentName}
               <ChevronRight className="h-3 w-3 opacity-60" />
             </Link>
           )}
-          <h1 className="mt-0.5 text-2xl font-semibold tracking-tight">
+          <h1 className="mt-0.5 text-xl font-black uppercase tracking-tight text-slate-900 dark:text-white sm:text-2xl">
             {category?.name ?? 'Categoría'}
           </h1>
-          <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs font-bold text-slate-500">
             <span>
-              <strong className="font-medium tabular-nums text-foreground">
+              <strong className="font-extrabold tabular-nums text-slate-700 dark:text-slate-200">
                 {total}
               </strong>{' '}
               {total === 1 ? 'producto asociado' : 'productos asociados'}
             </span>
             {isRoot && subcategories.length > 0 && (
               <>
-                <span className="h-1 w-1 rounded-full bg-muted-foreground/40" />
+                <span className="h-1 w-1 rounded-full bg-slate-300 dark:bg-slate-700" />
                 <span>
-                  <strong className="font-medium tabular-nums text-foreground">
+                  <strong className="font-extrabold tabular-nums text-slate-700 dark:text-slate-200">
                     {subcategories.length}
                   </strong>{' '}
-                  {subcategories.length === 1
-                    ? 'subcategoría'
-                    : 'subcategorías'}
+                  {subcategories.length === 1 ? 'subcategoría' : 'subcategorías'}
                 </span>
               </>
             )}
-            {(outOfStock ?? 0) + (lowStock ?? 0) > 0 && (
+            {reposicion > 0 && (
               <>
-                <span className="h-1 w-1 rounded-full bg-muted-foreground/40" />
-                <span className="font-medium text-rose-600 dark:text-rose-400">
-                  {(outOfStock ?? 0) + (lowStock ?? 0)} requieren reposición
+                <span className="h-1 w-1 rounded-full bg-slate-300 dark:bg-slate-700" />
+                <span className="inline-flex items-center gap-1.5 font-extrabold text-[#E03131] dark:text-rose-400">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#E03131]" />
+                  {reposicion} requieren reposición
                 </span>
               </>
             )}
-          </p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
+
+        <div className="flex shrink-0 items-center gap-2">
+          <button
             type="button"
-            variant="outline"
-            size="sm"
             onClick={startEditCategory}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-sm transition-all hover:bg-slate-50 active:scale-95 dark:border-slate-800 dark:bg-transparent dark:text-slate-300 dark:hover:bg-slate-900"
           >
-            <Pencil className="h-3.5 w-3.5" />
-            Editar nombre
-          </Button>
-          <Button
+            <Pencil className="h-3.5 w-3.5 text-slate-400" />
+            <span>Editar nombre</span>
+          </button>
+          <button
             type="button"
-            variant="outline"
-            size="sm"
-            className="border-destructive/40 text-destructive hover:bg-destructive/10"
             onClick={() => setDeleteOpen(true)}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-rose-200 bg-white px-3 py-2 text-xs font-bold text-[#E03131] shadow-sm transition-all hover:bg-rose-50 active:scale-95 dark:border-rose-950/30 dark:bg-transparent dark:hover:bg-rose-950/15"
           >
             <Trash2 className="h-3.5 w-3.5" />
-            Eliminar
-          </Button>
+            <span>Eliminar</span>
+          </button>
         </div>
       </div>
 
       {/* ============================================================
           STATS — 4 cards
           ============================================================ */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
-          icon={<Package className="h-3 w-3" />}
+          icon={<Package className="h-3.5 w-3.5" />}
           label="Total productos"
           value={String(total)}
           sub="incluye subcategorías"
         />
         <StatCard
-          icon={<Wallet className="h-3 w-3" />}
+          icon={<Wallet className="h-3.5 w-3.5" />}
           label="Valor inventario"
-          value={
-            inventoryValue != null
-              ? formatCurrency(String(inventoryValue))
-              : '—'
-          }
+          value={inventoryValue != null ? formatCurrency(String(inventoryValue)) : '—'}
+          valueMono
           sub={inventoryValue != null ? 'stock × costo unitario' : 'sin datos'}
         />
         <StatCard
-          icon={<AlertTriangle className="h-3 w-3" />}
+          icon={<AlertTriangle className="h-3.5 w-3.5 text-[#E03131]" />}
           label="Sin stock"
           value={outOfStock != null ? String(outOfStock) : '—'}
           valueTone={outOfStock && outOfStock > 0 ? 'alert' : undefined}
@@ -406,9 +389,10 @@ export default function CategoriaDetailPage() {
           subTone={lowStock && lowStock > 0 ? 'alert' : undefined}
         />
         <StatCard
-          icon={<TrendingUp className="h-3 w-3" />}
+          icon={<TrendingUp className="h-3.5 w-3.5 text-emerald-500" />}
           label="Margen promedio"
           value={avgMargin != null ? `${avgMargin}%` : '—'}
+          valueMono
           valueTone={avgMargin != null && avgMargin > 0 ? 'success' : undefined}
           sub={avgMargin != null ? 'precio venta vs costo' : 'sin datos'}
         />
@@ -420,54 +404,67 @@ export default function CategoriaDetailPage() {
       {(isRoot || (topProducts && topProducts.length > 0)) && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[2fr_1fr]">
           {isRoot && (
-            <div className="rounded-2xl border bg-card shadow-sm">
-              <div className="flex items-start justify-between gap-3 border-b p-4">
+            <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+              <div className="flex items-start justify-between gap-3 border-b border-slate-100 bg-slate-50/50 p-5 dark:border-slate-800 dark:bg-slate-900/10">
                 <div className="min-w-0">
-                  <h3 className="text-[14px] font-semibold tracking-tight">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
                     Subcategorías
                   </h3>
-                  <p className="mt-1 max-w-prose text-[11.5px] leading-relaxed text-muted-foreground">
-                    Ej: "Lubricantes sintéticos" dentro de "Lubricantes". Los
-                    productos pueden asociarse directamente a la subcategoría;
-                    al filtrar por esta categoría también se incluyen los
-                    productos de sus subcategorías.
+                  <p className="mt-1.5 max-w-prose text-[11.5px] font-medium leading-relaxed text-slate-400">
+                    Ej: «Lubricantes sintéticos» dentro de «Lubricantes». Los productos
+                    pueden asociarse directamente a la subcategoría; al filtrar por esta
+                    categoría también se incluyen los de sus subcategorías.
                   </p>
                 </div>
-                <Button size="sm" variant="brand" onClick={startCreateSub}>
+                <button
+                  type="button"
+                  onClick={startCreateSub}
+                  className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl bg-[#2F6BFF] px-3 py-2 text-[11px] font-bold text-white shadow-sm transition-colors hover:bg-[#2F6BFF]/90"
+                >
                   <Plus className="h-3.5 w-3.5" />
-                  Nueva subcategoría
-                </Button>
+                  <span>Nueva subcategoría</span>
+                </button>
               </div>
-              <div className="px-2 py-2">
+
+              <div className="p-3">
                 {subcategoriesQ.isLoading && (
-                  <div className="space-y-2 px-2 py-2">
+                  <div className="space-y-2 p-1">
                     {[0, 1, 2].map((i) => (
-                      <Skeleton key={i} className="h-9 w-full" />
+                      <div
+                        key={i}
+                        className="h-10 w-full animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800"
+                      />
                     ))}
                   </div>
                 )}
+
                 {!subcategoriesQ.isLoading && subcategories.length === 0 && (
-                  <div className="px-3 py-6 text-center text-xs italic text-muted-foreground">
-                    Sin subcategorías. Usá «Nueva subcategoría» para crear la
-                    primera.
+                  <div className="rounded-2xl border border-dashed border-slate-200 px-3 py-8 text-center dark:border-slate-800">
+                    <p className="text-xs font-medium italic text-slate-400">
+                      Sin subcategorías. Usá «Nueva subcategoría» para crear la primera.
+                    </p>
                   </div>
                 )}
-                <div className="flex flex-col">
+
+                <div className="flex flex-col gap-0.5">
                   {subcategories.map((s) => (
                     <div
                       key={s.id}
-                      className="group grid grid-cols-[1fr_auto_auto] items-center gap-3 rounded-md px-3 py-2.5 text-sm hover:bg-accent/40"
+                      className="group grid grid-cols-[1fr_auto_auto] items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/30"
                     >
                       <Link
                         href={`/categorias/${s.id}`}
-                        className="min-w-0 font-medium underline-offset-2 hover:underline"
+                        className="inline-flex min-w-0 items-center gap-2 self-start"
                       >
-                        {s.name}
+                        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[#2F6BFF] opacity-70 dark:text-blue-400" />
+                        <span className="truncate text-[12.5px] font-bold text-slate-700 transition-colors hover:text-[#2F6BFF] dark:text-slate-200">
+                          {s.name}
+                        </span>
                       </Link>
-                      <span className="font-mono text-[11.5px] text-muted-foreground">
+                      <span className="whitespace-nowrap font-mono text-[11px] font-semibold text-slate-400">
                         {s.productCount != null ? (
                           <>
-                            <strong className="font-semibold text-foreground">
+                            <strong className="font-bold text-slate-600 dark:text-slate-300">
                               {s.productCount}
                             </strong>{' '}
                             productos
@@ -476,20 +473,20 @@ export default function CategoriaDetailPage() {
                           '—'
                         )}
                       </span>
-                      <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                      <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
                         <button
                           type="button"
                           onClick={() => startEditSub(s)}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                           aria-label="Editar"
+                          className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white hover:text-slate-700 dark:hover:bg-slate-900 dark:hover:text-slate-200"
                         >
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
                         <button
                           type="button"
                           onClick={() => setSubDeleteTarget(s)}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                           aria-label="Eliminar"
+                          className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-rose-50 hover:text-[#E03131] dark:hover:bg-rose-950/20"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -497,11 +494,12 @@ export default function CategoriaDetailPage() {
                     </div>
                   ))}
                 </div>
+
                 {!subcategoriesQ.isLoading && subcategories.length > 0 && (
                   <button
                     type="button"
                     onClick={startCreateSub}
-                    className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed py-2 text-xs font-medium text-muted-foreground hover:border-solid hover:bg-accent hover:text-foreground"
+                    className="mt-2 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-dashed border-slate-200 py-2.5 text-xs font-bold text-slate-400 transition-all hover:border-solid hover:border-[#2F6BFF]/40 hover:bg-[#2F6BFF]/5 hover:text-[#2F6BFF] dark:border-slate-800"
                   >
                     <Plus className="h-3.5 w-3.5" />
                     Agregar subcategoría
@@ -512,46 +510,46 @@ export default function CategoriaDetailPage() {
           )}
 
           {topProducts && topProducts.length > 0 && (
-            <div className="rounded-2xl border bg-card shadow-sm">
-              <div className="flex items-start justify-between gap-3 border-b p-4">
+            <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+              <div className="flex items-start justify-between gap-3 border-b border-slate-100 bg-slate-50/50 p-5 dark:border-slate-800 dark:bg-slate-900/10">
                 <div className="min-w-0">
-                  <h3 className="text-[14px] font-semibold tracking-tight">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
                     Top productos
                   </h3>
-                  <p className="mt-1 text-[11.5px] text-muted-foreground">
-                    SKUs que más vendieron en esta categoría este mes.
+                  <p className="mt-1.5 text-[11.5px] font-medium text-slate-400">
+                    SKUs que más vendieron este mes.
                   </p>
                 </div>
                 <Link
                   href={`/reportes/ventas?categoryId=${id}`}
-                  className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-400 transition-colors hover:bg-white hover:text-slate-700 dark:hover:bg-slate-900 dark:hover:text-slate-200"
                 >
                   Ver todos
                   <ExternalLink className="h-3 w-3" />
                 </Link>
               </div>
-              <div className="flex flex-col gap-2 p-3">
+              <div className="flex flex-col gap-1 p-3">
                 {topProducts.slice(0, 3).map((p) => (
                   <Link
                     key={p.id}
                     href={`/productos/${p.id}`}
-                    className="-mx-1 grid grid-cols-[36px_1fr_auto] items-center gap-3 rounded-md px-1 py-2 text-[12.5px] transition-colors hover:bg-accent/40"
+                    className="grid grid-cols-[40px_1fr_auto] items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/30"
                   >
                     <ProductThumbnail
                       src={p.coverUrl ? publicImageUrl(p.coverUrl) : null}
-                      size={36}
+                      size={40}
                     />
                     <div className="min-w-0">
-                      <span className="block truncate text-[13px] font-medium">
+                      <span className="block truncate text-[12.5px] font-bold text-slate-800 dark:text-white">
                         {p.name}
                       </span>
-                      <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <div className="mt-0.5 flex items-center gap-1.5 text-[11px] font-medium text-slate-400">
                         <span className="font-mono">{p.sku}</span>
                         <span>·</span>
                         <span className="font-mono">{p.units} u.</span>
                       </div>
                     </div>
-                    <span className="font-mono text-[12px] font-semibold tabular-nums">
+                    <span className="whitespace-nowrap font-mono text-[12px] font-black tabular-nums text-slate-900 dark:text-white">
                       {formatCurrency(String(p.amount))}
                     </span>
                   </Link>
@@ -563,66 +561,252 @@ export default function CategoriaDetailPage() {
       )}
 
       {/* ============================================================
-          DIALOG — crear / editar subcategoría
+          PRODUCTS TOOLBAR
           ============================================================ */}
-      <SoftModal
-        open={subDialogOpen}
-        onOpenChange={setSubDialogOpen}
-        title={
-          subEditing
-            ? `Editar "${subEditing.name}"`
-            : `Nueva subcategoría de ${category?.name ?? '—'}`
-        }
-        subtitle={
-          subEditing
-            ? 'Actualizá el nombre de la subcategoría'
-            : 'Agregá una subcategoría para organizar mejor los productos'
-        }
-      >
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!subName.trim()) return;
-            if (subEditing) updateSubMut.mutate();
-            else createSubMut.mutate();
-          }}
-          className="space-y-4 p-5"
-        >
-          <div className="space-y-1">
-            <label htmlFor="sub-name" className={softLabelClass}>
-              Nombre
-            </label>
-            <input
-              id="sub-name"
-              autoFocus
-              value={subName}
-              onChange={(e) => setSubName(e.target.value)}
-              placeholder="ej: Lubricantes sintéticos"
-              className={softInputClass}
-            />
-          </div>
-          <div className="flex items-center justify-end gap-2 pt-1">
+      <div className="flex flex-wrap items-center gap-3 pt-1">
+        <div className="relative max-w-md flex-1">
+          <Search className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400 dark:text-slate-500" />
+          <input
+            type="text"
+            value={search.value}
+            onChange={(e) => search.setValue(e.target.value)}
+            placeholder="Buscar por SKU o nombre…"
+            className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-10 text-xs font-semibold text-slate-800 shadow-sm outline-none transition-all placeholder:font-medium placeholder:text-slate-400 focus:border-[#2F6BFF] focus:ring-2 focus:ring-[#2F6BFF]/10 dark:border-slate-800 dark:bg-[#11151C] dark:text-slate-200"
+          />
+          {search.value && (
             <button
               type="button"
-              onClick={() => setSubDialogOpen(false)}
-              className={softSecondaryButtonClass}
+              onClick={() => search.setValue('')}
+              className="absolute right-3.5 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800"
+              aria-label="Limpiar"
             >
-              Cancelar
+              <X className="h-3.5 w-3.5" />
             </button>
-            <button
-              type="submit"
-              disabled={
-                !subName.trim() ||
-                createSubMut.isPending ||
-                updateSubMut.isPending
-              }
-              className={`${softPrimaryButtonClass} w-auto px-5`}
-            >
-              {subEditing ? 'Guardar' : 'Crear'}
-            </button>
+          )}
+        </div>
+        <span className="ml-auto font-mono text-[10.5px] font-black uppercase tracking-wider text-slate-400">
+          <strong className="font-black tabular-nums text-slate-600 dark:text-slate-300">
+            {total}
+          </strong>{' '}
+          {total === 1 ? 'producto' : 'productos'}
+        </span>
+      </div>
+
+      {/* ============================================================
+          PRODUCTS TABLE
+          ============================================================ */}
+      <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+        {/* head */}
+        <div className="grid grid-cols-[40px_60px_120px_minmax(180px,1fr)_140px_120px_40px] items-center gap-3 border-b border-slate-100 bg-slate-50/50 px-5 py-3 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-800 dark:bg-slate-900/10 dark:text-slate-500">
+          <button
+            type="button"
+            onClick={toggleAllOnPage}
+            className={cn(
+              'inline-flex h-4 w-4 items-center justify-center rounded-[5px] border-[1.5px] transition-colors',
+              allOnPageSelected
+                ? 'border-[#2F6BFF] bg-[#2F6BFF] text-white'
+                : 'border-slate-300 bg-white hover:border-slate-400 dark:border-slate-700 dark:bg-slate-900',
+            )}
+            aria-label="Seleccionar todos en esta página"
+          >
+            {allOnPageSelected && <Check className="h-2.5 w-2.5" strokeWidth={3} />}
+          </button>
+          <span>Imagen</span>
+          <span>SKU</span>
+          <span>Nombre</span>
+          <span>Marca</span>
+          <span className="justify-self-end">Precio</span>
+          <span />
+        </div>
+
+        {productsQ.isLoading && (
+          <div>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="border-b border-slate-100 px-5 py-4 last:border-b-0 dark:border-slate-800/80">
+                <div className="h-10 w-full animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
+              </div>
+            ))}
           </div>
-        </form>
-      </SoftModal>
+        )}
+
+        {!productsQ.isLoading && items.length === 0 && (
+          <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400 dark:bg-slate-800">
+              <Package className="h-5 w-5" />
+            </div>
+            <p className="text-sm font-bold text-slate-600 dark:text-slate-300">
+              Sin productos en esta categoría
+            </p>
+            <p className="max-w-[40ch] text-xs text-slate-400">
+              Cuando asignes productos a «{category?.name ?? 'esta categoría'}» o a sus
+              subcategorías, aparecerán acá.
+            </p>
+          </div>
+        )}
+
+        {!productsQ.isLoading &&
+          items.map((p) => {
+            const isOn = selected.has(p.id);
+            const cover = publicImageUrl(p.coverUrl ?? null);
+            return (
+              <div
+                key={p.id}
+                className={cn(
+                  'group grid grid-cols-[40px_60px_120px_minmax(180px,1fr)_140px_120px_40px] items-center gap-3 border-b border-slate-100 px-5 py-3 text-xs transition-colors last:border-b-0 dark:border-slate-800/80',
+                  isOn
+                    ? 'bg-[#2F6BFF]/[0.04] dark:bg-blue-950/10'
+                    : 'hover:bg-slate-50/60 dark:hover:bg-slate-800/10',
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={() => toggleRow(p.id)}
+                  className={cn(
+                    'inline-flex h-4 w-4 items-center justify-center rounded-[5px] border-[1.5px] transition-colors',
+                    isOn
+                      ? 'border-[#2F6BFF] bg-[#2F6BFF] text-white'
+                      : 'border-slate-300 bg-white hover:border-slate-400 dark:border-slate-700 dark:bg-slate-900',
+                  )}
+                  aria-label={`Seleccionar ${p.sku}`}
+                >
+                  {isOn && <Check className="h-2.5 w-2.5" strokeWidth={3} />}
+                </button>
+                <Link href={`/productos/${p.id}`} className="inline-block">
+                  <div className="overflow-hidden rounded-lg border border-slate-100 dark:border-slate-800">
+                    <ProductThumbnail src={cover} size={44} />
+                  </div>
+                </Link>
+                <Link
+                  href={`/productos/${p.id}`}
+                  className="font-mono text-[11px] font-bold text-slate-500 underline-offset-2 transition-colors hover:text-[#2F6BFF] hover:underline dark:text-slate-400"
+                >
+                  {p.sku}
+                </Link>
+                <Link
+                  href={`/productos/${p.id}`}
+                  className="block min-w-0 truncate text-[12.5px] font-black uppercase tracking-tight text-slate-900 underline-offset-2 transition-colors hover:text-[#2F6BFF] hover:underline dark:text-white"
+                >
+                  {p.name}
+                </Link>
+                <span className="truncate font-bold text-slate-500 dark:text-slate-400">
+                  {p.brand?.name ?? '—'}
+                </span>
+                <span className="justify-self-end font-mono text-xs font-black tabular-nums text-slate-900 dark:text-white">
+                  {formatCurrency(p.price)}
+                </span>
+                <button
+                  type="button"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 opacity-0 transition-all hover:bg-slate-100 hover:text-slate-700 group-hover:opacity-100 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                  aria-label="Más opciones"
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            );
+          })}
+
+        {!productsQ.isLoading && total > 0 && (
+          <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50/50 px-5 py-3.5 text-[11.5px] font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-900/10 dark:text-slate-400">
+            <span>
+              Mostrando{' '}
+              <strong className="font-extrabold tabular-nums text-slate-700 dark:text-slate-200">
+                {items.length}
+              </strong>{' '}
+              de{' '}
+              <strong className="font-extrabold tabular-nums text-slate-700 dark:text-slate-200">
+                {total}
+              </strong>{' '}
+              · página {page} de {totalPages}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setFilter('page', String(Math.max(1, page - 1)))}
+                disabled={page === 1}
+                className="rounded-xl border border-slate-200 px-3 py-1.5 text-[11px] font-bold text-slate-600 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900"
+              >
+                Anterior
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilter('page', String(Math.min(totalPages, page + 1)))}
+                disabled={page >= totalPages}
+                className="rounded-xl border border-slate-200 px-3 py-1.5 text-[11px] font-bold text-slate-600 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900"
+              >
+                Siguiente
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ============================================================
+          MODAL — crear / editar subcategoría (custom)
+          ============================================================ */}
+      {subDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="w-full max-w-md overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-xl animate-in zoom-in-95 duration-200 dark:border-slate-800 dark:bg-[#11151C]">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-100 bg-slate-50/50 p-5 dark:border-slate-800 dark:bg-slate-900/10">
+              <div>
+                <h4 className="text-sm font-black text-slate-900 dark:text-white">
+                  {subEditing
+                    ? `Editar "${subEditing.name}"`
+                    : `Nueva subcategoría de ${category?.name ?? '—'}`}
+                </h4>
+                <p className="mt-0.5 text-[11px] text-slate-400">
+                  {subEditing
+                    ? 'Actualizá el nombre de la subcategoría'
+                    : 'Agregá una subcategoría para organizar mejor los productos'}
+                </p>
+              </div>
+              <button
+                onClick={() => setSubDialogOpen(false)}
+                className="rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!subName.trim()) return;
+                if (subEditing) updateSubMut.mutate();
+                else createSubMut.mutate();
+              }}
+              className="space-y-4 p-5"
+            >
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                  Nombre
+                </label>
+                <input
+                  autoFocus
+                  value={subName}
+                  onChange={(e) => setSubName(e.target.value)}
+                  placeholder="ej: Lubricantes sintéticos"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs font-semibold focus:border-[#2F6BFF] focus:outline-none focus:ring-2 focus:ring-[#2F6BFF]/15 dark:border-slate-800 dark:bg-slate-900"
+                />
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setSubDialogOpen(false)}
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={!subName.trim() || subSaving}
+                  className="rounded-xl bg-[#2F6BFF] px-5 py-2 text-xs font-black text-white shadow-md transition-colors hover:bg-opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {subSaving ? 'Guardando…' : subEditing ? 'Guardar' : 'Crear'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       <ConfirmDialog
         open={!!subDeleteTarget}
@@ -636,58 +820,71 @@ export default function CategoriaDetailPage() {
         confirmLabel="Eliminar"
         variant="destructive"
         onConfirm={async () => {
-          if (subDeleteTarget)
-            await deleteSubMut.mutateAsync(subDeleteTarget.id);
+          if (subDeleteTarget) await deleteSubMut.mutateAsync(subDeleteTarget.id);
         }}
       />
 
       {/* ============================================================
-          DIALOG — editar nombre de la categoría actual
+          MODAL — editar nombre de la categoría actual (custom)
           ============================================================ */}
-      <SoftModal
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        title={`Editar "${category?.name ?? '—'}"`}
-        subtitle="Actualizá el nombre de la categoría"
-      >
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!editName.trim()) return;
-            updateCatMut.mutate();
-          }}
-          className="space-y-4 p-5"
-        >
-          <div className="space-y-1">
-            <label htmlFor="cat-name" className={softLabelClass}>
-              Nombre
-            </label>
-            <input
-              id="cat-name"
-              autoFocus
-              value={editName}
-              onChange={(e) => setEditName(e.target.value)}
-              className={softInputClass}
-            />
-          </div>
-          <div className="flex items-center justify-end gap-2 pt-1">
-            <button
-              type="button"
-              onClick={() => setEditOpen(false)}
-              className={softSecondaryButtonClass}
+      {editOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="w-full max-w-md overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-xl animate-in zoom-in-95 duration-200 dark:border-slate-800 dark:bg-[#11151C]">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-100 bg-slate-50/50 p-5 dark:border-slate-800 dark:bg-slate-900/10">
+              <div>
+                <h4 className="text-sm font-black text-slate-900 dark:text-white">
+                  Editar "{category?.name ?? '—'}"
+                </h4>
+                <p className="mt-0.5 text-[11px] text-slate-400">
+                  Actualizá el nombre de la categoría
+                </p>
+              </div>
+              <button
+                onClick={() => setEditOpen(false)}
+                className="rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!editName.trim()) return;
+                updateCatMut.mutate();
+              }}
+              className="space-y-4 p-5"
             >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={!editName.trim() || updateCatMut.isPending}
-              className={`${softPrimaryButtonClass} w-auto px-5`}
-            >
-              Guardar
-            </button>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                  Nombre
+                </label>
+                <input
+                  autoFocus
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs font-semibold focus:border-[#2F6BFF] focus:outline-none focus:ring-2 focus:ring-[#2F6BFF]/15 dark:border-slate-800 dark:bg-slate-900"
+                />
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setEditOpen(false)}
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={!editName.trim() || updateCatMut.isPending}
+                  className="rounded-xl bg-[#2F6BFF] px-5 py-2 text-xs font-black text-white shadow-md transition-colors hover:bg-opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {updateCatMut.isPending ? 'Guardando…' : 'Guardar'}
+                </button>
+              </div>
+            </form>
           </div>
-        </form>
-      </SoftModal>
+        </div>
+      )}
 
       <ConfirmDialog
         open={deleteOpen}
@@ -696,9 +893,9 @@ export default function CategoriaDetailPage() {
         description={
           category ? (
             <>
-              Se eliminará <strong>{category.name}</strong>. Si tiene productos
-              o subcategorías asociadas, la operación va a fallar — primero
-              desvinculá o reasigná lo que cuelga de ella.
+              Se eliminará <strong>{category.name}</strong>. Si tiene productos o
+              subcategorías asociadas, la operación va a fallar — primero desvinculá o
+              reasigná lo que cuelga de ella.
             </>
           ) : null
         }
@@ -710,181 +907,7 @@ export default function CategoriaDetailPage() {
       />
 
       {/* ============================================================
-          PRODUCTS TOOLBAR + BULK
-          ============================================================ */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative flex h-10 max-w-[480px] flex-1 items-center gap-2 rounded-lg border bg-card px-3 transition-shadow focus-within:border-foreground/40 focus-within:ring-4 focus-within:ring-foreground/5">
-          <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <input
-            type="text"
-            value={search.value}
-            onChange={(e) => search.setValue(e.target.value)}
-            placeholder="Buscar por SKU o nombre…"
-            className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-          />
-          {search.value && (
-            <button
-              type="button"
-              onClick={() => search.setValue('')}
-              className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-              aria-label="Limpiar"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-
-        <span className="flex-1" />
-        <span className="font-mono text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
-          <strong className="font-semibold text-foreground tabular-nums">
-            {total}
-          </strong>{' '}
-          {total === 1 ? 'producto' : 'productos'}
-        </span>
-      </div>
-
-      {/* ============================================================
-          PRODUCTS TABLE
-          ============================================================ */}
-      <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
-        <div className="grid grid-cols-[40px_60px_120px_minmax(200px,1fr)_140px_120px_40px] items-center gap-3 border-b bg-muted/40 px-4 py-2.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          <button
-            type="button"
-            onClick={toggleAllOnPage}
-            className={cn(
-              'inline-flex h-4 w-4 items-center justify-center rounded border-[1.5px] transition-colors',
-              allOnPageSelected
-                ? 'border-foreground bg-foreground text-background'
-                : 'border-border bg-card hover:border-muted-foreground',
-            )}
-            aria-label="Seleccionar todos en esta página"
-          >
-            {allOnPageSelected && <Check className="h-2.5 w-2.5" strokeWidth={3} />}
-          </button>
-          <span />
-          <span>SKU</span>
-          <span>Nombre</span>
-          <span>Marca</span>
-          <span className="justify-self-end">Precio</span>
-          <span />
-        </div>
-
-        {productsQ.isLoading && (
-          <div>
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="border-b px-4 py-4 last:border-b-0">
-                <Skeleton className="h-10 w-full" />
-              </div>
-            ))}
-          </div>
-        )}
-
-        {!productsQ.isLoading && items.length === 0 && (
-          <div className="flex flex-col items-center justify-center gap-2 px-4 py-12 text-center">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-              <Package className="h-5 w-5" />
-            </div>
-            <p className="text-sm font-medium">Sin productos en esta categoría</p>
-            <p className="max-w-[36ch] text-xs text-muted-foreground">
-              Cuando asignes productos a &ldquo;{category?.name ?? 'esta categoría'}
-              &rdquo; o a sus subcategorías, aparecerán acá.
-            </p>
-          </div>
-        )}
-
-        {!productsQ.isLoading &&
-          items.map((p) => {
-            const isOn = selected.has(p.id);
-            const cover = publicImageUrl(p.coverUrl ?? null);
-            return (
-              <div
-                key={p.id}
-                className="group grid grid-cols-[40px_60px_120px_minmax(200px,1fr)_140px_120px_40px] items-center gap-3 border-b px-4 py-3 text-sm last:border-b-0 hover:bg-accent/30"
-              >
-                <button
-                  type="button"
-                  onClick={() => toggleRow(p.id)}
-                  className={cn(
-                    'inline-flex h-4 w-4 items-center justify-center rounded border-[1.5px] transition-colors',
-                    isOn
-                      ? 'border-foreground bg-foreground text-background'
-                      : 'border-border bg-card hover:border-muted-foreground',
-                  )}
-                  aria-label={`Seleccionar ${p.sku}`}
-                >
-                  {isOn && <Check className="h-2.5 w-2.5" strokeWidth={3} />}
-                </button>
-                <Link href={`/productos/${p.id}`} className="inline-block">
-                  <ProductThumbnail src={cover} size={44} />
-                </Link>
-                <Link
-                  href={`/productos/${p.id}`}
-                  className="font-mono text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-                >
-                  {p.sku}
-                </Link>
-                <Link
-                  href={`/productos/${p.id}`}
-                  className="block min-w-0 truncate text-[13.5px] font-medium tracking-tight underline-offset-2 hover:underline"
-                >
-                  {p.name}
-                </Link>
-                <span className="text-sm text-muted-foreground">
-                  {p.brand?.name ?? '—'}
-                </span>
-                <span className="justify-self-end font-mono text-sm font-medium tabular-nums">
-                  {formatCurrency(p.price)}
-                </span>
-                <button
-                  type="button"
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100"
-                  aria-label="Más opciones"
-                >
-                  <MoreHorizontal className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            );
-          })}
-
-        {!productsQ.isLoading && total > 0 && (
-          <div className="flex items-center justify-between border-t bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
-            <span>
-              Mostrando{' '}
-              <strong className="font-semibold tabular-nums text-foreground">
-                {items.length}
-              </strong>{' '}
-              de{' '}
-              <strong className="font-semibold tabular-nums text-foreground">
-                {total}
-              </strong>{' '}
-              · página {page} de {totalPages}
-            </span>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setFilter('page', String(Math.max(1, page - 1)))}
-                disabled={page === 1}
-              >
-                Anterior
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  setFilter('page', String(Math.min(totalPages, page + 1)))
-                }
-                disabled={page >= totalPages}
-              >
-                Siguiente
-              </Button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* ============================================================
-          BULK CONFIRM DIALOGS — preservados 1:1 de la lógica original
+          BULK CONFIRM DIALOGS — preservados 1:1
           ============================================================ */}
       <ConfirmDialog
         open={unlinkOpen}
@@ -894,9 +917,8 @@ export default function CategoriaDetailPage() {
           <>
             Los <strong>{selected.size}</strong> producto
             {selected.size === 1 ? '' : 's'} seleccionado
-            {selected.size === 1 ? '' : 's'} quedarán sin categoría asignada.
-            Podrás reasignarlos después desde el detalle del producto o de
-            otra categoría.
+            {selected.size === 1 ? '' : 's'} quedarán sin categoría asignada. Podrás
+            reasignarlos después desde el detalle del producto o de otra categoría.
           </>
         }
         confirmLabel="Desvincular"
@@ -914,8 +936,7 @@ export default function CategoriaDetailPage() {
             <p>
               Los <strong>{selected.size}</strong> producto
               {selected.size === 1 ? '' : 's'} seleccionado
-              {selected.size === 1 ? '' : 's'} se moverán a la categoría
-              elegida.
+              {selected.size === 1 ? '' : 's'} se moverán a la categoría elegida.
             </p>
             <Select value={moveTargetId} onValueChange={setMoveTargetId}>
               <SelectTrigger>
@@ -947,32 +968,30 @@ export default function CategoriaDetailPage() {
       <div
         className={cn(
           'pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 transition-all duration-200 ease-out',
-          selected.size > 0
-            ? 'translate-y-0 opacity-100'
-            : 'translate-y-4 opacity-0',
+          selected.size > 0 ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0',
         )}
         aria-hidden={selected.size === 0}
       >
         <div
           className={cn(
-            'flex items-center gap-1 rounded-2xl border border-background/10 bg-foreground p-1.5 text-background shadow-2xl shadow-foreground/30 ring-1 ring-foreground/5',
+            'flex items-center gap-1 rounded-2xl border border-white/10 bg-[#2F6BFF] p-1.5 text-white shadow-2xl shadow-[#2F6BFF]/40',
             selected.size > 0 && 'pointer-events-auto',
           )}
         >
           <div className="flex items-center gap-2 px-3 py-1.5">
-            <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-background/15 px-1.5 font-mono text-[11px] font-bold tabular-nums">
+            <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-white/20 px-1.5 font-mono text-[11px] font-black tabular-nums">
               {selected.size}
             </span>
-            <span className="text-[13px] font-medium">
+            <span className="text-[12.5px] font-bold">
               {selected.size === 1 ? 'seleccionado' : 'seleccionados'}
             </span>
           </div>
-          <span className="h-6 w-px bg-background/15" />
+          <span className="h-6 w-px bg-white/20" />
           <button
             type="button"
             onClick={() => setUnlinkOpen(true)}
             disabled={bulkMut.isPending}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium transition-colors hover:bg-background/10 disabled:opacity-50"
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl px-3 text-[12.5px] font-bold transition-colors hover:bg-white/15 disabled:opacity-50"
           >
             <Link2Off className="h-3.5 w-3.5" />
             Desvincular
@@ -984,16 +1003,16 @@ export default function CategoriaDetailPage() {
               setMoveOpen(true);
             }}
             disabled={bulkMut.isPending || otherCategories.length === 0}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium transition-colors hover:bg-background/10 disabled:opacity-50"
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl px-3 text-[12.5px] font-bold transition-colors hover:bg-white/15 disabled:opacity-50"
           >
             <FolderInput className="h-3.5 w-3.5" />
             Mover
           </button>
-          <span className="h-6 w-px bg-background/15" />
+          <span className="h-6 w-px bg-white/20" />
           <button
             type="button"
             onClick={() => setSelected(new Set())}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-background/70 transition-colors hover:bg-background/10 hover:text-background"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-white/70 transition-colors hover:bg-white/15 hover:text-white"
             aria-label="Limpiar selección"
           >
             <X className="h-4 w-4" />
@@ -1005,12 +1024,14 @@ export default function CategoriaDetailPage() {
 }
 
 /* ============================================================
-   StatCard — pequeña card con icon · label · big value · sub
+   StatCard — icon · label · valor grande · subtexto
+   (look de CategoriasView)
    ============================================================ */
 function StatCard({
   icon,
   label,
   value,
+  valueMono,
   valueTone,
   sub,
   subTone,
@@ -1018,33 +1039,41 @@ function StatCard({
   icon: ReactNode;
   label: string;
   value: string;
+  valueMono?: boolean;
   valueTone?: 'alert' | 'success';
   sub?: string;
   subTone?: 'alert' | 'success';
 }) {
   return (
-    <div className="flex flex-col gap-1.5 rounded-2xl border bg-card p-4 shadow-sm">
-      <span className="flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-        <span className="text-muted-foreground">{icon}</span>
+    <div className="flex min-h-[104px] flex-col justify-between rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition-colors hover:border-slate-200 dark:border-slate-850 dark:bg-[#11151C] dark:hover:border-slate-800">
+      <div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
         <span>{label}</span>
-      </span>
-      <span
-        className={cn(
-          'text-2xl font-semibold tracking-tight tabular-nums',
-          valueTone === 'alert' && 'text-rose-600 dark:text-rose-400',
-          valueTone === 'success' && 'text-emerald-600 dark:text-emerald-400',
-        )}
-      >
-        {value}
-      </span>
+        <span className="text-slate-400">{icon}</span>
+      </div>
+      <div className="my-1">
+        <span
+          className={cn(
+            'text-2xl font-black tracking-tight tabular-nums',
+            valueMono && 'font-mono',
+            valueTone === 'alert'
+              ? 'text-[#E03131] dark:text-rose-400'
+              : valueTone === 'success'
+                ? 'text-[#137333] dark:text-emerald-400'
+                : 'text-slate-900 dark:text-white',
+          )}
+        >
+          {value}
+        </span>
+      </div>
       {sub && (
         <span
           className={cn(
-            'text-[11.5px]',
-            subTone === 'alert' && 'font-medium text-rose-600 dark:text-rose-400',
-            subTone === 'success' &&
-              'font-medium text-emerald-600 dark:text-emerald-400',
-            !subTone && 'text-muted-foreground',
+            'text-[10px] font-semibold',
+            subTone === 'alert'
+              ? 'font-extrabold text-[#A61C1C] dark:text-rose-300'
+              : subTone === 'success'
+                ? 'font-extrabold text-[#137333] dark:text-emerald-400'
+                : 'text-slate-400',
           )}
         >
           {sub}
@@ -1053,4 +1082,3 @@ function StatCard({
     </div>
   );
 }
-

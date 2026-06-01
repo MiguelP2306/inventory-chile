@@ -1,30 +1,12 @@
 'use client';
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Eye, FileDown, Plus } from 'lucide-react';
+import { Download, Eye, Plus, Search } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { SaleFormDialog } from '@/components/forms/sale-form-dialog';
 import { SaleStatusBadge } from '@/components/sale-status-badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { apiAbsoluteUrl } from '@/lib/api';
 import { Permission, useCan } from '@/lib/current-user-context';
 import { formatCurrency } from '@/lib/format';
@@ -45,12 +27,24 @@ const STATUS_OPTIONS: { value: SaleStatusDto; label: string }[] = [
 const METHOD_OPTIONS: { value: PaymentMethodDto; label: string }[] = [
   { value: 'CASH', label: 'Efectivo' },
   { value: 'TRANSFER', label: 'Transferencia' },
-  // Ronda 9 — CARD se desdobló por subtipo (mismas comisiones distintas).
   { value: 'CARD_DEBIT', label: 'Débito' },
   { value: 'CARD_CREDIT', label: 'Crédito' },
   { value: 'PAYMENT_LINK', label: 'Link de pago' },
 ];
 
+const FIELD =
+  'w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-xs font-semibold text-slate-700 transition-all focus:border-[#2F6BFF] focus:outline-none dark:border-slate-850 dark:bg-[#11151C] dark:text-white';
+const SHEET =
+  'overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]';
+const THEAD =
+  'border-b border-slate-100 bg-slate-50/50 font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-800 dark:bg-slate-900/10 dark:text-slate-500';
+
+/**
+ * /ventas — Rediseño UI (look Compras / Movimientos / Cotizaciones).
+ * SOLO UI/UX. Lógica idéntica: KPIs del mes, filtros URL + debounce,
+ * listSales paginado, export Excel, modal Nueva venta (?new=1), y gating
+ * por permiso SALE_VIEW_FINANCIAL_BREAKDOWN para método/desglose.
+ */
 export default function VentasPage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -82,23 +76,14 @@ export default function VentasPage() {
     dateTo !== '' ||
     search.value !== '';
 
-  // Ronda 12 — KPIs del mes actual + top productos/clientes. Se cargan
-  // arriba de la tabla, independientes de los filtros del listado.
-  const kpis = useQuery({
-    queryKey: ['sales', 'kpis'],
-    queryFn: () => getSalesKpis(),
-  });
+  const kpis = useQuery({ queryKey: ['sales', 'kpis'], queryFn: () => getSalesKpis() });
 
   const list = useQuery({
-    queryKey: [
-      'sales',
-      { status, method, q: debouncedQ, dateFrom, dateTo, page },
-    ],
+    queryKey: ['sales', { status, method, q: debouncedQ, dateFrom, dateTo, page }],
     queryFn: () =>
       listSales({
         status: status === ALL ? undefined : (status as SaleStatusDto),
-        paymentMethod:
-          method === ALL ? undefined : (method as PaymentMethodDto),
+        paymentMethod: method === ALL ? undefined : (method as PaymentMethodDto),
         q: debouncedQ || undefined,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
@@ -126,348 +111,337 @@ export default function VentasPage() {
   }, [searchParams]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold">Ventas</h1>
-        <div className="flex flex-wrap items-center gap-2">
+    <div className="space-y-6 animate-in fade-in duration-200">
+      {/* HEADER */}
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">
+          Ventas
+        </h1>
+        <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
           {filtersActive && (
-            <Button variant="ghost" size="sm" onClick={clear}>
-              Limpiar filtros
-            </Button>
-          )}
-          <Button asChild variant="outline" size="sm">
-            <a
-              href={apiAbsoluteUrl(
-                `sales/export.xlsx${buildSalesExportQuery({
-                  status: status === ALL ? undefined : status,
-                  paymentMethod: method === ALL ? undefined : method,
-                  q: debouncedQ || undefined,
-                  dateFrom: dateFrom || undefined,
-                  dateTo: dateTo || undefined,
-                })}`,
-              )}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={clear}
+              className="cursor-pointer rounded-xl px-3 py-2 text-xs font-bold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
             >
-              <FileDown className="h-4 w-4" />
-              Exportar Excel
-            </a>
-          </Button>
-          <Button onClick={() => setDialogOpen(true)}>
+              Limpiar filtros
+            </button>
+          )}
+          <a
+            href={apiAbsoluteUrl(
+              `sales/export.xlsx${buildSalesExportQuery({
+                status: status === ALL ? undefined : status,
+                paymentMethod: method === ALL ? undefined : method,
+                q: debouncedQ || undefined,
+                dateFrom: dateFrom || undefined,
+                dateTo: dateTo || undefined,
+              })}`,
+            )}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-850 dark:bg-[#11151C] dark:text-slate-300 dark:hover:bg-slate-900"
+          >
+            <Download className="h-4 w-4 text-slate-400" />
+            <span>Exportar Excel</span>
+          </a>
+          <button
+            onClick={() => setDialogOpen(true)}
+            className="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-2xl bg-[#2F6BFF] px-5 py-3 text-xs font-bold text-white shadow-md transition-colors hover:bg-[#2F6BFF]/90"
+          >
             <Plus className="h-4 w-4" />
-            Nueva venta
-          </Button>
+            <span>Nueva venta</span>
+          </button>
         </div>
       </div>
 
-      {/* Ronda 12 — KPIs del mes actual. 4 cards arriba. */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {/* KPIs */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard
           label="Vendido este mes"
-          value={
-            kpis.data ? formatCurrency(kpis.data.totalAmount) : 'Cargando…'
-          }
-          hint={kpis.data ? `${kpis.data.count} venta(s)` : ''}
+          value={kpis.data ? formatCurrency(kpis.data.totalAmount) : '—'}
+          hint={kpis.data ? `${kpis.data.count} ${kpis.data.count === 1 ? 'venta' : 'ventas'}` : 'Cargando…'}
         />
         <KpiCard
           label="Promedio por venta"
-          value={
-            kpis.data ? formatCurrency(kpis.data.averageAmount) : 'Cargando…'
-          }
+          value={kpis.data ? formatCurrency(kpis.data.averageAmount) : '—'}
           hint="Mes actual"
         />
         <KpiCard
           label="Vendido hoy"
-          value={
-            kpis.data ? formatCurrency(kpis.data.todayAmount) : 'Cargando…'
-          }
-          hint={kpis.data ? `${kpis.data.todayCount} venta(s) hoy` : ''}
+          value={kpis.data ? formatCurrency(kpis.data.todayAmount) : '—'}
+          hint={kpis.data ? `${kpis.data.todayCount} venta(s) hoy` : 'Cargando…'}
         />
         <KpiCard
           label="Última venta"
-          value={
-            kpis.data?.lastSale
-              ? formatCurrency(kpis.data.lastSale.total)
-              : 'Sin ventas'
-          }
+          value={kpis.data?.lastSale ? formatCurrency(kpis.data.lastSale.total) : '—'}
           hint={
             kpis.data?.lastSale
-              ? `${kpis.data.lastSale.customerName} · ${new Date(
-                  kpis.data.lastSale.date,
-                ).toLocaleDateString('es-CL')}`
-              : ''
+              ? `${kpis.data.lastSale.customerName} · ${new Date(kpis.data.lastSale.date).toLocaleDateString('es-CL')}`
+              : 'Sin ventas'
           }
+          truncateHint
         />
       </div>
 
-      {/* Ronda 12 — Top productos y clientes del mes. */}
+      {/* TOP productos / clientes */}
       {kpis.data &&
-        (kpis.data.topProducts.length > 0 ||
-          kpis.data.topCustomers.length > 0) && (
+        (kpis.data.topProducts.length > 0 || kpis.data.topCustomers.length > 0) && (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <div className="rounded-md border bg-card">
-              <div className="border-b p-3">
-                <h2 className="text-sm font-medium">
+            <div className={SHEET}>
+              <div className="border-b border-slate-100 p-4 dark:border-slate-850">
+                <h2 className="text-[11px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">
                   Top productos vendidos del mes
                 </h2>
               </div>
               {kpis.data.topProducts.length === 0 ? (
-                <div className="p-4 text-center text-sm text-muted-foreground">
+                <div className="p-5 text-center text-xs font-semibold text-slate-400">
                   Sin ventas en el período.
                 </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Producto</TableHead>
-                      <TableHead className="text-right">Unidades</TableHead>
-                      <TableHead className="text-right">Monto</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
+                <table className="w-full border-collapse text-left text-[12px]">
+                  <thead>
+                    <tr className={THEAD}>
+                      <th className="py-3 pl-5">Producto</th>
+                      <th className="py-3 text-right">Unidades</th>
+                      <th className="py-3 pr-5 text-right">Monto</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
                     {kpis.data.topProducts.map((p) => (
-                      <TableRow key={p.productId}>
-                        <TableCell>
-                          <Link
-                            href={`/productos/${p.productId}`}
-                            className="hover:underline"
-                          >
-                            <div className="text-sm font-medium">{p.name}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {p.sku ?? '—'}
-                            </div>
+                      <tr key={p.productId} className="hover:bg-slate-50/40 dark:hover:bg-slate-900/10">
+                        <td className="py-3 pl-5">
+                          <Link href={`/productos/${p.productId}`} className="hover:underline">
+                            <div className="font-bold text-slate-900 dark:text-white">{p.name}</div>
+                            <div className="font-mono text-[11px] text-slate-400">{p.sku ?? '—'}</div>
                           </Link>
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
+                        </td>
+                        <td className="py-3 text-right font-mono font-semibold text-slate-600 dark:text-slate-400">
                           {p.qty}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">
+                        </td>
+                        <td className="py-3 pr-5 text-right font-mono font-black text-slate-900 dark:text-white">
                           {formatCurrency(p.totalAmount)}
-                        </TableCell>
-                      </TableRow>
+                        </td>
+                      </tr>
                     ))}
-                  </TableBody>
-                </Table>
+                  </tbody>
+                </table>
               )}
             </div>
 
-            <div className="rounded-md border bg-card">
-              <div className="border-b p-3">
-                <h2 className="text-sm font-medium">
+            <div className={SHEET}>
+              <div className="border-b border-slate-100 p-4 dark:border-slate-850">
+                <h2 className="text-[11px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">
                   Top clientes frecuentes del mes
                 </h2>
               </div>
               {kpis.data.topCustomers.length === 0 ? (
-                <div className="p-4 text-center text-sm text-muted-foreground">
+                <div className="p-5 text-center text-xs font-semibold text-slate-400">
                   Sin ventas en el período.
                 </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Cliente</TableHead>
-                      <TableHead className="text-right">Ventas</TableHead>
-                      <TableHead className="text-right">Monto total</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
+                <table className="w-full border-collapse text-left text-[12px]">
+                  <thead>
+                    <tr className={THEAD}>
+                      <th className="py-3 pl-5">Cliente</th>
+                      <th className="py-3 text-right">Ventas</th>
+                      <th className="py-3 pr-5 text-right">Monto total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
                     {kpis.data.topCustomers.map((c) => (
-                      <TableRow key={c.customerId}>
-                        <TableCell>
-                          <Link
-                            href={`/clientes/${c.customerId}`}
-                            className="hover:underline"
-                          >
-                            <div className="text-sm font-medium">
-                              {c.customerName}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {c.customerTaxId ?? 'sin RUT'}
-                            </div>
+                      <tr key={c.customerId} className="hover:bg-slate-50/40 dark:hover:bg-slate-900/10">
+                        <td className="py-3 pl-5">
+                          <Link href={`/clientes/${c.customerId}`} className="hover:underline">
+                            <div className="font-bold text-slate-900 dark:text-white">{c.customerName}</div>
+                            <div className="font-mono text-[11px] text-slate-400">{c.customerTaxId ?? 'sin RUT'}</div>
                           </Link>
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
+                        </td>
+                        <td className="py-3 text-right font-mono font-semibold text-slate-600 dark:text-slate-400">
                           {c.salesCount}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">
+                        </td>
+                        <td className="py-3 pr-5 text-right font-mono font-black text-slate-900 dark:text-white">
                           {formatCurrency(c.totalAmount)}
-                        </TableCell>
-                      </TableRow>
+                        </td>
+                      </tr>
                     ))}
-                  </TableBody>
-                </Table>
+                  </tbody>
+                </table>
               )}
             </div>
           </div>
         )}
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
-        <Input
-          placeholder="Buscar (número, cliente, RUT)"
-          value={search.value}
-          onChange={(e) => search.setValue(e.target.value)}
-          className="md:col-span-2"
-        />
-        <Select
+      {/* FILTROS */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="relative lg:col-span-2">
+          <Search className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={search.value}
+            onChange={(e) => search.setValue(e.target.value)}
+            placeholder="Buscar nº, cliente, RUT…"
+            className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-xs font-medium text-slate-700 transition-all placeholder:text-slate-400 focus:border-[#2F6BFF] focus:outline-none dark:border-slate-850 dark:bg-[#11151C] dark:text-white"
+          />
+        </div>
+        <select
           value={status}
-          onValueChange={(v) => {
-            setFilter('status', v === ALL ? null : v);
+          onChange={(e) => {
+            setFilter('status', e.target.value === ALL ? null : e.target.value);
             setFilter('page', null);
           }}
+          className={FIELD}
         >
-          <SelectTrigger>
-            <SelectValue placeholder="Estado" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Todos los estados</SelectItem>
-            {STATUS_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          <option value={ALL}>Todos los estados</option>
+          {STATUS_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
         {canSeeBreakdown && (
-          <Select
+          <select
             value={method}
-            onValueChange={(v) => {
-              setFilter('method', v === ALL ? null : v);
+            onChange={(e) => {
+              setFilter('method', e.target.value === ALL ? null : e.target.value);
               setFilter('page', null);
             }}
+            className={FIELD}
           >
-            <SelectTrigger>
-              <SelectValue placeholder="Método" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>Todos los métodos</SelectItem>
-              {METHOD_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <option value={ALL}>Todos los métodos</option>
+            {METHOD_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
         )}
-        <Input
+        <input
           type="date"
           value={dateFrom}
           onChange={(e) => {
             setFilter('dateFrom', e.target.value || null);
             setFilter('page', null);
           }}
+          className={FIELD}
         />
-        <Input
+        <input
           type="date"
           value={dateTo}
           onChange={(e) => {
             setFilter('dateTo', e.target.value || null);
             setFilter('page', null);
           }}
+          className={FIELD}
         />
       </div>
 
-      <div className="rounded-md border bg-card">
-        <Table stickyFirstColumn>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Número</TableHead>
-              <TableHead>Fecha</TableHead>
-              <TableHead>Cliente</TableHead>
-              <TableHead className="text-right">Items</TableHead>
-              <TableHead className="text-right">Total</TableHead>
-              {canSeeBreakdown && <TableHead>Método</TableHead>}
-              <TableHead>Estado</TableHead>
-              <TableHead className="w-[100px]" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {list.isLoading && (
-              <>
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <TableRow key={i}>
-                    <TableCell colSpan={8}>
-                      <Skeleton className="h-4 w-full" />
-                    </TableCell>
-                  </TableRow>
+      {/* TABLA */}
+      <div className={SHEET}>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[820px] border-collapse text-left text-[12px]">
+            <thead>
+              <tr className={THEAD}>
+                <th className="py-4 pl-6">Número</th>
+                <th className="py-4">Fecha</th>
+                <th className="py-4">Cliente</th>
+                <th className="py-4 text-right">Items</th>
+                <th className="py-4 text-right">Total</th>
+                {canSeeBreakdown && <th className="py-4 pl-8">Método</th>}
+                <th className="py-4 pl-8">Estado</th>
+                <th className="w-[60px] py-4 pr-6 text-right" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+              {list.isLoading &&
+                Array.from({ length: 6 }).map((_, i) => (
+                  <tr key={i}>
+                    <td colSpan={8} className="px-6 py-5">
+                      <div className="h-4 w-full animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+                    </td>
+                  </tr>
                 ))}
-              </>
-            )}
-            {!list.isLoading && items.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground">
-                  Sin ventas.
-                </TableCell>
-              </TableRow>
-            )}
-            {items.map((s) => (
-              <TableRow key={s.id}>
-                <TableCell className="font-mono text-xs">
-                  <Link href={`/ventas/${s.id}`} className="hover:underline">
-                    {s.number}
-                  </Link>
-                </TableCell>
-                <TableCell>
-                  {new Date(s.date).toLocaleDateString('es-CL', {
-                    dateStyle: 'short',
-                  })}
-                </TableCell>
-                <TableCell className="max-w-[260px] truncate">
-                  {s.customer?.name ?? '—'}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {s.items?.length ?? 0}
-                </TableCell>
-                <TableCell className="text-right tabular-nums font-medium">
-                  {formatCurrency(s.total)}
-                </TableCell>
-                {canSeeBreakdown && (
-                  <TableCell className="text-xs text-muted-foreground">
-                    {s.paymentMethod
-                      ? METHOD_OPTIONS.find(
-                          (o) => o.value === s.paymentMethod,
-                        )?.label ?? s.paymentMethod
-                      : '—'}
-                  </TableCell>
-                )}
-                <TableCell>
-                  <SaleStatusBadge status={s.status} />
-                </TableCell>
-                <TableCell className="text-right">
-                  <Button asChild variant="ghost" size="icon" title="Ver detalle">
-                    <Link href={`/ventas/${s.id}`}>
-                      <Eye className="h-4 w-4" />
+
+              {!list.isLoading && items.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="py-12 text-center font-bold text-slate-400">
+                    Ninguna venta coincide con la búsqueda o filtros.
+                  </td>
+                </tr>
+              )}
+
+              {items.map((s) => (
+                <tr
+                  key={s.id}
+                  onClick={() => {
+                    window.location.href = `/ventas/${s.id}`;
+                  }}
+                  className="group cursor-pointer transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-800/10"
+                >
+                  <td className="py-5 pl-6 font-mono font-bold text-slate-900 dark:text-white">
+                    <Link href={`/ventas/${s.id}`} onClick={(e) => e.stopPropagation()} className="hover:underline">
+                      {s.number}
                     </Link>
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+                  </td>
+                  <td className="py-5 font-medium text-slate-500 dark:text-slate-400">
+                    {new Date(s.date).toLocaleDateString('es-CL', { dateStyle: 'short' })}
+                  </td>
+                  <td className="max-w-[240px] truncate py-5 font-bold text-slate-950 dark:text-white">
+                    {s.customer?.name ?? <span className="font-medium text-slate-400">—</span>}
+                  </td>
+                  <td className="py-5 text-right font-mono font-semibold text-slate-600 dark:text-slate-400">
+                    {s.items?.length ?? 0}
+                  </td>
+                  <td className="py-5 text-right font-mono text-[13px] font-black text-slate-900 dark:text-white">
+                    {formatCurrency(s.total)}
+                  </td>
+                  {canSeeBreakdown && (
+                    <td className="py-5 pl-8 font-medium text-slate-500 dark:text-slate-400">
+                      {s.paymentMethod
+                        ? METHOD_OPTIONS.find((o) => o.value === s.paymentMethod)?.label ?? s.paymentMethod
+                        : '—'}
+                    </td>
+                  )}
+                  <td className="py-5 pl-8">
+                    <SaleStatusBadge status={s.status} />
+                  </td>
+                  <td className="py-5 pr-6 text-right">
+                    <Link
+                      href={`/ventas/${s.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      title="Ver detalle"
+                      className="inline-flex items-center justify-center p-2 text-slate-400 transition-colors hover:text-slate-600 dark:hover:text-white"
+                    >
+                      <Eye className="h-[18px] w-[18px]" />
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <span>
+      {/* PAGINACIÓN */}
+      <div className="flex items-center justify-between text-xs font-medium text-slate-400 dark:text-slate-500">
+        <div>
           {total} venta{total === 1 ? '' : 's'}
           {total > 0 ? ` · página ${page} de ${totalPages}` : ''}
-        </span>
+        </div>
         {total > 0 && (
           <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
+            <button
               onClick={() => setFilter('page', String(Math.max(1, page - 1)))}
               disabled={page === 1}
+              className="cursor-pointer rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2 font-bold text-slate-700 transition-all hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:text-slate-300 dark:hover:bg-slate-900"
             >
               Anterior
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
+            </button>
+            <button
               onClick={() => setFilter('page', String(Math.min(totalPages, page + 1)))}
               disabled={page >= totalPages}
+              className="cursor-pointer rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2 font-bold text-slate-700 transition-all hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:text-slate-300 dark:hover:bg-slate-900"
             >
               Siguiente
-            </Button>
+            </button>
           </div>
         )}
       </div>
@@ -487,30 +461,32 @@ function KpiCard({
   label,
   value,
   hint,
+  truncateHint,
 }: {
   label: string;
   value: string;
   hint?: string;
+  truncateHint?: boolean;
 }) {
   return (
-    <div className="rounded-md border bg-card p-4">
-      <div className="text-xs uppercase tracking-wide text-muted-foreground">
+    <div className="select-none space-y-1 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+      <span className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
         {label}
-      </div>
-      <div className="mt-1 text-xl font-semibold tabular-nums">{value}</div>
+      </span>
+      <span className="block text-[20px] font-black tracking-tight tabular-nums text-slate-900 dark:text-white">
+        {value}
+      </span>
       {hint && (
-        <div className="mt-1 text-xs text-muted-foreground">{hint}</div>
+        <span className={`block text-[10.5px] font-bold text-slate-400 dark:text-slate-500 ${truncateHint ? 'truncate' : ''}`}>
+          {hint}
+        </span>
       )}
     </div>
   );
 }
 
-function buildSalesExportQuery(
-  params: Record<string, string | undefined>,
-): string {
-  const entries = Object.entries(params).filter(
-    ([, v]) => v != null && v !== '',
-  ) as [string, string][];
+function buildSalesExportQuery(params: Record<string, string | undefined>): string {
+  const entries = Object.entries(params).filter(([, v]) => v != null && v !== '') as [string, string][];
   if (entries.length === 0) return '';
   return '?' + entries.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
 }

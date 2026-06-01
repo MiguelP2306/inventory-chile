@@ -185,7 +185,7 @@ export default function ComprasPage() {
           FILTROS
           ============================================================ */}
       <div className="space-y-3">
-        <div className="relative">
+        <div className="relative max-w-[480px]">
           <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             type="text"

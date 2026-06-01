@@ -1,31 +1,13 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  Check,
-  ExternalLink,
-  FileText,
-  MessageCircle,
-  Search,
-  X,
-} from 'lucide-react';
+import { Check, FileText, MessageCircle, Search, X } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { LifecycleBadge } from '@/components/lifecycle-badge';
 import { QuotationStatusBadge } from '@/components/quotation-status-badge';
 import { MarkLostDialog } from '@/components/mark-lost-dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { getCompanySettings } from '@/lib/cashbox-api';
 import { apiErrorMessage } from '@/lib/catalog-api';
@@ -49,6 +31,18 @@ const TABS: { value: FollowUpTab; label: string }[] = [
 
 const PAGE_SIZE = 20;
 
+const PILL_LIST =
+  'h-auto gap-1 rounded-2xl border border-slate-200 bg-slate-100/70 p-1 shadow-sm dark:border-slate-800 dark:bg-slate-900/80';
+const PILL_TRIGGER =
+  'rounded-xl px-4 py-2 text-[11.5px] font-bold text-slate-500 transition-all hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 data-[state=active]:bg-[#2F6BFF] data-[state=active]:font-black data-[state=active]:text-white data-[state=active]:shadow-md';
+const ICON_BTN =
+  'inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:bg-[#11151C] dark:text-slate-400 dark:hover:bg-slate-900';
+
+/**
+ * /seguimiento — Rediseño UI (look de la web). SOLO UI/UX.
+ * Lógica idéntica: tabs (pendientes/sin-respuesta/vencidos/último contacto),
+ * listFollowUps paginado + search, touchCustomer, link wa.me, MarkLostDialog.
+ */
 export default function SeguimientoPage() {
   const qc = useQueryClient();
   const filters = useUrlFilters({ tab: 'pendientes', q: '', page: '' });
@@ -58,10 +52,7 @@ export default function SeguimientoPage() {
   const page = Number(values.page || '1');
   const debouncedQ = (values.q ?? '').trim();
 
-  const [lostTarget, setLostTarget] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
+  const [lostTarget, setLostTarget] = useState<{ id: string; name: string } | null>(null);
 
   const settings = useQuery({
     queryKey: ['settings', 'company'],
@@ -72,12 +63,7 @@ export default function SeguimientoPage() {
   const followUpsQ = useQuery({
     queryKey: ['follow-ups', { tab, q: debouncedQ, page }],
     queryFn: () =>
-      listFollowUps({
-        tab,
-        q: debouncedQ || undefined,
-        page,
-        pageSize: PAGE_SIZE,
-      }),
+      listFollowUps({ tab, q: debouncedQ || undefined, page, pageSize: PAGE_SIZE }),
   });
 
   const touchMut = useMutation({
@@ -101,9 +87,7 @@ export default function SeguimientoPage() {
     const message = applyWhatsappTokens(template, {
       cliente: row.customerName,
       cotizacion: row.latestQuotation?.number ?? '',
-      total: row.latestQuotation
-        ? formatCurrency(row.latestQuotation.total)
-        : '',
+      total: row.latestQuotation ? formatCurrency(row.latestQuotation.total) : '',
       link: row.latestQuotation
         ? `${window.location.origin}/p/cotizacion/${row.latestQuotation.publicToken}`
         : '',
@@ -112,241 +96,203 @@ export default function SeguimientoPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-in fade-in duration-200">
+      {/* HEADER */}
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold">Seguimiento comercial</h1>
-        <p className="text-sm text-muted-foreground">
-          Cotizaciones del día — {new Date().toLocaleDateString('es-CL', {
+        <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">
+          Seguimiento comercial
+        </h1>
+        <p className="max-w-3xl text-xs font-medium text-slate-500 dark:text-slate-400">
+          Cotizaciones del día —{' '}
+          {new Date().toLocaleDateString('es-CL', {
             weekday: 'long',
             day: 'numeric',
             month: 'long',
-          })}. Solo se muestran clientes con cotizaciones abiertas creadas
-          hoy. El badge refleja el estado actual de la cotización.
+          })}
+          . Solo se muestran clientes con cotizaciones abiertas creadas hoy. El
+          badge refleja el estado actual de la cotización.
         </p>
       </div>
 
-      <Tabs
-        value={tab}
-        onValueChange={(v) => setFilters({ tab: v, page: null })}
-      >
-        <TabsList>
-          {TABS.map((t) => (
-            <TabsTrigger key={t.value} value={t.value}>
-              {t.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+      {/* TABS + SEARCH */}
+      <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
+        <Tabs value={tab} onValueChange={(v) => setFilters({ tab: v, page: null })}>
+          <TabsList className={PILL_LIST}>
+            {TABS.map((t) => (
+              <TabsTrigger key={t.value} value={t.value} className={PILL_TRIGGER}>
+                {t.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
 
-      <div className="relative max-w-md">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={search.value}
-          onChange={(e) => search.setValue(e.target.value)}
-          placeholder="Buscar por nombre, RUT, email o teléfono"
-          className="pl-9"
-        />
+        <div className="relative w-full max-w-[480px]">
+          <Search className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400" />
+          <input
+            value={search.value}
+            onChange={(e) => search.setValue(e.target.value)}
+            placeholder="Buscar por nombre, RUT, email o teléfono…"
+            className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-xs font-medium text-slate-700 shadow-sm transition-all placeholder:text-slate-400 focus:border-[#2F6BFF] focus:outline-none dark:border-slate-850 dark:bg-[#11151C] dark:text-white"
+          />
+        </div>
       </div>
 
-      <div className="rounded-md border bg-card">
-        <Table stickyFirstColumn>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Cliente</TableHead>
-              <TableHead>Último contacto</TableHead>
-              <TableHead>Próximo follow-up</TableHead>
-              <TableHead>Cotización</TableHead>
-              <TableHead>Estado</TableHead>
-              <TableHead className="text-right">Acciones</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {followUpsQ.isLoading && (
-              <>
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <TableRow key={i}>
-                    <TableCell colSpan={6}>
-                      <Skeleton className="h-4 w-full" />
-                    </TableCell>
-                  </TableRow>
+      {/* TABLA */}
+      <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[820px] border-collapse text-left text-[12px]">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/50 font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-800 dark:bg-slate-900/10 dark:text-slate-500">
+                <th className="py-4 pl-6">Cliente</th>
+                <th className="py-4">Último contacto</th>
+                <th className="py-4">Próximo follow-up</th>
+                <th className="py-4">Cotización</th>
+                <th className="py-4">Estado</th>
+                <th className="py-4 pr-6 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+              {followUpsQ.isLoading &&
+                Array.from({ length: 5 }).map((_, i) => (
+                  <tr key={i}>
+                    <td colSpan={6} className="px-6 py-5">
+                      <div className="h-4 w-full animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+                    </td>
+                  </tr>
                 ))}
-              </>
-            )}
-            {!followUpsQ.isLoading && rows.length === 0 && (
-              <TableRow>
-                <TableCell
-                  colSpan={6}
-                  className="py-8 text-center text-muted-foreground"
-                >
-                  No hay clientes en este estado.
-                </TableCell>
-              </TableRow>
-            )}
-            {rows.map((row) => {
-              const waUrl = buildWaUrl(row);
-              return (
-                <TableRow key={row.customerId}>
-                  <TableCell>
-                    <div className="flex flex-col">
+
+              {!followUpsQ.isLoading && rows.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center font-bold text-slate-400">
+                    No hay clientes en este estado.
+                  </td>
+                </tr>
+              )}
+
+              {rows.map((row) => {
+                const waUrl = buildWaUrl(row);
+                return (
+                  <tr key={row.customerId} className="transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-800/10">
+                    <td className="py-5 pl-6">
                       <Link
                         href={`/clientes/${row.customerId}`}
-                        className="font-medium hover:underline"
+                        className="font-bold text-slate-900 hover:underline dark:text-white"
                       >
                         {row.customerName}
                       </Link>
-                      <span className="text-xs text-muted-foreground font-mono">
-                        {row.customerTaxId}
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    {row.lastContactAt ? (
-                      <span title={row.lastContactAt}>
-                        {relativeTime(row.lastContactAt)}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {row.nextFollowUpAt ? (
-                      <span title={row.nextFollowUpAt}>
-                        {relativeTime(row.nextFollowUpAt)}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {row.latestQuotation ? (
-                      <Link
-                        href={`/cotizaciones/${row.latestQuotation.id}`}
-                        className="text-sm hover:underline"
-                      >
-                        <span className="font-mono">
-                          {row.latestQuotation.number}
-                        </span>{' '}
-                        <span className="text-muted-foreground">
-                          · {formatCurrency(row.latestQuotation.total)}
-                        </span>
-                      </Link>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {/* Ronda 10 — badge = estado de la cotización del día.
-                        Si no hay cotización (caso teórico, el EXISTS lo
-                        bloquea) cae al lifecycle del Customer. */}
-                    {row.latestQuotation ? (
-                      <QuotationStatusBadge
-                        status={row.latestQuotation.status}
-                      />
-                    ) : (
-                      <LifecycleBadge status={row.lifecycleStatus} />
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
-                      {waUrl ? (
-                        <a
-                          href={waUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            className="border-emerald-500/40 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300"
+                      <div className="font-mono text-[11px] text-slate-400">{row.customerTaxId}</div>
+                    </td>
+                    <td className="py-5 font-medium text-slate-500 dark:text-slate-400">
+                      {row.lastContactAt ? (
+                        <span title={row.lastContactAt}>{relativeTime(row.lastContactAt)}</span>
+                      ) : (
+                        <span className="text-slate-300 dark:text-slate-600">—</span>
+                      )}
+                    </td>
+                    <td className="py-5 font-medium text-slate-500 dark:text-slate-400">
+                      {row.nextFollowUpAt ? (
+                        <span title={row.nextFollowUpAt}>{relativeTime(row.nextFollowUpAt)}</span>
+                      ) : (
+                        <span className="text-slate-300 dark:text-slate-600">—</span>
+                      )}
+                    </td>
+                    <td className="py-5">
+                      {row.latestQuotation ? (
+                        <Link href={`/cotizaciones/${row.latestQuotation.id}`} className="hover:underline">
+                          <span className="font-mono font-bold text-slate-900 dark:text-white">
+                            {row.latestQuotation.number}
+                          </span>{' '}
+                          <span className="font-medium text-slate-400">
+                            · {formatCurrency(row.latestQuotation.total)}
+                          </span>
+                        </Link>
+                      ) : (
+                        <span className="text-slate-300 dark:text-slate-600">—</span>
+                      )}
+                    </td>
+                    <td className="py-5">
+                      {row.latestQuotation ? (
+                        <QuotationStatusBadge status={row.latestQuotation.status} />
+                      ) : (
+                        <LifecycleBadge status={row.lifecycleStatus} />
+                      )}
+                    </td>
+                    <td className="py-5 pr-6">
+                      <div className="flex justify-end gap-1.5">
+                        {waUrl ? (
+                          <a
+                            href={waUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
                             title="Enviar WhatsApp"
+                            className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50/50 text-emerald-600 transition-colors hover:bg-emerald-50 dark:border-emerald-950/30 dark:bg-emerald-950/15 dark:text-emerald-400"
                           >
                             <MessageCircle className="h-4 w-4" />
-                          </Button>
-                        </a>
-                      ) : (
-                        <Button
+                          </a>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled
+                            title="Sin WhatsApp / teléfono configurado"
+                            className={ICON_BTN}
+                          >
+                            <MessageCircle className="h-4 w-4" />
+                          </button>
+                        )}
+                        <button
                           type="button"
-                          variant="outline"
-                          size="icon"
-                          disabled
-                          title="Sin WhatsApp / teléfono configurado"
+                          onClick={() => touchMut.mutate(row.customerId)}
+                          disabled={touchMut.isPending}
+                          title="Marcar contacto"
+                          className={ICON_BTN}
                         >
-                          <MessageCircle className="h-4 w-4" />
-                        </Button>
-                      )}
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        onClick={() => touchMut.mutate(row.customerId)}
-                        disabled={touchMut.isPending}
-                        title="Marcar contacto"
-                      >
-                        <Check className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        asChild
-                        title="Ver cotizaciones del cliente"
-                      >
+                          <Check className="h-4 w-4" />
+                        </button>
                         <Link
                           href={`/cotizaciones?customer=${row.customerId}`}
+                          title="Ver cotizaciones del cliente"
+                          className={ICON_BTN}
                         >
                           <FileText className="h-4 w-4" />
                         </Link>
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="border-destructive/40 text-destructive hover:bg-destructive/10"
-                        onClick={() =>
-                          setLostTarget({
-                            id: row.customerId,
-                            name: row.customerName,
-                          })
-                        }
-                        title="Marcar como perdido"
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
+                        <button
+                          type="button"
+                          onClick={() => setLostTarget({ id: row.customerId, name: row.customerName })}
+                          title="Marcar como perdido"
+                          className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-rose-100 bg-rose-50/50 text-rose-500 transition-colors hover:bg-rose-50 dark:border-rose-950/30 dark:bg-rose-950/15 dark:text-rose-400"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {total > 0 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
+        <div className="flex items-center justify-between text-xs font-medium text-slate-400 dark:text-slate-500">
           <span>
-            {total} cliente{total === 1 ? '' : 's'} · página {page} de{' '}
-            {totalPages}
+            {total} cliente{total === 1 ? '' : 's'} · página {page} de {totalPages}
           </span>
           <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
+            <button
               onClick={() => setFilter('page', String(Math.max(1, page - 1)))}
               disabled={page === 1}
+              className="cursor-pointer rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2 font-bold text-slate-700 transition-all hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:text-slate-300 dark:hover:bg-slate-900"
             >
               Anterior
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                setFilter('page', String(Math.min(totalPages, page + 1)))
-              }
+            </button>
+            <button
+              onClick={() => setFilter('page', String(Math.min(totalPages, page + 1)))}
               disabled={page >= totalPages}
+              className="cursor-pointer rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2 font-bold text-slate-700 transition-all hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:text-slate-300 dark:hover:bg-slate-900"
             >
               Siguiente
-            </Button>
+            </button>
           </div>
         </div>
       )}

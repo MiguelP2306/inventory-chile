@@ -1,29 +1,11 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Eye, Plus } from 'lucide-react';
+import { Eye, Plus, Search } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { DispatchStatusBadge } from '@/components/dispatch-status-badge';
 import { QuickOpFromSaleDialog } from '@/components/quick-op-from-sale-dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { listDispatchNotes } from '@/lib/dispatch-api';
 import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
@@ -32,14 +14,15 @@ import type { DispatchStatusDto } from '@inventory/shared';
 const ALL = '__all__';
 const PAGE_SIZE = 20;
 
+const FIELD =
+  'w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-xs font-semibold text-slate-700 transition-all focus:border-[#2F6BFF] focus:outline-none dark:border-slate-850 dark:bg-[#11151C] dark:text-white';
+
+/**
+ * /guias — Rediseño UI (look de la web). SOLO UI/UX. Lógica idéntica:
+ * filtros URL + debounce, listDispatchNotes paginado, QuickOpFromSaleDialog.
+ */
 export default function GuiasPage() {
-  const filters = useUrlFilters({
-    status: '',
-    q: '',
-    dateFrom: '',
-    dateTo: '',
-    page: '',
-  });
+  const filters = useUrlFilters({ status: '', q: '', dateFrom: '', dateTo: '', page: '' });
   const { values, setFilter, clear } = filters;
   const search = useDebouncedUrlFilter(filters, 'q', { resetKeys: ['page'] });
 
@@ -49,8 +32,7 @@ export default function GuiasPage() {
   const page = Number(values.page || '1');
   const debouncedQ = (values.q ?? '').trim();
 
-  const filtersActive =
-    status !== ALL || dateFrom !== '' || dateTo !== '' || search.value !== '';
+  const filtersActive = status !== ALL || dateFrom !== '' || dateTo !== '' || search.value !== '';
 
   const list = useQuery({
     queryKey: ['dispatch-notes', { status, debouncedQ, dateFrom, dateTo, page }],
@@ -72,166 +54,178 @@ export default function GuiasPage() {
   const [quickOpen, setQuickOpen] = useState(false);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="space-y-6 animate-in fade-in duration-200">
+      {/* HEADER */}
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
         <div>
-          <h1 className="text-2xl font-semibold">Guías de despacho</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">
+            Guías de despacho
+          </h1>
+          <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
             Documentos operativos del envío físico de las ventas.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5 self-start sm:self-auto">
           {filtersActive && (
-            <Button variant="ghost" size="sm" onClick={clear}>
+            <button
+              onClick={clear}
+              className="cursor-pointer rounded-xl px-3 py-2 text-xs font-bold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            >
               Limpiar filtros
-            </Button>
+            </button>
           )}
-          <Button onClick={() => setQuickOpen(true)}>
+          <button
+            onClick={() => setQuickOpen(true)}
+            className="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-2xl bg-[#2F6BFF] px-5 py-3 text-xs font-bold text-white shadow-md transition-colors hover:bg-[#2F6BFF]/90"
+          >
             <Plus className="h-4 w-4" />
-            Nueva guía
-          </Button>
+            <span>Nueva guía</span>
+          </button>
         </div>
       </div>
 
-      <QuickOpFromSaleDialog
-        action="dispatch"
-        open={quickOpen}
-        onOpenChange={setQuickOpen}
-      />
+      <QuickOpFromSaleDialog action="dispatch" open={quickOpen} onOpenChange={setQuickOpen} />
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-        <Input
-          placeholder="Buscar (número, venta, transportista, tracking)"
-          value={search.value}
-          onChange={(e) => search.setValue(e.target.value)}
-          className="md:col-span-2"
-        />
-        <Select
+      {/* FILTROS */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="relative lg:col-span-2">
+          <Search className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={search.value}
+            onChange={(e) => search.setValue(e.target.value)}
+            placeholder="Buscar nº, venta, transportista, tracking…"
+            className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-xs font-medium text-slate-700 transition-all placeholder:text-slate-400 focus:border-[#2F6BFF] focus:outline-none dark:border-slate-850 dark:bg-[#11151C] dark:text-white"
+          />
+        </div>
+        <select
           value={status}
-          onValueChange={(v) => {
-            setFilter('status', v === ALL ? null : v);
+          onChange={(e) => {
+            setFilter('status', e.target.value === ALL ? null : e.target.value);
             setFilter('page', null);
           }}
+          className={FIELD}
         >
-          <SelectTrigger>
-            <SelectValue placeholder="Estado" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Todos los estados</SelectItem>
-            <SelectItem value="ACTIVE">Activas</SelectItem>
-            <SelectItem value="VOIDED">Anuladas</SelectItem>
-          </SelectContent>
-        </Select>
-        <Input
+          <option value={ALL}>Todos los estados</option>
+          <option value="ACTIVE">Activas</option>
+          <option value="VOIDED">Anuladas</option>
+        </select>
+        <input
           type="date"
           value={dateFrom}
           onChange={(e) => {
             setFilter('dateFrom', e.target.value || null);
             setFilter('page', null);
           }}
+          className={FIELD}
         />
       </div>
 
-      <div className="rounded-md border bg-card">
-        <Table stickyFirstColumn>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Número</TableHead>
-              <TableHead>Fecha</TableHead>
-              <TableHead>Venta</TableHead>
-              <TableHead>Cliente</TableHead>
-              <TableHead>Transportista</TableHead>
-              <TableHead>Estado</TableHead>
-              <TableHead className="w-[80px]" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {list.isLoading && (
-              <>
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <TableRow key={i}>
-                    <TableCell colSpan={7}>
-                      <Skeleton className="h-4 w-full" />
-                    </TableCell>
-                  </TableRow>
+      {/* TABLA */}
+      <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[820px] border-collapse text-left text-[12px]">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/50 font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-800 dark:bg-slate-900/10 dark:text-slate-500">
+                <th className="py-4 pl-6">Número</th>
+                <th className="py-4">Fecha</th>
+                <th className="py-4">Venta</th>
+                <th className="py-4">Cliente</th>
+                <th className="py-4">Transportista</th>
+                <th className="py-4 pl-8">Estado</th>
+                <th className="w-[60px] py-4 pr-6 text-right" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+              {list.isLoading &&
+                Array.from({ length: 5 }).map((_, i) => (
+                  <tr key={i}>
+                    <td colSpan={7} className="px-6 py-5">
+                      <div className="h-4 w-full animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+                    </td>
+                  </tr>
                 ))}
-              </>
-            )}
-            {!list.isLoading && items.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
-                  Sin guías de despacho.
-                </TableCell>
-              </TableRow>
-            )}
-            {items.map((d) => (
-              <TableRow
-                key={d.id}
-                className={d.status === 'VOIDED' ? 'opacity-60' : ''}
-              >
-                <TableCell className="font-mono text-xs">
-                  <Link href={`/guias/${d.id}`} className="hover:underline">
-                    {d.number}
-                  </Link>
-                </TableCell>
-                <TableCell>
-                  {new Date(d.dispatchedAt).toLocaleDateString('es-CL', {
-                    dateStyle: 'short',
-                  })}
-                </TableCell>
-                <TableCell className="font-mono text-xs">
-                  {d.sale?.number ?? '—'}
-                </TableCell>
-                <TableCell className="max-w-[200px] truncate">
-                  {d.sale?.customer?.name ?? '—'}
-                </TableCell>
-                <TableCell className="text-sm">
-                  {d.carrier ?? <span className="text-muted-foreground">—</span>}
-                  {d.trackingNumber && (
-                    <span className="ml-2 font-mono text-xs text-muted-foreground">
-                      {d.trackingNumber}
-                    </span>
-                  )}
-                </TableCell>
-                <TableCell>
-                  <DispatchStatusBadge status={d.status} />
-                </TableCell>
-                <TableCell className="text-right">
-                  <Button asChild variant="ghost" size="icon" title="Ver detalle">
-                    <Link href={`/guias/${d.id}`}>
-                      <Eye className="h-4 w-4" />
+
+              {!list.isLoading && items.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="py-12 text-center font-bold text-slate-400">
+                    Ninguna guía coincide con la búsqueda o filtros.
+                  </td>
+                </tr>
+              )}
+
+              {items.map((d) => (
+                <tr
+                  key={d.id}
+                  onClick={() => {
+                    window.location.href = `/guias/${d.id}`;
+                  }}
+                  className={`group cursor-pointer transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-800/10 ${
+                    d.status === 'VOIDED' ? 'opacity-55' : ''
+                  }`}
+                >
+                  <td className="py-5 pl-6 font-mono font-bold text-slate-900 dark:text-white">
+                    <Link href={`/guias/${d.id}`} onClick={(e) => e.stopPropagation()} className="hover:underline">
+                      {d.number}
                     </Link>
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+                  </td>
+                  <td className="py-5 font-medium text-slate-500 dark:text-slate-400">
+                    {new Date(d.dispatchedAt).toLocaleDateString('es-CL', { dateStyle: 'short' })}
+                  </td>
+                  <td className="py-5 font-mono text-[11.5px] text-slate-500 dark:text-slate-400">
+                    {d.sale?.number ?? '—'}
+                  </td>
+                  <td className="max-w-[180px] truncate py-5 font-bold text-slate-950 dark:text-white">
+                    {d.sale?.customer?.name ?? '—'}
+                  </td>
+                  <td className="py-5 font-medium text-slate-600 dark:text-slate-400">
+                    {d.carrier ?? <span className="text-slate-300 dark:text-slate-600">—</span>}
+                    {d.trackingNumber && (
+                      <span className="ml-2 font-mono text-[11px] text-slate-400">{d.trackingNumber}</span>
+                    )}
+                  </td>
+                  <td className="py-5 pl-8">
+                    <DispatchStatusBadge status={d.status} />
+                  </td>
+                  <td className="py-5 pr-6 text-right">
+                    <Link
+                      href={`/guias/${d.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      title="Ver detalle"
+                      className="inline-flex items-center justify-center p-2 text-slate-400 transition-colors hover:text-slate-600 dark:hover:text-white"
+                    >
+                      <Eye className="h-[18px] w-[18px]" />
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <span>
+      {/* PAGINACIÓN */}
+      <div className="flex items-center justify-between text-xs font-medium text-slate-400 dark:text-slate-500">
+        <div>
           {total} gu{total === 1 ? 'ía' : 'ías'}
           {total > 0 ? ` · página ${page} de ${totalPages}` : ''}
-        </span>
+        </div>
         {total > 0 && (
           <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
+            <button
               onClick={() => setFilter('page', String(Math.max(1, page - 1)))}
               disabled={page === 1}
+              className="cursor-pointer rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2 font-bold text-slate-700 transition-all hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:text-slate-300 dark:hover:bg-slate-900"
             >
               Anterior
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
+            </button>
+            <button
               onClick={() => setFilter('page', String(Math.min(totalPages, page + 1)))}
               disabled={page >= totalPages}
+              className="cursor-pointer rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2 font-bold text-slate-700 transition-all hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:text-slate-300 dark:hover:bg-slate-900"
             >
               Siguiente
-            </Button>
+            </button>
           </div>
         )}
       </div>

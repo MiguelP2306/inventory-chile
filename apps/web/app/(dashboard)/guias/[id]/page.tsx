@@ -1,36 +1,23 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import {
-  ArrowLeft,
-  Ban,
-  ChevronDown,
-  ExternalLink,
-  FileText,
-  Printer,
-} from 'lucide-react';
+import { ArrowLeft, Ban, ChevronDown, ExternalLink, FileText, Printer } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
 import { DispatchStatusBadge } from '@/components/dispatch-status-badge';
 import { VoidDispatchDialog } from '@/components/forms/void-dispatch-dialog';
-import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { getDispatchNote, getDispatchPdfUrl } from '@/lib/dispatch-api';
+
+const CARD =
+  'rounded-2xl border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-850 dark:bg-[#11151C]';
+const LABEL = 'text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500';
 
 export default function GuiaDetailPage() {
   const params = useParams<{ id: string }>();
@@ -43,10 +30,10 @@ export default function GuiaDetailPage() {
     enabled: !!id,
   });
 
-  if (dq.isLoading) return <Skeleton className="h-40 w-full" />;
+  if (dq.isLoading) return <div className="h-40 w-full animate-pulse rounded-3xl bg-slate-100 dark:bg-slate-800" />;
   if (!dq.data) {
     return (
-      <div className="rounded-md border bg-card p-6 text-sm text-muted-foreground">
+      <div className="rounded-3xl border border-slate-100 bg-white p-6 text-sm font-semibold text-slate-400 dark:border-slate-850 dark:bg-[#11151C]">
         Guía no encontrada.
       </div>
     );
@@ -54,71 +41,65 @@ export default function GuiaDetailPage() {
 
   const d = dq.data;
   const canVoid = d.status === 'ACTIVE';
-
-  const addressLine = [d.addressStreet, d.addressNumber, d.commune?.name]
-    .filter(Boolean)
-    .join(' ');
+  const addressLine = [d.addressStreet, d.addressNumber, d.commune?.name].filter(Boolean).join(' ');
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Button asChild variant="ghost" size="icon">
-            <Link href="/guias">
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-          </Button>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-semibold">{d.number}</h1>
+    <div className="space-y-6 animate-in fade-in duration-200">
+      {/* HEADER */}
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
+        <div className="flex items-start gap-4">
+          <Link
+            href="/guias"
+            title="Volver"
+            className="cursor-pointer rounded-xl border border-slate-200 bg-white p-2 transition-colors hover:bg-slate-50 dark:border-slate-850 dark:bg-[#11151C] dark:hover:bg-slate-800"
+          >
+            <ArrowLeft className="h-5 w-5 text-slate-500" />
+          </Link>
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="font-mono text-2xl font-black tracking-tight text-slate-900 dark:text-white">
+                {d.number}
+              </h1>
               <DispatchStatusBadge status={d.status} />
             </div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
               Despachada el{' '}
-              {new Date(d.dispatchedAt).toLocaleString('es-CL', {
-                dateStyle: 'long',
-                timeStyle: 'short',
-              })}
+              {new Date(d.dispatchedAt).toLocaleString('es-CL', { dateStyle: 'long', timeStyle: 'short' })}
               {d.user ? ` por ${d.user.name}` : ''}
             </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canVoid && (
-            <Button
-              variant="outline"
+            <button
+              type="button"
               onClick={() => setVoidOpen(true)}
-              className="text-destructive hover:text-destructive"
+              className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-rose-100 bg-rose-50/50 px-4 py-2.5 text-xs font-bold text-rose-500 transition-colors hover:bg-rose-50 dark:border-rose-950/30 dark:bg-rose-950/15 dark:text-rose-400"
             >
               <Ban className="h-4 w-4" />
               Anular guía
-            </Button>
+            </button>
           )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button>
+              <button
+                type="button"
+                className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-[#2F6BFF] px-4 py-2.5 text-xs font-bold text-white shadow-md transition-all hover:opacity-90"
+              >
                 <Printer className="h-4 w-4" />
                 Imprimir
                 <ChevronDown className="h-4 w-4" />
-              </Button>
+              </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem asChild>
-                <a
-                  href={getDispatchPdfUrl(d.id, 'letter')}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
+                <a href={getDispatchPdfUrl(d.id, 'letter')} target="_blank" rel="noopener noreferrer">
                   <FileText className="h-4 w-4" />
                   Carta (A4)
                 </a>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
-                <a
-                  href={getDispatchPdfUrl(d.id, 'thermal80')}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
+                <a href={getDispatchPdfUrl(d.id, 'thermal80')} target="_blank" rel="noopener noreferrer">
                   <FileText className="h-4 w-4" />
                   Térmica 80mm
                 </a>
@@ -128,123 +109,117 @@ export default function GuiaDetailPage() {
         </div>
       </div>
 
+      {/* BANNER anulada */}
       {d.status === 'VOIDED' && (
-        <div className="rounded-md border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm">
-          <div className="font-medium text-destructive">Guía anulada</div>
+        <div className="space-y-2 rounded-3xl border border-rose-100 bg-rose-50/50 p-5 dark:border-rose-950/20 dark:bg-rose-950/5">
+          <h4 className="text-sm font-black text-rose-500">Guía anulada</h4>
           {d.voidedAt && (
-            <div className="text-xs text-muted-foreground">
-              {new Date(d.voidedAt).toLocaleString('es-CL', {
-                dateStyle: 'long',
-                timeStyle: 'short',
-              })}
+            <p className="text-xs font-medium text-slate-500">
+              {new Date(d.voidedAt).toLocaleString('es-CL', { dateStyle: 'long', timeStyle: 'short' })}
               {d.voidedBy ? ` por ${d.voidedBy.name}` : ''}
-            </div>
+            </p>
           )}
           {d.voidReason && (
-            <div className="mt-2 whitespace-pre-wrap text-sm">
-              <span className="text-muted-foreground">Motivo: </span>
-              {d.voidReason}
-            </div>
+            <p className="whitespace-pre-wrap text-xs font-bold text-slate-800 dark:text-slate-200">
+              Motivo:{' '}
+              <span className="font-semibold text-slate-600 dark:text-slate-400">{d.voidReason}</span>
+            </p>
           )}
         </div>
       )}
 
+      {/* VENTA / DIRECCIÓN / TRANSPORTE */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <div className="rounded-md border bg-card p-4 space-y-1 text-sm">
-          <h2 className="text-sm font-semibold text-muted-foreground">
-            Venta origen
-          </h2>
+        <div className={`space-y-1 ${CARD}`}>
+          <h2 className={LABEL}>Venta origen</h2>
           {d.sale ? (
-            <Button asChild variant="link" size="sm" className="px-0">
-              <Link href={`/ventas/${d.sale.id}`}>
-                {d.sale.number}
-                <ExternalLink className="h-3 w-3" />
-              </Link>
-            </Button>
+            <Link
+              href={`/ventas/${d.sale.id}`}
+              className="inline-flex items-center gap-1 font-mono text-sm font-bold text-[#2F6BFF] hover:underline"
+            >
+              {d.sale.number} <ExternalLink className="h-3 w-3" />
+            </Link>
           ) : (
-            '—'
+            <span className="text-xs text-slate-400">—</span>
           )}
           {d.sale?.customer && (
-            <div className="text-muted-foreground">
+            <div className="text-xs text-slate-500 dark:text-slate-400">
               {d.sale.customer.name} · RUT {d.sale.customer.taxId}
             </div>
           )}
         </div>
-        <div className="rounded-md border bg-card p-4 space-y-1 text-sm">
-          <h2 className="text-sm font-semibold text-muted-foreground">
-            Dirección de entrega
-          </h2>
-          <div>{addressLine || <span className="text-muted-foreground">—</span>}</div>
-          {d.commune?.region && (
-            <div className="text-muted-foreground text-xs">
-              Región {d.commune.region}
-            </div>
-          )}
+        <div className={`space-y-1 ${CARD}`}>
+          <h2 className={LABEL}>Dirección de entrega</h2>
+          <div className="text-xs font-bold text-slate-700 dark:text-slate-200">
+            {addressLine || <span className="font-medium text-slate-400">—</span>}
+          </div>
+          {d.commune?.region && <div className="text-[11px] text-slate-400">Región {d.commune.region}</div>}
           {d.addressNotes && (
-            <p className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">
+            <p className="mt-1 whitespace-pre-wrap text-[11px] text-slate-500 dark:text-slate-400">
               {d.addressNotes}
             </p>
           )}
         </div>
-        <div className="rounded-md border bg-card p-4 space-y-1 text-sm">
-          <h2 className="text-sm font-semibold text-muted-foreground">
-            Transporte
-          </h2>
-          <div>
-            <span className="text-muted-foreground">Transportista: </span>
-            {d.carrier ?? <span className="text-muted-foreground">—</span>}
+        <div className={`space-y-1 ${CARD}`}>
+          <h2 className={LABEL}>Transporte</h2>
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            Transportista:{' '}
+            <span className="font-bold text-slate-700 dark:text-slate-200">
+              {d.carrier ?? '—'}
+            </span>
           </div>
           {d.trackingNumber && (
-            <div>
-              <span className="text-muted-foreground">N° seguimiento: </span>
-              <span className="font-mono text-xs">{d.trackingNumber}</span>
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              N° seguimiento: <span className="font-mono text-slate-700 dark:text-slate-300">{d.trackingNumber}</span>
             </div>
           )}
         </div>
       </div>
 
-      <div className="rounded-md border bg-card">
-        <div className="border-b p-4">
-          <h2 className="font-medium">Items despachados</h2>
+      {/* ITEMS */}
+      <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+        <div className="select-none border-b border-slate-100 p-5 dark:border-slate-850">
+          <h2 className={LABEL}>Items despachados</h2>
         </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>SKU</TableHead>
-              <TableHead>Producto</TableHead>
-              <TableHead className="text-right">Cantidad</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(d.sale?.items ?? []).map((it) => (
-              <TableRow key={it.id}>
-                <TableCell className="font-mono text-xs">
-                  {it.product?.sku ?? '—'}
-                </TableCell>
-                <TableCell>{it.product?.name ?? '—'}</TableCell>
-                <TableCell className="text-right tabular-nums font-medium">
-                  {it.qty}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[500px] border-collapse text-left text-[12px]">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/20 font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-850 dark:text-slate-500">
+                <th className="w-[20%] py-3 pl-6">SKU</th>
+                <th className="py-3">Producto</th>
+                <th className="w-[15%] py-3 pr-6 text-right">Cantidad</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 font-medium dark:divide-slate-850">
+              {(d.sale?.items ?? []).map((it) => (
+                <tr key={it.id} className="transition-colors hover:bg-slate-50/40 dark:hover:bg-slate-900/10">
+                  <td className="py-4 pl-6 font-mono text-slate-500 dark:text-slate-400">
+                    {it.product?.sku ?? '—'}
+                  </td>
+                  <td className="max-w-[300px] truncate py-4 font-bold text-slate-950 dark:text-white">
+                    {it.product?.name ?? '—'}
+                  </td>
+                  <td className="py-4 pr-6 text-right font-mono text-[13px] font-black text-slate-900 dark:text-white">
+                    {it.qty}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
+      {/* OBSERVACIONES */}
       {d.notes && (
-        <div className="rounded-md border bg-card p-4">
-          <h2 className="text-sm font-semibold text-muted-foreground">
-            Observaciones
-          </h2>
-          <p className="mt-2 whitespace-pre-wrap text-sm">{d.notes}</p>
+        <div className={`space-y-2 ${CARD}`}>
+          <h2 className={LABEL}>Observaciones</h2>
+          <p className="whitespace-pre-wrap text-xs font-semibold leading-relaxed text-slate-600 dark:text-slate-300">
+            {d.notes}
+          </p>
         </div>
       )}
 
-      <VoidDispatchDialog
-        note={d}
-        open={voidOpen}
-        onOpenChange={setVoidOpen}
-      />
+      <VoidDispatchDialog note={d} open={voidOpen} onOpenChange={setVoidOpen} />
     </div>
   );
 }

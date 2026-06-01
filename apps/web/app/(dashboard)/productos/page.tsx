@@ -331,7 +331,7 @@ export default function ProductosPage() {
           ============================================================ */}
       <div className="flex flex-col gap-3 lg:flex-row">
         {/* Search */}
-        <div className="relative min-w-[30%] flex-1">
+        <div className="relative min-w-[30%] flex-1 lg:max-w-[480px]">
           <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             type="text"

@@ -4,13 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { PurchaseSearchCombobox } from '@/components/purchase-search-combobox';
 import { SaleSearchCombobox } from '@/components/sale-search-combobox';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { SoftModal } from '@/components/ui/soft-modal';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export type QuickOpAction = 'return' | 'warranty' | 'dispatch';
@@ -45,13 +39,17 @@ const QUERY_PARAM: Record<QuickOpAction, string> = {
   dispatch: 'dispatch',
 };
 
+const PILL_TRIGGER =
+  'rounded-xl px-4 py-2 text-[11.5px] font-bold text-slate-500 transition-all data-[state=active]:bg-[#2F6BFF] data-[state=active]:font-black data-[state=active]:text-white data-[state=active]:shadow-md dark:text-slate-400';
+
 /**
- * Ronda 9 — dialog reusable para crear devoluciones / garantías / guías
- * sin tener que entrar al detalle primero.
+ * Dialog reusable para crear devoluciones / garantías / guías sin entrar al
+ * detalle primero. `action='return'` ofrece 2 tabs (Cliente desde venta /
+ * Proveedor desde compra). Los comboboxes muestran una lista paginada (4 por
+ * página) por defecto.
  *
- * Ronda 11 — `action='return'` ofrece 2 tabs (Cliente / Proveedor) para
- * cubrir tanto devoluciones desde ventas como desde compras. Las otras
- * acciones (warranty, dispatch) siguen siendo solo de ventas.
+ * Solo UI (look SoftModal de la web). La navegación al detalle con el query
+ * param de la op es idéntica.
  */
 export function QuickOpFromSaleDialog({ action, open, onOpenChange }: Props) {
   const router = useRouter();
@@ -61,19 +59,25 @@ export function QuickOpFromSaleDialog({ action, open, onOpenChange }: Props) {
   const [tab, setTab] = useState<'sale' | 'purchase'>('sale');
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>{copy.title}</DialogTitle>
-          <DialogDescription>{copy.description}</DialogDescription>
-        </DialogHeader>
+    <SoftModal
+      open={open}
+      onOpenChange={onOpenChange}
+      title={copy.title}
+      subtitle={copy.description}
+      size="xl"
+    >
+      <div className="space-y-4 p-5">
         {supportsSupplier ? (
           <Tabs value={tab} onValueChange={(v) => setTab(v as 'sale' | 'purchase')}>
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="sale">Cliente (desde venta)</TabsTrigger>
-              <TabsTrigger value="purchase">Proveedor (desde compra)</TabsTrigger>
+            <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-2xl border border-slate-200 bg-slate-100/70 p-1 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
+              <TabsTrigger value="sale" className={PILL_TRIGGER}>
+                Cliente (desde venta)
+              </TabsTrigger>
+              <TabsTrigger value="purchase" className={PILL_TRIGGER}>
+                Proveedor (desde compra)
+              </TabsTrigger>
             </TabsList>
-            <TabsContent value="sale" className="mt-3">
+            <TabsContent value="sale" className="mt-4">
               <SaleSearchCombobox
                 onPick={(s) => {
                   onOpenChange(false);
@@ -81,7 +85,7 @@ export function QuickOpFromSaleDialog({ action, open, onOpenChange }: Props) {
                 }}
               />
             </TabsContent>
-            <TabsContent value="purchase" className="mt-3">
+            <TabsContent value="purchase" className="mt-4">
               <PurchaseSearchCombobox
                 onPick={(p) => {
                   onOpenChange(false);
@@ -100,7 +104,7 @@ export function QuickOpFromSaleDialog({ action, open, onOpenChange }: Props) {
             }}
           />
         )}
-      </DialogContent>
-    </Dialog>
+      </div>
+    </SoftModal>
   );
 }
