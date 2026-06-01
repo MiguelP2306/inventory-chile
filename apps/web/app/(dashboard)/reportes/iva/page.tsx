@@ -14,18 +14,26 @@
 import { useQuery } from '@tanstack/react-query';
 import { Download, FileSpreadsheet, Receipt, ShoppingCart } from 'lucide-react';
 import { useState } from 'react';
+import { TablePagination } from '@/components/table-pagination';
 import { formatCurrency } from '@/lib/format';
 import { getIvaReport, ivaReportCsvUrl } from '@/lib/reports-api';
 import { cn } from '@/lib/utils';
 import { useUrlFilters } from '@/lib/use-url-filters';
 
+const PAGE_SIZE = 50;
+
 const FIELD =
   'w-44 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-700 outline-none transition-all focus:border-[#2F6BFF] focus:ring-2 focus:ring-[#2F6BFF]/15 dark:border-slate-850 dark:bg-[#11151C] dark:text-white';
 
 export default function ReporteIvaPage() {
-  const { values, setFilter } = useUrlFilters({ dateFrom: '', dateTo: '' });
+  const { values, setFilter } = useUrlFilters({
+    dateFrom: '',
+    dateTo: '',
+    page: '',
+  });
   const dateFrom = values.dateFrom ?? '';
   const dateTo = values.dateTo ?? '';
+  const page = Number(values.page || '1');
 
   const params = {
     dateFrom: dateFrom || undefined,
@@ -42,6 +50,24 @@ export default function ReporteIvaPage() {
   const balanceN = data ? Number(data.balance) : 0;
 
   const [tab, setTab] = useState<'ventas' | 'compras'>('ventas');
+
+  // Cambiar de pestaña reinicia a la primera página.
+  function changeTab(next: 'ventas' | 'compras') {
+    setTab(next);
+    setFilter('page', null);
+  }
+
+  // Paginación cliente sobre la pestaña activa (el reporte trae todo).
+  const salesRows = data?.salesRows ?? [];
+  const purchaseRows = data?.purchaseRows ?? [];
+  const activeRows = tab === 'ventas' ? salesRows : purchaseRows;
+  const totalPages = Math.max(1, Math.ceil(activeRows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const pagedSales =
+    tab === 'ventas' ? salesRows.slice(start, start + PAGE_SIZE) : [];
+  const pagedPurchases =
+    tab === 'compras' ? purchaseRows.slice(start, start + PAGE_SIZE) : [];
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200 text-slate-800 dark:text-slate-200">
@@ -77,7 +103,10 @@ export default function ReporteIvaPage() {
           <input
             type="date"
             value={dateFrom}
-            onChange={(e) => setFilter('dateFrom', e.target.value || null)}
+            onChange={(e) => {
+              setFilter('dateFrom', e.target.value || null);
+              setFilter('page', null);
+            }}
             className={FIELD}
           />
         </div>
@@ -88,7 +117,10 @@ export default function ReporteIvaPage() {
           <input
             type="date"
             value={dateTo}
-            onChange={(e) => setFilter('dateTo', e.target.value || null)}
+            onChange={(e) => {
+              setFilter('dateTo', e.target.value || null);
+              setFilter('page', null);
+            }}
             className={FIELD}
           />
         </div>
@@ -98,6 +130,7 @@ export default function ReporteIvaPage() {
             onClick={() => {
               setFilter('dateFrom', null);
               setFilter('dateTo', null);
+              setFilter('page', null);
             }}
             className="cursor-pointer rounded-xl px-3 py-2.5 text-xs font-bold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200 sm:ml-auto"
           >
@@ -136,14 +169,14 @@ export default function ReporteIvaPage() {
       <div className="flex items-center gap-2">
         <TabPill
           active={tab === 'ventas'}
-          onClick={() => setTab('ventas')}
+          onClick={() => changeTab('ventas')}
           count={data?.salesRows.length ?? 0}
         >
           Ventas
         </TabPill>
         <TabPill
           active={tab === 'compras'}
-          onClick={() => setTab('compras')}
+          onClick={() => changeTab('compras')}
           count={data?.purchaseRows.length ?? 0}
         >
           Compras
@@ -171,7 +204,7 @@ export default function ReporteIvaPage() {
                 {!report.isLoading && (data?.salesRows.length ?? 0) === 0 && (
                   <EmptyRow cols={7} label="No hay ventas en el período." />
                 )}
-                {data?.salesRows.map((r) => (
+                {pagedSales.map((r) => (
                   <tr
                     key={r.id}
                     className="transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-800/10"
@@ -221,7 +254,7 @@ export default function ReporteIvaPage() {
                   (data?.purchaseRows.length ?? 0) === 0 && (
                     <EmptyRow cols={6} label="No hay compras en el período." />
                   )}
-                {data?.purchaseRows.map((r) => (
+                {pagedPurchases.map((r) => (
                   <tr
                     key={r.id}
                     className="transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-800/10"
@@ -252,6 +285,18 @@ export default function ReporteIvaPage() {
             </table>
           )}
         </div>
+
+        {!report.isLoading && (
+          <TablePagination
+            page={currentPage}
+            totalPages={totalPages}
+            total={activeRows.length}
+            shown={tab === 'ventas' ? pagedSales.length : pagedPurchases.length}
+            noun={tab === 'ventas' ? 'ventas' : 'compras'}
+            nounSingular={tab === 'ventas' ? 'venta' : 'compra'}
+            onPageChange={(n) => setFilter('page', String(n))}
+          />
+        )}
       </div>
     </div>
   );

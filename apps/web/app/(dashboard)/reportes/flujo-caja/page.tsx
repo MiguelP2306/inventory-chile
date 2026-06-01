@@ -19,10 +19,13 @@ import {
   Download,
   Wallet,
 } from 'lucide-react';
+import { TablePagination } from '@/components/table-pagination';
 import { formatCurrency } from '@/lib/format';
 import { cashFlowReportCsvUrl, getCashFlowReport } from '@/lib/reports-api';
 import { cn } from '@/lib/utils';
 import { useUrlFilters } from '@/lib/use-url-filters';
+
+const PAGE_SIZE = 50;
 
 const SOURCE_LABEL: Record<string, string> = {
   SALE: 'Venta',
@@ -44,9 +47,14 @@ const FIELD =
   'w-44 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-700 outline-none transition-all focus:border-[#2F6BFF] focus:ring-2 focus:ring-[#2F6BFF]/15 dark:border-slate-850 dark:bg-[#11151C] dark:text-white';
 
 export default function ReporteFlujoCajaPage() {
-  const { values, setFilter } = useUrlFilters({ dateFrom: '', dateTo: '' });
+  const { values, setFilter } = useUrlFilters({
+    dateFrom: '',
+    dateTo: '',
+    page: '',
+  });
   const dateFrom = values.dateFrom ?? '';
   const dateTo = values.dateTo ?? '';
+  const page = Number(values.page || '1');
 
   const params = {
     dateFrom: dateFrom || undefined,
@@ -61,6 +69,14 @@ export default function ReporteFlujoCajaPage() {
   const data = report.data;
   const rows = data?.rows ?? [];
   const netN = data ? Number(data.net) : 0;
+
+  // Paginación cliente — el reporte devuelve todos los movimientos del período.
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedRows = rows.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200 text-slate-800 dark:text-slate-200">
@@ -96,7 +112,10 @@ export default function ReporteFlujoCajaPage() {
           <input
             type="date"
             value={dateFrom}
-            onChange={(e) => setFilter('dateFrom', e.target.value || null)}
+            onChange={(e) => {
+              setFilter('dateFrom', e.target.value || null);
+              setFilter('page', null);
+            }}
             className={FIELD}
           />
         </div>
@@ -107,7 +126,10 @@ export default function ReporteFlujoCajaPage() {
           <input
             type="date"
             value={dateTo}
-            onChange={(e) => setFilter('dateTo', e.target.value || null)}
+            onChange={(e) => {
+              setFilter('dateTo', e.target.value || null);
+              setFilter('page', null);
+            }}
             className={FIELD}
           />
         </div>
@@ -117,6 +139,7 @@ export default function ReporteFlujoCajaPage() {
             onClick={() => {
               setFilter('dateFrom', null);
               setFilter('dateTo', null);
+              setFilter('page', null);
             }}
             className="cursor-pointer rounded-xl px-3 py-2.5 text-xs font-bold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200 sm:ml-auto"
           >
@@ -191,7 +214,7 @@ export default function ReporteFlujoCajaPage() {
                 </tr>
               )}
 
-              {rows.map((r) => {
+              {pagedRows.map((r) => {
                 const voided = r.isVoided;
                 const income = r.type === 'INCOME';
                 const sign = income ? '+' : '−';
@@ -262,6 +285,18 @@ export default function ReporteFlujoCajaPage() {
             </tbody>
           </table>
         </div>
+
+        {!report.isLoading && (
+          <TablePagination
+            page={currentPage}
+            totalPages={totalPages}
+            total={rows.length}
+            shown={pagedRows.length}
+            noun="movimientos"
+            nounSingular="movimiento"
+            onPageChange={(n) => setFilter('page', String(n))}
+          />
+        )}
       </div>
     </div>
   );

@@ -14,12 +14,14 @@
 import { useQuery } from '@tanstack/react-query';
 import { Download, PackageX } from 'lucide-react';
 import Link from 'next/link';
+import { TablePagination } from '@/components/table-pagination';
 import { getNoMovementCsvUrl, getNoMovementReport } from '@/lib/dashboard-api';
 import { formatCurrency } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useUrlFilters } from '@/lib/use-url-filters';
 
 const DAYS_OPTIONS = [30, 60, 90, 180];
+const PAGE_SIZE = 50;
 
 /**
  * Fase 9 — Reporte de productos sin movimiento. Lista los productos
@@ -27,8 +29,9 @@ const DAYS_OPTIONS = [30, 60, 90, 180];
  * días (default 30). Útil para detectar stock estancado.
  */
 export default function SinMovimientoReportPage() {
-  const { values, setFilter } = useUrlFilters({ days: '' });
+  const { values, setFilter } = useUrlFilters({ days: '', page: '' });
   const days = Number(values.days || '30');
+  const page = Number(values.page || '1');
 
   const q = useQuery({
     queryKey: ['no-movement-report', days],
@@ -38,6 +41,14 @@ export default function SinMovimientoReportPage() {
   const rows = q.data?.rows ?? [];
   const total = q.data?.totalProducts ?? 0;
   const inventoryValue = q.data?.totalInventoryValue ?? '0';
+
+  // Paginación cliente — el reporte devuelve todas las filas a la vez.
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedRows = rows.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200 text-slate-800 dark:text-slate-200">
@@ -57,9 +68,10 @@ export default function SinMovimientoReportPage() {
           <div className="relative">
             <select
               value={String(days)}
-              onChange={(e) =>
-                setFilter('days', e.target.value === '30' ? null : e.target.value)
-              }
+              onChange={(e) => {
+                setFilter('days', e.target.value === '30' ? null : e.target.value);
+                setFilter('page', null);
+              }}
               className="cursor-pointer appearance-none rounded-2xl border border-slate-200 bg-white py-3 pl-4 pr-9 text-xs font-bold text-slate-700 shadow-sm outline-none transition-colors hover:bg-slate-50 focus:border-[#2F6BFF] dark:border-slate-850 dark:bg-[#11151C] dark:text-slate-300 dark:hover:bg-slate-900"
             >
               {DAYS_OPTIONS.map((d) => (
@@ -168,7 +180,7 @@ export default function SinMovimientoReportPage() {
                 </tr>
               )}
 
-              {rows.map((r) => (
+              {pagedRows.map((r) => (
                 <tr
                   key={r.productId}
                   className="transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-800/10"
@@ -220,6 +232,18 @@ export default function SinMovimientoReportPage() {
             </tbody>
           </table>
         </div>
+
+        {!q.isLoading && (
+          <TablePagination
+            page={currentPage}
+            totalPages={totalPages}
+            total={rows.length}
+            shown={pagedRows.length}
+            noun="productos"
+            nounSingular="producto"
+            onPageChange={(n) => setFilter('page', String(n))}
+          />
+        )}
       </div>
     </div>
   );

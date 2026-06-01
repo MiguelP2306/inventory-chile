@@ -17,10 +17,13 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { Calendar, Download, FileText, Receipt, XCircle } from 'lucide-react';
+import { TablePagination } from '@/components/table-pagination';
 import { formatCurrency } from '@/lib/format';
 import { getSalesReport, salesReportCsvUrl } from '@/lib/reports-api';
 import { cn } from '@/lib/utils';
 import { useUrlFilters } from '@/lib/use-url-filters';
+
+const PAGE_SIZE = 50;
 
 // Ronda 9 — CARD se desdobló en débito/crédito/link de pago.
 const METHOD_LABEL: Record<
@@ -44,9 +47,14 @@ const FIELD =
   'w-44 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-700 outline-none transition-all focus:border-[#2F6BFF] focus:ring-2 focus:ring-[#2F6BFF]/15 dark:border-slate-850 dark:bg-[#11151C] dark:text-white';
 
 export default function ReporteVentasPage() {
-  const { values, setFilter } = useUrlFilters({ dateFrom: '', dateTo: '' });
+  const { values, setFilter } = useUrlFilters({
+    dateFrom: '',
+    dateTo: '',
+    page: '',
+  });
   const dateFrom = values.dateFrom ?? '';
   const dateTo = values.dateTo ?? '';
+  const page = Number(values.page || '1');
 
   const params = {
     dateFrom: dateFrom || undefined,
@@ -59,6 +67,14 @@ export default function ReporteVentasPage() {
   });
 
   const rows = report.data?.rows ?? [];
+
+  // Paginación cliente — el reporte devuelve todas las filas del período.
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedRows = rows.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200 text-slate-800 dark:text-slate-200">
@@ -98,7 +114,10 @@ export default function ReporteVentasPage() {
           <input
             type="date"
             value={dateFrom}
-            onChange={(e) => setFilter('dateFrom', e.target.value || null)}
+            onChange={(e) => {
+              setFilter('dateFrom', e.target.value || null);
+              setFilter('page', null);
+            }}
             className={FIELD}
           />
         </div>
@@ -109,7 +128,10 @@ export default function ReporteVentasPage() {
           <input
             type="date"
             value={dateTo}
-            onChange={(e) => setFilter('dateTo', e.target.value || null)}
+            onChange={(e) => {
+              setFilter('dateTo', e.target.value || null);
+              setFilter('page', null);
+            }}
             className={FIELD}
           />
         </div>
@@ -119,6 +141,7 @@ export default function ReporteVentasPage() {
             onClick={() => {
               setFilter('dateFrom', null);
               setFilter('dateTo', null);
+              setFilter('page', null);
             }}
             className="cursor-pointer rounded-xl px-3 py-2.5 text-xs font-bold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200 sm:ml-auto"
           >
@@ -205,7 +228,7 @@ export default function ReporteVentasPage() {
               )}
 
               {!report.isLoading &&
-                rows.map((r) => {
+                pagedRows.map((r) => {
                   const cancelled = r.status === 'CANCELLED';
                   return (
                     <tr
@@ -287,6 +310,18 @@ export default function ReporteVentasPage() {
             )}
           </table>
         </div>
+
+        {!report.isLoading && (
+          <TablePagination
+            page={currentPage}
+            totalPages={totalPages}
+            total={rows.length}
+            shown={pagedRows.length}
+            noun="ventas"
+            nounSingular="venta"
+            onPageChange={(n) => setFilter('page', String(n))}
+          />
+        )}
       </div>
     </div>
   );

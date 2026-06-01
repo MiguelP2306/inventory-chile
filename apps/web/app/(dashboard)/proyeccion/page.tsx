@@ -80,11 +80,25 @@ export default function ProyeccionPage() {
     0,
   );
 
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedRows = rows.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
+
   function applyLeadTime() {
     const parsed = Number(draftLeadTime);
     if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 365) {
       setAppliedLeadTime(parsed);
+      setFilter('page', null);
     }
+  }
+
+  // Cambiar el toggle críticos/todos reinicia a la primera página.
+  function changeShowAll(next: boolean) {
+    setShowAll(next);
+    setFilter('page', null);
   }
 
   return (
@@ -182,10 +196,10 @@ export default function ProyeccionPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <TogglePill active={!showAll} onClick={() => setShowAll(false)}>
+          <TogglePill active={!showAll} onClick={() => changeShowAll(false)}>
             Solo críticos
           </TogglePill>
-          <TogglePill active={showAll} onClick={() => setShowAll(true)}>
+          <TogglePill active={showAll} onClick={() => changeShowAll(true)}>
             Mostrar todos
           </TogglePill>
         </div>
@@ -275,7 +289,7 @@ export default function ProyeccionPage() {
               )}
 
               {!projection.isLoading &&
-                rows.map((r) => (
+                pagedRows.map((r) => (
                   <tr
                     key={r.productId}
                     className={cn(
@@ -357,6 +371,18 @@ export default function ProyeccionPage() {
             </tbody>
           </table>
         </div>
+
+        {!projection.isLoading && (
+          <TablePagination
+            page={currentPage}
+            totalPages={totalPages}
+            total={rows.length}
+            shown={pagedRows.length}
+            noun="productos"
+            nounSingular="producto"
+            onPageChange={(n) => setFilter('page', String(n))}
+          />
+        )}
       </div>
     </div>
   );
