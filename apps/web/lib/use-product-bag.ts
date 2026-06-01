@@ -123,6 +123,16 @@ class BagStore {
     this.notify();
   }
 
+  removeMany(productIds: string[]) {
+    if (productIds.length === 0) return;
+    const set = new Set(productIds);
+    this.state = {
+      items: this.state.items.filter((i) => !set.has(i.productId)),
+    };
+    this.writeToStorage();
+    this.notify();
+  }
+
   clear() {
     this.state = { items: [] };
     this.writeToStorage();
@@ -185,6 +195,12 @@ export function useProductBag() {
 // de cotización) limpie el bolso sin re-renderizar nada.
 export function clearProductBag() {
   store.clear();
+}
+
+// Quita solo un subconjunto del bolso (ej: tras convertir en venta/cotización
+// los productos que el operador seleccionó, dejando el resto en el bolso).
+export function clearProductBagItems(productIds: string[]) {
+  store.removeMany(productIds);
 }
 
 /**

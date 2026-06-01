@@ -11,7 +11,10 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { createDispatchNote } from '@/lib/dispatch-api';
 import { getQuotation } from '@/lib/quotations-api';
-import { clearProductBag, useProductBag } from '@/lib/use-product-bag';
+import {
+  clearProductBagItems,
+  useProductBag,
+} from '@/lib/use-product-bag';
 
 /**
  * Pantalla "Nueva venta" navegada por URL.
@@ -34,9 +37,18 @@ export default function NuevaVentaPage() {
   const generateDispatch = searchParams.get('generateDispatch') === '1';
 
   const bag = useProductBag();
+  // `bagIds` (opcional) acota el prefill a los productos que el operador
+  // seleccionó en el bolso; sin él se usan todos (compatibilidad).
+  const bagIdsParam = searchParams.get('bagIds');
+  const bagItems = useMemo(() => {
+    if (!fromBag) return [];
+    if (!bagIdsParam) return bag.items;
+    const ids = new Set(bagIdsParam.split(','));
+    return bag.items.filter((it) => ids.has(it.productId));
+  }, [fromBag, bagIdsParam, bag.items]);
   const bagPrefill: SaleBagItem[] | undefined =
-    fromBag && bag.items.length > 0
-      ? bag.items.map((it) => ({
+    bagItems.length > 0
+      ? bagItems.map((it) => ({
           productId: it.productId,
           sku: it.sku,
           name: it.name,
@@ -139,8 +151,12 @@ export default function NuevaVentaPage() {
         prefillFromQuotation={prefill}
         initialBagItems={bagPrefill}
         onSuccess={(sale) => {
-          // Si la venta arrancó desde el bolso, limpiamos al guardar OK.
-          if (fromBag) clearProductBag();
+          // Si la venta arrancó desde el bolso, quitamos del bolso SOLO los
+          // productos convertidos (los no seleccionados quedan para después).
+          if (fromBag) {
+            const ids = bagItems.map((it) => it.productId);
+            if (ids.length > 0) clearProductBagItems(ids);
+          }
           // Ronda 9 — flujo "convertir y generar guía". Tras confirmar la
           // venta, generamos la guía con datos mínimos y redirigimos a su
           // detalle. Si falla la guía, el toast lo indica y queda la venta

@@ -10,7 +10,11 @@ import { QuotationStatusBadge } from '@/components/quotation-status-badge';
 import { apiAbsoluteUrl } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
 import { listQuotations } from '@/lib/quotations-api';
-import { clearProductBag, useProductBag } from '@/lib/use-product-bag';
+import {
+  clearProductBag,
+  clearProductBagItems,
+  useProductBag,
+} from '@/lib/use-product-bag';
 import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
 import type { QuotationStatusDto } from '@inventory/shared';
@@ -86,6 +90,9 @@ export default function CotizacionesPage() {
   // Si llegamos con ?fromBag=1, el modal se abre con los items del bolso ya
   // cargados. Limpiamos el bolso solo cuando la cotización se guarda exitosamente.
   const [bagPrefillActive, setBagPrefillActive] = useState(false);
+  // IDs seleccionados en el bolso (null = todos, por compatibilidad). Se captura
+  // en el montaje porque enseguida limpiamos los query params de la URL.
+  const [bagIds, setBagIds] = useState<string[] | null>(null);
   const bag = useProductBag();
 
   // ?new=1 abre el modal automáticamente y limpia el query param.
@@ -94,15 +101,25 @@ export default function CotizacionesPage() {
       setDialogOpen(true);
       if (searchParams.get('fromBag') === '1' && bag.items.length > 0) {
         setBagPrefillActive(true);
+        const idsParam = searchParams.get('bagIds');
+        setBagIds(idsParam ? idsParam.split(',') : null);
       }
       const next = new URLSearchParams(searchParams.toString());
       next.delete('new');
       next.delete('fromBag');
+      next.delete('bagIds');
       const qs = next.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
+
+  // Productos del bolso a precargar, acotados a la selección si la hubo.
+  const bagPrefillItems = bagPrefillActive
+    ? bagIds
+      ? bag.items.filter((it) => bagIds.includes(it.productId))
+      : bag.items
+    : [];
 
   const fieldCls =
     'w-full text-xs font-semibold px-3 py-3 bg-white dark:bg-[#11151C] text-slate-700 dark:text-white border border-slate-200 dark:border-slate-850 rounded-2xl focus:outline-none focus:border-[#2F6BFF] transition-all';
@@ -353,8 +370,8 @@ export default function CotizacionesPage() {
         }}
         mode="create"
         initialBagItems={
-          bagPrefillActive
-            ? bag.items.map((it) => ({
+          bagPrefillItems.length > 0
+            ? bagPrefillItems.map((it) => ({
                 productId: it.productId,
                 sku: it.sku,
                 name: it.name,
@@ -366,8 +383,11 @@ export default function CotizacionesPage() {
         onSaved={() => {
           qc.invalidateQueries({ queryKey: ['quotations'] });
           if (bagPrefillActive) {
-            clearProductBag();
+            // Quitamos del bolso solo los productos convertidos.
+            if (bagIds && bagIds.length > 0) clearProductBagItems(bagIds);
+            else clearProductBag();
             setBagPrefillActive(false);
+            setBagIds(null);
           }
         }}
       />

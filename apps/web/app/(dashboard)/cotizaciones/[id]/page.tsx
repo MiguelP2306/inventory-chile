@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  AlertTriangle,
   ArrowLeft,
   Check,
   ChevronDown,
@@ -405,6 +406,21 @@ export default function QuotationDetailPage() {
                   <X className="h-4 w-4" />
                   Marcar rechazada
                 </button>
+              )}
+
+              {/* Aviso visible: explica por qué "Convertir a venta" está
+                  deshabilitado cuando hay ítems temporales (antes solo había un
+                  title en hover y daba la sensación de que "no avanzaba"). */}
+              {hasTempItems && (
+                <div className="flex w-full items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs font-medium text-amber-700 dark:text-amber-300">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                  <span>
+                    Esta cotización tiene{' '}
+                    <strong>productos temporales</strong>. Para convertirla en
+                    venta, registralos en el catálogo o quitalos de la
+                    cotización con <strong>Editar</strong>.
+                  </span>
+                </div>
               )}
             </>
           )}
