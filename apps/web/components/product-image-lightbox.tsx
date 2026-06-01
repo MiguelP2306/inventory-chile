@@ -81,7 +81,7 @@ export function ProductImageLightbox({
         <DialogPrimitive.Content
           aria-describedby={undefined}
           onOpenAutoFocus={(e) => e.preventDefault()}
-          className="fixed inset-0 z-[9999] flex flex-col outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
+          className="fixed inset-0 z-[9999] flex flex-col bg-black/95 outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
         >
           {/* Título accesible (requerido por Radix), oculto visualmente. */}
           <DialogPrimitive.Title className="sr-only">
@@ -107,23 +107,26 @@ export function ProductImageLightbox({
 
           {/* Centro: imagen + flechas. `min-h-0` es clave: sin él el item flex
               no se encoge y la imagen desborda el viewport (se veía "cortada"). */}
-          <div className="relative flex min-h-0 flex-1 items-center justify-center px-4 sm:px-16">
+          <div className="relative flex min-h-0 flex-1 items-center justify-center px-4 py-2 sm:px-16 sm:py-4">
             {hasMultiple && (
               <button
                 type="button"
                 onClick={prev}
                 aria-label="Anterior"
-                className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-white/10 p-3 text-white shadow-lg backdrop-blur transition-all hover:bg-white/25 sm:left-6"
+                className="absolute left-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-white/10 p-3 text-white shadow-lg backdrop-blur transition-all hover:bg-white/25 sm:left-6"
               >
                 <ChevronLeft className="h-6 w-6" />
               </button>
             )}
 
+            {/* `h-full w-full object-contain`: cada imagen ocupa SIEMPRE el mismo
+                marco responsive (se escala hacia arriba o abajo sin deformarse),
+                así todas se ven del mismo tamaño sin importar su resolución. */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={src}
               alt={alt}
-              className="max-h-full max-w-full select-none object-contain"
+              className="h-full w-full select-none object-contain"
               draggable={false}
             />
 
@@ -132,7 +135,7 @@ export function ProductImageLightbox({
                 type="button"
                 onClick={next}
                 aria-label="Siguiente"
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-white/10 p-3 text-white shadow-lg backdrop-blur transition-all hover:bg-white/25 sm:right-6"
+                className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-white/10 p-3 text-white shadow-lg backdrop-blur transition-all hover:bg-white/25 sm:right-6"
               >
                 <ChevronRight className="h-6 w-6" />
               </button>
