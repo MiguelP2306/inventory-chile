@@ -116,9 +116,9 @@ export default function LoginPage() {
           {/* Marca — logo + título centrados, uno debajo del otro */}
           <div className="mb-10 flex flex-col items-center gap-1 md:mb-0">
             <BrandMark height={92} priority />
-            <span className="text-center text-lg font-bold tracking-tight text-slate-900 dark:text-white">
+            {/* <span className="text-center text-lg font-bold tracking-tight text-slate-900 dark:text-white">
               {BRAND_NAME}
-            </span>
+            </span> */}
           </div>
 
           {/* Form */}
