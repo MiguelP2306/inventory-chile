@@ -10,7 +10,7 @@ import { cookies } from 'next/headers';
  *   client). Para SSR necesitamos URL absoluta — caemos a `BACKEND_URL`
  *   (env var server-only).
  */
-function resolveServerApiBase(): string {
+export function resolveServerApiBase(): string {
   const fromPublic = process.env.NEXT_PUBLIC_API_URL ?? '/api';
   if (fromPublic.startsWith('http://') || fromPublic.startsWith('https://')) {
     return fromPublic;

@@ -8,6 +8,10 @@
       {
         "include": "database/seeds/data/*.json",
         "outDir": "dist"
+      },
+      {
+        "include": "assets/*.png",
+        "outDir": "dist"
       }
     ],
     "watchAssets": true

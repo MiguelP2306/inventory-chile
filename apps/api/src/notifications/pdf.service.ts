@@ -13,6 +13,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { join } from 'path';
 import { renderBarcodePng } from '../common/barcode';
+import { BRAND_LOGO_RATIO, BRAND_NAME, getBrandLogoDataUrl } from '../common/brand';
 import { CompanySettings } from '../database/entities';
 import { UPLOADS_ROOT } from '../uploads/upload-config';
 
@@ -210,12 +211,14 @@ export class PdfService {
     const margin = 40;
     let y = margin;
 
-    if (input.company.logoUrl) {
+    // Marca fija (logo + nombre). El logo se embebe desde el asset empaquetado;
+    // si falla, seguimos sin él (best-effort).
+    const logoH = 50;
+    const logoW = Math.round(logoH * BRAND_LOGO_RATIO);
+    const brandLogo = await getBrandLogoDataUrl();
+    if (brandLogo) {
       try {
-        const dataUrl = await fetchAsDataUrl(input.company.logoUrl);
-        if (dataUrl) {
-          doc.addImage(dataUrl, 'PNG', margin, y, 80, 40);
-        }
+        doc.addImage(brandLogo, 'PNG', margin, y, logoW, logoH);
       } catch (err) {
         this.logger.warn(`No se pudo cargar el logo: ${(err as Error).message}`);
       }
@@ -223,7 +226,7 @@ export class PdfService {
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(16);
-    doc.text(input.company.name, pageWidth - margin, y + 14, { align: 'right' });
+    doc.text(BRAND_NAME, pageWidth - margin, y + 14, { align: 'right' });
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     let rightY = y + 28;
@@ -399,7 +402,7 @@ export class PdfService {
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
-    doc.text(input.company.name, widthPt / 2, y, { align: 'center' });
+    doc.text(BRAND_NAME, widthPt / 2, y, { align: 'center' });
     y += 12;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
@@ -602,18 +605,20 @@ export class PdfService {
     const margin = 40;
     let y = margin;
 
-    // Header empresa.
-    if (input.company.logoUrl) {
+    // Header marca fija (logo + nombre).
+    const logoH = 50;
+    const logoW = Math.round(logoH * BRAND_LOGO_RATIO);
+    const brandLogo = await getBrandLogoDataUrl();
+    if (brandLogo) {
       try {
-        const dataUrl = await fetchAsDataUrl(input.company.logoUrl);
-        if (dataUrl) doc.addImage(dataUrl, 'PNG', margin, y, 80, 40);
+        doc.addImage(brandLogo, 'PNG', margin, y, logoW, logoH);
       } catch (err) {
         this.logger.warn(`No se pudo cargar el logo: ${(err as Error).message}`);
       }
     }
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(16);
-    doc.text(input.company.name, pageWidth - margin, y + 14, { align: 'right' });
+    doc.text(BRAND_NAME, pageWidth - margin, y + 14, { align: 'right' });
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     let rightY = y + 28;
@@ -785,7 +790,7 @@ export class PdfService {
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
-    doc.text(input.company.name, widthPt / 2, y, { align: 'center' });
+    doc.text(BRAND_NAME, widthPt / 2, y, { align: 'center' });
     y += 12;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
@@ -902,27 +907,27 @@ export class PdfService {
     const margin = 40;
 
     // ----- Cabecera de portada -----
-    if (input.company.logoUrl) {
+    const catLogoH = 56;
+    const catLogoW = Math.round(catLogoH * BRAND_LOGO_RATIO);
+    const brandLogo = await getBrandLogoDataUrl();
+    if (brandLogo) {
       try {
-        const dataUrl = await fetchAsDataUrl(input.company.logoUrl);
-        if (dataUrl) {
-          doc.addImage(dataUrl, 'PNG', margin, margin, 60, 60);
-        }
+        doc.addImage(brandLogo, 'PNG', margin, margin, catLogoW, catLogoH);
       } catch {
         // logo opcional — si falla seguimos sin él.
       }
     }
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(22);
-    doc.text(input.company.name, margin + 75, margin + 25);
+    doc.text(BRAND_NAME, margin + catLogoW + 15, margin + 25);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(11);
-    doc.text('Catálogo de productos', margin + 75, margin + 45);
+    doc.text('Catálogo de productos', margin + catLogoW + 15, margin + 45);
     doc.setFontSize(9);
     doc.setTextColor(120);
     doc.text(
       `Generado el ${formatDate(input.generatedAt)}`,
-      margin + 75,
+      margin + catLogoW + 15,
       margin + 60,
     );
 

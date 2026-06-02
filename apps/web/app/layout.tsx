@@ -4,7 +4,7 @@ import { Toaster } from '@/components/ui/toaster';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Inventario',
+  title: 'Autopartes Gran Pacífico',
   description: 'Sistema de gestión de inventario, cotizaciones, ventas y caja',
 };
 

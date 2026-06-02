@@ -7,8 +7,9 @@
  * rounded-3xl, marca con caja azul).
  */
 
-import { ArrowLeft, Boxes, Compass, LifeBuoy } from 'lucide-react';
+import { ArrowLeft, Compass, LifeBuoy } from 'lucide-react';
 import Link from 'next/link';
+import { Brand } from '@/components/brand';
 import { getCurrentUser } from '@/lib/server-api';
 
 const ACCENT = '#2F6BFF';
@@ -28,23 +29,8 @@ export default async function NotFound() {
         }}
       >
         {/* Marca */}
-        <Link
-          href="/"
-          className="mx-auto inline-flex items-center gap-2.5"
-          aria-label="Ir al inicio"
-        >
-          <span
-            className="flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-lg"
-            style={{ backgroundColor: ACCENT, boxShadow: '0 10px 22px -8px rgba(47,107,255,0.5)' }}
-          >
-            <Boxes className="h-5 w-5" />
-          </span>
-          <span className="text-[15px] font-bold tracking-tight text-slate-900 dark:text-white">
-            Inventario{' '}
-            <span style={{ color: ACCENT }} className="font-extrabold dark:brightness-125">
-              PYME
-            </span>
-          </span>
+        <Link href="/" className="mx-auto inline-flex" aria-label="Ir al inicio">
+          <Brand height={40} />
         </Link>
 
         {/* Ilustración / código */}

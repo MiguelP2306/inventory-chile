@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
+import { BrandMark, BRAND_NAME } from '@/components/brand';
 import { api } from '@/lib/api';
 
 const schema = z.object({
@@ -112,20 +113,12 @@ export default function LoginPage() {
             LEFT — FORM
             ============================================================ */}
         <div className="flex w-full flex-col justify-between bg-white p-8 dark:bg-[#121620] sm:p-12 md:w-1/2">
-          {/* Marca */}
-          <div className="mb-10 flex items-center md:mb-0">
-            <div
-              className="inline-flex select-none items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black"
-              style={{ backgroundColor: `${ACCENT}14`, color: ACCENT }}
-            >
-              <span
-                className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] text-white"
-                style={{ backgroundColor: ACCENT }}
-              >
-                ⚙️
-              </span>
-              <span className="font-sans tracking-tight">Repuestos San Pablo</span>
-            </div>
+          {/* Marca — logo + título centrados, uno debajo del otro */}
+          <div className="mb-10 flex flex-col items-center gap-1 md:mb-0">
+            <BrandMark height={92} priority />
+            <span className="text-center text-lg font-bold tracking-tight text-slate-900 dark:text-white">
+              {BRAND_NAME}
+            </span>
           </div>
 
           {/* Form */}

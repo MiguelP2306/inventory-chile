@@ -35,43 +35,56 @@ import {
 import { InventoryMovementType } from '@inventory/shared';
 import { InventoryService } from '../inventory/inventory.service';
 
+// Orden de columnas de la plantilla. El parser matchea por NOMBRE de header
+// (ver findHeaderRow), no por posición, así que este orden solo define cómo se
+// ve la plantilla descargable. Orden pedido por el cliente:
+// SKU, Codigo universal, Cod Compatibles, Categoria, (Nombre), Marca, Modelo,
+// luego Costo, Precio, Bodega (+ Stock actual, que va de la mano), y el resto.
 const COLUMNS = [
   'sku',
-  'partNumber',
   'barcode',
-  'name',
-  'description',
+  'compatibleCodes',
   'categoryName',
+  'name',
   'brandName',
+  'vehicleModels',
   'cost',
   'price',
-  'minStock',
-  'location',
-  'productKind',
-  'compatibleCodes',
-  'vehicleModels',
   'warehouseName',
   'stockQuantity',
+  'partNumber',
+  'description',
+  'minStock',
+  'productKind',
+  'location',
 ] as const;
 type Column = (typeof COLUMNS)[number];
 
 const HEADERS: Record<Column, string> = {
   sku: 'SKU',
-  partNumber: 'PartNumber',
-  barcode: 'Codigo de barras',
-  name: 'Nombre',
-  description: 'Descripcion',
+  barcode: 'Codigo universal',
+  compatibleCodes: 'Cod Compatibles',
   categoryName: 'Categoria',
+  name: 'Nombre',
   brandName: 'Marca',
+  vehicleModels: 'Modelo (Marca:Modelo:Año-Año, separados por ;)',
   cost: 'Costo (bruto)',
   price: 'Precio (bruto)',
-  minStock: 'Stock minimo',
-  location: 'Ubicacion (deprecated)',
-  productKind: 'Tipo (ORIGINAL/ALTERNATIVE)',
-  compatibleCodes: 'Codigos compatibles (separados por ;)',
-  vehicleModels: 'Modelo (Marca:Modelo:Año-Año, separados por ;)',
   warehouseName: 'Bodega',
   stockQuantity: 'Stock actual',
+  partNumber: 'PartNumber',
+  description: 'Descripcion',
+  minStock: 'Stock minimo',
+  productKind: 'Tipo (ORIGINAL/ALTERNATIVE)',
+  location: 'Ubicacion (deprecated)',
+};
+
+// Alias de headers para no romper archivos viejos / exportados que traen los
+// nombres anteriores. El header canónico (HEADERS) es el que escribe la
+// plantilla nueva; estos también matchean al importar.
+const HEADER_ALIASES: Partial<Record<Column, string[]>> = {
+  barcode: ['Codigo de barras'],
+  compatibleCodes: ['Codigos compatibles (separados por ;)'],
 };
 
 /**
@@ -334,21 +347,21 @@ export class ImportsService {
     inst.getRow(1).font = { bold: true };
     const ROWS: Array<[Column, boolean, string]> = [
       ['sku', true, 'Codigo unico interno. Si ya existe en el sistema, se actualiza ese producto (upsert).'],
-      ['partNumber', false, 'Codigo de pieza del fabricante. Indexado para busqueda.'],
-      ['barcode', false, 'Codigo de barras del producto. Indexado para escanner.'],
-      ['name', true, 'Nombre comercial del producto.'],
-      ['description', false, 'Descripcion larga (opcional).'],
+      ['barcode', false, 'Codigo universal / de barras del producto. Indexado para escanner y busqueda.'],
+      ['compatibleCodes', false, 'Lista de codigos compatibles separados por punto y coma (;). Ej: "A123;B456;XYZ-789".'],
       ['categoryName', false, 'Nombre de la categoria. Si no existe, se crea automaticamente.'],
+      ['name', true, 'Nombre / descripcion comercial del producto.'],
       ['brandName', false, 'Nombre de la marca. Si no existe, se crea automaticamente.'],
+      ['vehicleModels', false, 'Compatibilidad vehicular separada por ";". Cada item es "Marca:Modelo" o "Marca:Modelo:AnioFrom-AnioTo". Marcas/modelos faltantes se crean automaticamente. Ej: "Toyota:Corolla:2014-2019; Toyota:Yaris:2018-".'],
       ['cost', false, 'Costo unitario BRUTO en CLP (con IVA). Ej: 8000. Default 0.'],
       ['price', false, 'Precio venta BRUTO en CLP (con IVA). Ej: 15000. Default 0.'],
-      ['minStock', false, 'Stock minimo. Entero >= 0. Default 0.'],
-      ['location', false, 'Deprecated desde Fase 7.5. Usar locationCode por bodega desde /inventario.'],
-      ['productKind', false, 'ORIGINAL o ALTERNATIVE. Default ORIGINAL.'],
-      ['compatibleCodes', false, 'Lista de codigos compatibles separados por punto y coma (;). Ej: "A123;B456;XYZ-789".'],
-      ['vehicleModels', false, 'Compatibilidad vehicular separada por ";". Cada item es "Marca:Modelo" o "Marca:Modelo:AnioFrom-AnioTo". Marcas/modelos faltantes se crean automaticamente. Ej: "Toyota:Corolla:2014-2019; Toyota:Yaris:2018-".'],
       ['warehouseName', false, 'Nombre exacto de la bodega para asignar stock. Si no existe, la fila se rechaza (la bodega NO se crea sola). Vacio = no toca stock.'],
       ['stockQuantity', false, 'Stock actual a ESTABLECER en la bodega indicada (registra un ADJUSTMENT con la diferencia). Requiere Bodega para tener efecto.'],
+      ['partNumber', false, 'Codigo de pieza del fabricante. Indexado para busqueda.'],
+      ['description', false, 'Descripcion larga (opcional).'],
+      ['minStock', false, 'Stock minimo. Entero >= 0. Default 0.'],
+      ['productKind', false, 'ORIGINAL o ALTERNATIVE. Default ORIGINAL.'],
+      ['location', false, 'Deprecated desde Fase 7.5. Usar locationCode por bodega desde /inventario.'],
     ];
     for (const [col, req, desc] of ROWS) {
       inst.addRow({ col: HEADERS[col], req: req ? 'Si' : 'No', desc });
@@ -381,7 +394,7 @@ export class ImportsService {
       throw new BadRequestException('El Excel no tiene hojas.');
     }
 
-    const found = findHeaderRow(sheet, HEADERS, ['sku', 'name']);
+    const found = findHeaderRow(sheet, HEADERS, ['sku', 'name'], 5, HEADER_ALIASES);
     if (!found) {
       throw new BadRequestException(
         'No encontré las columnas obligatorias "SKU" y "Nombre" en las primeras 5 filas. Descargá la plantilla nueva desde el botón "Descargar plantilla".',

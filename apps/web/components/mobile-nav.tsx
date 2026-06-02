@@ -3,7 +3,8 @@
 import { Menu } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
-import { SidebarNav, useCompanyName } from '@/components/sidebar';
+import { Brand } from '@/components/brand';
+import { SidebarNav } from '@/components/sidebar';
 import {
   Sheet,
   SheetContent,
@@ -23,7 +24,6 @@ import {
 export function MobileNav() {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
-  const companyName = useCompanyName();
 
   // Cierre defensivo en cambios de ruta.
   useEffect(() => {
@@ -42,9 +42,9 @@ export function MobileNav() {
         </button>
       </SheetTrigger>
       <SheetContent side="left" className="flex w-72 flex-col p-0">
-        <SheetHeader className="h-14 flex-row items-center border-b px-4">
-          <SheetTitle className="truncate" title={companyName}>
-            {companyName}
+        <SheetHeader className="h-16 flex-row items-center border-b px-4">
+          <SheetTitle className="min-w-0">
+            <Brand />
           </SheetTitle>
         </SheetHeader>
         <div className="flex-1 overflow-y-auto">

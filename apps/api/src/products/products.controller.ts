@@ -232,30 +232,30 @@ export class ProductsController {
     );
 
     const sheet = wb.addWorksheet('Productos');
-    // Los headers de Categoría, Marca, Descripción, Modelo y Códigos compatibles
-    // usan EXACTAMENTE los nombres que reconoce el importer (match normalizado,
-    // sin acentos/símbolos), para que el export se pueda reimportar sin perder
-    // esos campos. Costo/Precio/Stock se dejan con headers "humanos" a propósito:
-    // así el importer los IGNORA y reimportar NO pisa el costo ponderado ni el
-    // stock (que se gestionan solos).
+    // El orden de columnas espeja la plantilla del importer (imports.service.ts):
+    // SKU, Codigo universal, Cod Compatibles, Categoria, Nombre, Marca, Modelo,
+    // luego Costo, Precio, Bodega, y el resto. Los headers de los campos del
+    // catálogo usan EXACTAMENTE los nombres que reconoce el importer (match
+    // normalizado, sin acentos/símbolos), para que el export se pueda reimportar
+    // sin perderlos. Costo/Precio/Stock se dejan con headers "humanos" a
+    // propósito: así el importer los IGNORA y reimportar NO pisa el costo
+    // ponderado ni el stock (que se gestionan solos).
     sheet.columns = [
       { header: 'SKU', key: 'sku', width: 18 },
-      { header: 'Nombre', key: 'name', width: 36 },
-      { header: 'PartNumber', key: 'partNumber', width: 16 },
-      { header: 'Código de barras', key: 'barcode', width: 18 },
+      { header: 'Codigo universal', key: 'barcode', width: 18 },
+      {
+        header: 'Cod Compatibles',
+        key: 'compatibleCodes',
+        width: 32,
+      },
       { header: 'Categoria', key: 'category', width: 22 },
+      { header: 'Nombre', key: 'name', width: 36 },
       { header: 'Marca', key: 'brand', width: 18 },
       {
         header: 'Modelo (Marca:Modelo:Año-Año, separados por ;)',
         key: 'models',
         width: 40,
       },
-      {
-        header: 'Codigos compatibles (separados por ;)',
-        key: 'compatibleCodes',
-        width: 32,
-      },
-      { header: 'Tipo (ORIGINAL/ALTERNATIVE)', key: 'kind', width: 16 },
       // La columna Costo solo aparece para usuarios con permiso. Es informativa:
       // al reimportar, el costo de productos existentes NO se pisa (autogestionado).
       ...(canSeeCost
@@ -274,9 +274,11 @@ export class ProductsController {
         width: 14,
         style: { numFmt: MONEY_FMT },
       },
-      { header: 'Stock minimo', key: 'minStock', width: 10 },
       { header: 'Stock por bodega', key: 'stockByWarehouse', width: 28 },
       { header: 'Stock actual (total)', key: 'totalStock', width: 14 },
+      { header: 'PartNumber', key: 'partNumber', width: 16 },
+      { header: 'Tipo (ORIGINAL/ALTERNATIVE)', key: 'kind', width: 16 },
+      { header: 'Stock minimo', key: 'minStock', width: 10 },
       { header: 'Descripción', key: 'description', width: 40 },
       { header: 'Activo', key: 'isActive', width: 8 },
     ];

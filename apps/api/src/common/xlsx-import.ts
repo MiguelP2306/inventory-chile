@@ -84,8 +84,19 @@ export function findHeaderRow<K extends string, R extends K = K>(
   headers: Record<K, string>,
   requiredKeys: R[],
   maxScan = 5,
+  aliases?: Partial<Record<K, string[]>>,
 ): { headerRowNumber: number; colIndex: Partial<Record<K, number>> } | null {
   const allKeys = Object.keys(headers) as K[];
+  // Pre-normalizamos los headers canónicos + sus alias. Los alias permiten
+  // que un mismo campo matchee varios nombres de columna (ej. renombrar un
+  // header en la plantilla sin romper archivos viejos que traen el nombre
+  // anterior). El primer match gana.
+  const normalizedByKey = new Map<K, string[]>(
+    allKeys.map((key) => [
+      key,
+      [headers[key], ...(aliases?.[key] ?? [])].map(normalizeHeader),
+    ]),
+  );
   for (let r = 1; r <= Math.min(maxScan, sheet.rowCount); r += 1) {
     const row = sheet.getRow(r);
     const idx: Partial<Record<K, number>> = {};
@@ -93,7 +104,7 @@ export function findHeaderRow<K extends string, R extends K = K>(
       const normalized = normalizeHeader(readCellText(cell));
       if (!normalized) return;
       for (const key of allKeys) {
-        if (normalizeHeader(headers[key]) === normalized) {
+        if (normalizedByKey.get(key)?.includes(normalized)) {
           idx[key] = cellIdx;
           break;
         }

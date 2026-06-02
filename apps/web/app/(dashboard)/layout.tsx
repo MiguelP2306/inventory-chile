@@ -99,7 +99,7 @@ export default async function DashboardLayout({
               className="hidden items-center gap-2 md:flex"
             >
               <span className="text-[12px] font-medium text-slate-400 dark:text-slate-500">
-                PYME
+                Gran Pacífico
               </span>
               <ChevronRight className="h-3 w-3 text-slate-300 dark:text-slate-600" />
               <Link

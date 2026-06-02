@@ -1,4 +1,5 @@
 import { FileDown } from 'lucide-react';
+import { BrandMark, BRAND_NAME } from '@/components/brand';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -11,10 +12,13 @@ import {
 } from '@/components/ui/table';
 import { formatCurrency } from '@/lib/format';
 import { getPublicPdfUrl } from '@/lib/quotations-api';
+import { resolveServerApiBase } from '@/lib/server-api';
 import type { PublicQuotationDto } from '@inventory/shared';
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
+// Esta página es un Server Component: el fetch corre en Node y necesita una
+// URL ABSOLUTA. `NEXT_PUBLIC_API_URL` puede ser `/api` (relativo, válido solo
+// en el browser), así que resolvemos el base server-side cayendo a BACKEND_URL.
+const API_BASE = resolveServerApiBase();
 
 interface FetchResult {
   ok: boolean;
@@ -65,16 +69,9 @@ export default async function PublicQuotationPage({
     <div className="space-y-6">
       <header className="flex flex-col items-start gap-4 rounded-md border bg-background p-6 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
-          {q.company.logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={q.company.logoUrl}
-              alt={q.company.name}
-              className="h-12 w-auto"
-            />
-          ) : null}
+          <BrandMark height={52} forceLight priority />
           <div>
-            <div className="text-lg font-semibold">{q.company.name}</div>
+            <div className="text-lg font-semibold">{BRAND_NAME}</div>
             {q.company.taxId && (
               <div className="text-xs text-muted-foreground">
                 RUT {q.company.taxId}
@@ -219,7 +216,7 @@ export default async function PublicQuotationPage({
       </div>
 
       <footer className="rounded-md border bg-background p-4 text-xs text-muted-foreground space-y-1">
-        <div className="font-medium text-foreground">{q.company.name}</div>
+        <div className="font-medium text-foreground">{BRAND_NAME}</div>
         {q.company.address && <div>{q.company.address}</div>}
         {q.company.phone && <div>Tel: {q.company.phone}</div>}
         {q.company.email && <div>Email: {q.company.email}</div>}

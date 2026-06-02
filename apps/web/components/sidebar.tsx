@@ -66,6 +66,7 @@ import {
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
+import { Brand, BrandMark } from '@/components/brand';
 import { getCompanySettings } from '@/lib/cashbox-api';
 import { useIsAdmin } from '@/lib/current-user-context';
 import { cn } from '@/lib/utils';
@@ -351,7 +352,6 @@ export function SidebarNav({
    · El botón del header alterna el estado (sin hover, sin pin).
 */
 export function Sidebar() {
-  const companyName = useCompanyName();
   const [collapsed, toggleCollapsed] = useCollapsed();
   const isAdmin = useIsAdmin();
 
@@ -365,32 +365,19 @@ export function Sidebar() {
       {/* Header — brand + toggle */}
       <div
         className={cn(
-          'flex h-16 shrink-0 items-center gap-3 px-4',
+          'flex h-16 shrink-0 items-center gap-2.5 px-4',
           collapsed && 'justify-center px-0',
         )}
       >
-        <div
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white shadow-lg"
-          style={{ backgroundColor: ACCENT, boxShadow: '0 10px 22px -8px rgba(47,107,255,0.5)' }}
-        >
-          <Boxes className="h-5 w-5" />
-        </div>
-        {!collapsed && (
+        {collapsed ? (
+          <Link href="/" aria-label="Inicio" title="Autopartes Gran Pacífico">
+            <BrandMark height={36} priority />
+          </Link>
+        ) : (
           <>
-            <div className="min-w-0 flex-1 leading-tight">
-              <h1
-                className="flex items-center gap-1 truncate text-[15px] font-bold tracking-tight text-slate-900 dark:text-white"
-                title={companyName}
-              >
-                {companyName}{' '}
-                <span style={{ color: ACCENT }} className="font-extrabold dark:brightness-125">
-                  PYME
-                </span>
-              </h1>
-              <p className="truncate text-[10px] font-medium text-slate-400 dark:text-slate-500">
-                SaaS Chile CLP
-              </p>
-            </div>
+            <Link href="/" className="min-w-0 flex-1" aria-label="Inicio">
+              <Brand priority />
+            </Link>
             <button
               type="button"
               onClick={toggleCollapsed}
