@@ -246,26 +246,31 @@ export class ProductsController {
     // ponderado (autogestionado).
     sheet.columns = [
       { header: 'SKU', key: 'sku', width: 18 },
+      { header: 'Códigos compatibles', key: 'compatibleCodes', width: 32 },
+      { header: 'Categoría', key: 'category', width: 22 },
       { header: 'Nombre', key: 'name', width: 36 },
-      { header: 'Categoria', key: 'category', width: 22 },
+      // Marca DEL REPUESTO (fabricante de la pieza: Mahle, Bosch).
       { header: 'Marca', key: 'brand', width: 18 },
-      // Compatibilidad vehicular en 4 columnas separadas (alineadas por ';').
-      { header: 'Marca de vehiculo', key: 'vMake', width: 20 },
-      { header: 'Modelo de vehiculo', key: 'vModel', width: 20 },
-      { header: 'Año desde', key: 'vFrom', width: 12 },
-      { header: 'Año hasta', key: 'vTo', width: 12 },
-      // Columnas dinámicas: una por bodega, header "Stock bodega <Nombre>" para
-      // dejar claro que la celda es stock de esa bodega.
-      ...warehouses.map((w) => ({
-        header: `Stock bodega ${w.name}`,
-        key: `wh:${w.id}`,
-        width: Math.max(w.name.length + 14, 16),
-      })),
-      { header: 'Stock minimo', key: 'minStock', width: 12 },
+      // Compatibilidad vehicular en columnas separadas (alineadas por ';'). La
+      // columna "Año" enumera todos los años del rango separados por ",".
+      { header: 'Marca de vehículo', key: 'vMake', width: 20 },
+      { header: 'Modelo de vehículo', key: 'vModel', width: 20 },
+      { header: 'Año', key: 'vYears', width: 22 },
+      // Columnas dinámicas por bodega: stock + ubicación física en esa bodega.
+      ...warehouses.flatMap((w) => [
+        {
+          header: `Stock bodega ${w.name}`,
+          key: `wh:${w.id}`,
+          width: Math.max(w.name.length + 14, 16),
+        },
+        {
+          header: `Ubicación bodega ${w.name}`,
+          key: `loc:${w.id}`,
+          width: Math.max(w.name.length + 18, 18),
+        },
+      ]),
+      { header: 'Stock mínimo', key: 'minStock', width: 12 },
       { header: 'Tipo (ORIGINAL/ALTERNATIVE)', key: 'kind', width: 16 },
-      { header: 'Numero de parte', key: 'partNumber', width: 16 },
-      { header: 'Codigo universal', key: 'barcode', width: 18 },
-      { header: 'Cod Compatibles', key: 'compatibleCodes', width: 32 },
       // La columna Costo solo aparece para usuarios con permiso. Es informativa:
       // al reimportar, el costo de productos existentes NO se pisa (autogestionado).
       ...(canSeeCost
@@ -284,8 +289,7 @@ export class ProductsController {
         width: 14,
         style: { numFmt: MONEY_FMT },
       },
-      { header: 'Descripcion', key: 'description', width: 40 },
-      { header: 'Observacion', key: 'observation', width: 32 },
+      { header: 'Observación', key: 'observation', width: 32 },
       { header: 'Activo', key: 'isActive', width: 8 },
     ];
 
@@ -299,24 +303,25 @@ export class ProductsController {
       const qtyByWarehouseId = new Map(
         stocks.map((s) => [s.warehouseId, s.qty]),
       );
-      // Una celda por bodega con el stock actual (0 si el producto no tiene
-      // registro en esa bodega).
-      const warehouseCells: Record<string, number> = {};
+      const locByWarehouseId = new Map(
+        stocks.map((s) => [s.warehouseId, s.locationCode]),
+      );
+      // Dos celdas por bodega: stock actual (0 si el producto no tiene registro
+      // en esa bodega) y la ubicación física en esa bodega.
+      const warehouseCells: Record<string, number | string> = {};
       for (const w of warehouses) {
         warehouseCells[`wh:${w.id}`] = qtyByWarehouseId.get(w.id) ?? 0;
+        warehouseCells[`loc:${w.id}`] = locByWarehouseId.get(w.id) ?? '';
       }
       const vm = modelsByProduct.get(p.id);
       sheet.addRow({
         sku: p.sku ?? '',
         name: p.name,
-        partNumber: p.partNumber ?? '',
-        barcode: p.barcode ?? '',
         category: categoryName,
         brand: p.brand?.name ?? '',
         vMake: vm?.makes ?? '',
         vModel: vm?.models ?? '',
-        vFrom: vm?.from ?? '',
-        vTo: vm?.to ?? '',
+        vYears: vm?.years ?? '',
         compatibleCodes: codesByProduct.get(p.id) ?? '',
         // Valor en mayúsculas para que el archivo round-trip con el importer.
         kind: p.productKind === 'ORIGINAL' ? 'ORIGINAL' : 'ALTERNATIVE',
@@ -324,7 +329,6 @@ export class ProductsController {
         price: parseFloat(p.price ?? '0'),
         minStock: p.minStock ?? 0,
         ...warehouseCells,
-        description: p.description ?? '',
         observation: p.observation ?? '',
         isActive: p.isActive ? 'Sí' : 'No',
       });

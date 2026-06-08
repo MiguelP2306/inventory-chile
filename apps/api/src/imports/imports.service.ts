@@ -5,6 +5,7 @@ import type {
   ProductImportResultDto,
   ProductImportRowDto,
   VehicleModelImportInput,
+  WarehouseStockImportInput,
 } from '@inventory/shared';
 import {
   BadRequestException,
@@ -46,11 +47,16 @@ const COLUMNS = [
   'name',
   'categoryName',
   'brandName',
-  // Compatibilidad vehicular en 4 columnas SEPARADAS (Fase 12). Para varios
-  // vehículos por producto, cada columna acepta una lista separada por ';'
-  // ALINEADA por posición.
+  // Compatibilidad vehicular en columnas SEPARADAS. Para varios vehículos por
+  // producto, cada columna acepta una lista separada por ';' ALINEADA por
+  // posición. La columna combinada "Año" enumera los años del rango separados
+  // por ',' (ej. "2015, 2016, 2017").
   'vehicleMake',
   'vehicleModel',
+  'vehicleYears',
+  // Columnas legacy de año en 2 campos separados ("Año desde"/"Año hasta"). Ya
+  // no van en la plantilla nueva, pero se siguen parseando si un archivo viejo
+  // las trae (fallback cuando no viene la columna combinada "Año").
   'vehicleYearFrom',
   'vehicleYearTo',
   // Columna combinada legacy ("Marca:Modelo:Año-Año; ..."). Ya no va en la
@@ -58,11 +64,16 @@ const COLUMNS = [
   'vehicleModels',
   'minStock',
   'productKind',
+  // Legacy: ya no van en la plantilla nueva (el cliente los eliminó), pero se
+  // siguen parseando si un archivo viejo / export anterior los trae.
   'partNumber',
   'barcode',
   'compatibleCodes',
   'cost',
   'price',
+  // Legacy: ya no va en la plantilla nueva (el cliente la quitó), pero se sigue
+  // parseando si un archivo viejo la trae. Si viene vacía/ausente, el upsert
+  // preserva la descripción actual del producto (no la pisa).
   'description',
   'observation',
   'location',
@@ -72,48 +83,46 @@ type Column = (typeof COLUMNS)[number];
 const HEADERS: Record<Column, string> = {
   sku: 'SKU',
   name: 'Nombre',
-  categoryName: 'Categoria',
+  categoryName: 'Categoría',
   brandName: 'Marca',
-  vehicleMake: 'Marca de vehiculo',
-  vehicleModel: 'Modelo de vehiculo',
+  vehicleMake: 'Marca de vehículo',
+  vehicleModel: 'Modelo de vehículo',
+  vehicleYears: 'Año',
   vehicleYearFrom: 'Año desde',
   vehicleYearTo: 'Año hasta',
   vehicleModels: 'Modelo (Marca:Modelo:Año-Año, separados por ;)',
-  minStock: 'Stock minimo',
+  minStock: 'Stock mínimo',
   productKind: 'Tipo (ORIGINAL/ALTERNATIVE)',
   partNumber: 'Numero de parte',
   barcode: 'Codigo universal',
-  compatibleCodes: 'Cod Compatibles',
+  compatibleCodes: 'Códigos compatibles',
   cost: 'Costo (bruto)',
   price: 'Precio (bruto)',
-  description: 'Descripcion',
-  observation: 'Observacion',
+  description: 'Descripción',
+  observation: 'Observación',
   location: 'Ubicacion (deprecated)',
 };
 
 // Orden de columnas FIJAS en la plantilla descargable. Las columnas por bodega
-// (dinámicas) se insertan entre las de vehículo y `minStock`.
+// (dinámicas) se insertan entre las de vehículo y `minStock`. Orden pedido por
+// el cliente (Fase 12): SKU → códigos compatibles → categoría/nombre/marca →
+// vehículo → bodegas → admin.
 const TEMPLATE_BEFORE_WAREHOUSES: Column[] = [
   'sku',
-  'name',
+  'compatibleCodes',
   'categoryName',
+  'name',
   'brandName',
   'vehicleMake',
   'vehicleModel',
-  'vehicleYearFrom',
-  'vehicleYearTo',
+  'vehicleYears',
 ];
 const TEMPLATE_AFTER_WAREHOUSES: Column[] = [
   'minStock',
   'productKind',
-  'partNumber',
-  'barcode',
-  'compatibleCodes',
   'cost',
   'price',
-  'description',
   'observation',
-  'location',
 ];
 
 // Alias de headers para no romper archivos viejos / exportados que traen los
@@ -121,9 +130,14 @@ const TEMPLATE_AFTER_WAREHOUSES: Column[] = [
 // plantilla nueva; estos también matchean al importar.
 const HEADER_ALIASES: Partial<Record<Column, string[]>> = {
   barcode: ['Codigo de barras'],
-  compatibleCodes: ['Codigos compatibles (separados por ;)'],
+  compatibleCodes: [
+    'Cod Compatibles',
+    'Codigos compatibles (separados por ;)',
+  ],
   // "PartNumber" era el header anterior — lo seguimos aceptando al importar.
   partNumber: ['PartNumber'],
+  // Header global anterior (sin "(deprecated)").
+  location: ['Ubicacion'],
 };
 
 // Headers que el EXPORT escribe pero que NO son columnas de bodega — hay que
@@ -459,7 +473,7 @@ export class ImportsService {
     wb.created = new Date();
 
     // Bodegas activas → una columna de stock por bodega. Si todavía no hay
-    // ninguna, dejamos un ejemplo "Principal" para que el operador entienda el
+    // ninguna, dejamos un ejemplo "Bodega" para que el operador entienda el
     // formato (al importar, esa bodega se crea sola si no existe).
     const activeWarehouses = await this.warehouses.find({
       where: { isActive: true },
@@ -469,7 +483,7 @@ export class ImportsService {
     const warehouseNames =
       activeWarehouses.length > 0
         ? activeWarehouses.map((w) => w.name)
-        : ['Principal'];
+        : ['Bodega'];
 
     const sheet = wb.addWorksheet('Productos');
     // Orden: campos antes de bodegas → columnas por bodega → campos después.
@@ -478,17 +492,24 @@ export class ImportsService {
       key: col,
       width: Math.max(HEADERS[col].length + 2, 16),
     });
-    const warehouseCol = (name: string) => ({
-      // Header "Stock bodega <Nombre>" para que quede claro que es stock de esa
-      // bodega.
-      header: `Stock bodega ${name}`,
-      // Prefijo `wh:` en la key para no colisionar con las keys de campos fijos.
-      key: `wh:${name}`,
-      width: Math.max(name.length + 14, 16),
-    });
+    // Dos columnas por bodega: stock + ubicación física en esa bodega. Headers
+    // "Stock bodega <Nombre>" y "Ubicación bodega <Nombre>". Prefijos `wh:` /
+    // `loc:` en la key para no colisionar con las keys de campos fijos.
+    const warehouseCols = (name: string) => [
+      {
+        header: `Stock bodega ${name}`,
+        key: `wh:${name}`,
+        width: Math.max(name.length + 14, 16),
+      },
+      {
+        header: `Ubicación bodega ${name}`,
+        key: `loc:${name}`,
+        width: Math.max(name.length + 18, 18),
+      },
+    ];
     sheet.columns = [
       ...TEMPLATE_BEFORE_WAREHOUSES.map(fixedCol),
-      ...warehouseNames.map(warehouseCol),
+      ...warehouseNames.flatMap(warehouseCols),
       ...TEMPLATE_AFTER_WAREHOUSES.map(fixedCol),
     ];
     const header = sheet.getRow(1);
@@ -500,28 +521,27 @@ export class ImportsService {
     };
     const exampleRow: Record<string, unknown> = {
       sku: 'FIL-AC-001',
-      partNumber: 'A12345',
-      barcode: '7891234567890',
       name: 'Filtro de aire Toyota Corolla 2018',
-      description: 'Filtro de aire para motor 1.8L',
       observation: 'Revisar empaque al recibir',
       categoryName: 'Filtros',
       brandName: 'Mahle',
       cost: '8000',
       price: '15000',
       minStock: 5,
-      location: '',
       productKind: 'ORIGINAL',
       compatibleCodes: 'A12345; B67890; XYZ-001',
       // Compatibilidad vehicular en columnas separadas. Para varios vehículos,
-      // alinear por posición con ';' en cada columna.
+      // alinear por posición con ';' en cada columna. "Año" enumera los años
+      // del rango separados por ',' (ej. "2014, 2015, 2016, 2017, 2018, 2019").
       vehicleMake: 'Toyota; Toyota',
       vehicleModel: 'Corolla; Yaris',
-      vehicleYearFrom: '2014; 2018',
-      vehicleYearTo: '2019; ',
+      vehicleYears: '2014, 2015, 2016, 2017, 2018, 2019; 2018, 2019, 2020',
     };
-    // Stock de ejemplo en la primera bodega.
-    if (warehouseNames[0]) exampleRow[`wh:${warehouseNames[0]}`] = 20;
+    // Stock + ubicación de ejemplo en la primera bodega.
+    if (warehouseNames[0]) {
+      exampleRow[`wh:${warehouseNames[0]}`] = 20;
+      exampleRow[`loc:${warehouseNames[0]}`] = 'A-12-3';
+    }
     sheet.addRow(exampleRow);
 
     const inst = wb.addWorksheet('Instrucciones');
@@ -533,24 +553,20 @@ export class ImportsService {
     inst.getRow(1).font = { bold: true };
     const ROWS: Array<[string, boolean, string]> = [
       [HEADERS.sku, true, 'Codigo unico interno. Si ya existe en el sistema, se actualiza ese producto (upsert).'],
-      [HEADERS.name, true, 'Nombre / descripcion comercial del producto.'],
+      [HEADERS.compatibleCodes, false, 'Lista de codigos compatibles separados por punto y coma (;). Ej: "A123;B456;XYZ-789".'],
       [HEADERS.categoryName, false, 'Nombre de la categoria. Si no existe, se crea automaticamente.'],
+      [HEADERS.name, true, 'Nombre / descripcion comercial del producto.'],
       [HEADERS.brandName, false, 'MARCA DEL PRODUCTO (fabricante del repuesto). Ej: Mahle, Bosch. Si no existe, se crea automaticamente. NO confundir con la marca del vehiculo.'],
-      [HEADERS.vehicleMake, false, 'MARCA DEL VEHICULO: fabricante del auto compatible. Ej: Toyota, Nissan, Chevrolet. Si no existe, se crea automaticamente. Para varios vehiculos, separar con ";" ALINEADO con las otras 3 columnas de vehiculo.'],
+      [HEADERS.vehicleMake, false, 'MARCA DEL VEHICULO: fabricante del auto compatible. Ej: Toyota, Nissan, Chevrolet. Si no existe, se crea automaticamente. Para varios vehiculos, separar con ";" ALINEADO con las columnas Modelo de vehiculo y Año.'],
       [HEADERS.vehicleModel, false, 'MODELO DEL VEHICULO: modelo especifico del fabricante. Ej: Corolla, Hilux, Sentra. Si no existe, se crea automaticamente. Obligatorio si cargas Marca de vehiculo. Para varios, separar con ";" alineado.'],
-      [HEADERS.vehicleYearFrom, false, 'AÑO DESDE: primer año de compatibilidad del producto con ese modelo. Entero 1900-2100. Opcional (vacio = cualquier año). Alinear con ";" si hay varios vehiculos.'],
-      [HEADERS.vehicleYearTo, false, 'AÑO HASTA: ultimo año de compatibilidad con ese modelo. Entero 1900-2100. Opcional. Debe ser >= Año desde. Alinear con ";" si hay varios vehiculos.'],
-      ['Stock bodega <Nombre> (una por bodega)', false, 'Stock por bodega: agrega UNA COLUMNA por cada bodega, con encabezado "Stock bodega " + el nombre (ej. "Stock bodega Mercado Libre Full"). El valor de la celda ESTABLECE el stock de esa bodega (registra un ajuste con la diferencia). Si la bodega no existe, se crea automaticamente. Celda vacia = no toca el stock de esa bodega.'],
+      [HEADERS.vehicleYears, false, 'AÑOS de compatibilidad con ese modelo: lista de años separados por coma (,). Ej: "2014, 2015, 2016, 2017, 2018, 2019". Enteros 1900-2100. Opcional (vacio = cualquier año). Si hay varios vehiculos, separar cada bloque de años con ";" alineado con Marca/Modelo de vehiculo. Se guarda como rango (minimo-maximo de la lista).'],
+      ['Stock bodega <Nombre> (una por bodega)', false, 'Stock por bodega: agrega UNA COLUMNA por cada bodega, con encabezado "Stock bodega " + el nombre (ej. "Stock bodega Mercado libre"). El valor de la celda ESTABLECE el stock de esa bodega (registra un ajuste con la diferencia). Si la bodega no existe, se crea automaticamente. Celda vacia = no toca el stock de esa bodega.'],
+      ['Ubicación bodega <Nombre> (una por bodega)', false, 'Ubicacion fisica del producto DENTRO de esa bodega (pasillo/estante/posicion). Maximo 30 caracteres. Va junto a la columna de stock de la misma bodega. Celda vacia = no toca la ubicacion.'],
       [HEADERS.minStock, false, 'Stock minimo. Entero >= 0. Default 0.'],
       [HEADERS.productKind, false, 'ORIGINAL o ALTERNATIVE. Default ORIGINAL.'],
-      [HEADERS.partNumber, false, 'Codigo de pieza del fabricante. Indexado para busqueda.'],
-      [HEADERS.barcode, false, 'Codigo universal / de barras del producto. Indexado para escanner y busqueda.'],
-      [HEADERS.compatibleCodes, false, 'Lista de codigos compatibles separados por punto y coma (;). Ej: "A123;B456;XYZ-789".'],
       [HEADERS.cost, false, 'Costo unitario BRUTO en CLP (con IVA). Ej: 8000. Default 0. En productos existentes NO se pisa (costo autogestionado).'],
       [HEADERS.price, false, 'Precio venta BRUTO en CLP (con IVA). Ej: 15000. Default 0.'],
-      [HEADERS.description, false, 'Descripcion larga comercial (opcional).'],
       [HEADERS.observation, false, 'Observacion / nota interna del producto (opcional).'],
-      [HEADERS.location, false, 'Deprecated desde Fase 7.5. Usar locationCode por bodega desde /inventario.'],
     ];
     for (const [col, req, desc] of ROWS) {
       inst.addRow({ col, req: req ? 'Si' : 'No', desc });
@@ -592,7 +608,7 @@ export class ImportsService {
     const { headerRowNumber, colIndex } = found;
 
     // Columnas DINÁMICAS de stock por bodega: una por bodega, con header
-    // "Stock bodega <Nombre>" (ej. "Stock bodega Mercado Libre Full"). Detectamos
+    // "Stock bodega <Nombre>" (ej. "Stock bodega Mercado libre"). Detectamos
     // las columnas que arrancan con el prefijo "Stock " y no son una columna fija
     // (Stock minimo) ni un header conocido del export (Stock actual, Stock por
     // bodega). El nombre de la bodega es lo que sigue al prefijo (la palabra
@@ -610,7 +626,26 @@ export class ImportsService {
     // Prefijo "Stock" + (opcional) "bodega", con espacio / ":" / "-" en el medio.
     // Acepta "Stock bodega Principal" y también "Stock Principal" (compat).
     const STOCK_PREFIX_RE = /^stock\b\s*[:\-]?\s*(?:bodega\b\s*[:\-]?\s*)?/i;
-    const warehouseColumns: { colIndex: number; name: string }[] = [];
+    // Prefijo "Ubicación/Ubicacion" + (opcional) "bodega". Acepta "Ubicación
+    // bodega Principal" y "Ubicacion Principal". El header fijo deprecado
+    // "Ubicacion (deprecated)" queda excluido vía `fixedHeaderNorms`.
+    const LOCATION_PREFIX_RE = /^ubicaci[oó]n\b\s*[:\-]?\s*(?:bodega\b\s*[:\-]?\s*)?/i;
+    // Una entrada por bodega con el índice de su columna de stock y/o ubicación.
+    const warehouseColumns: {
+      name: string;
+      stockColIndex?: number;
+      locationColIndex?: number;
+    }[] = [];
+    const warehouseByName = new Map<string, (typeof warehouseColumns)[number]>();
+    const ensureWarehouse = (name: string) => {
+      let wc = warehouseByName.get(name);
+      if (!wc) {
+        wc = { name };
+        warehouseByName.set(name, wc);
+        warehouseColumns.push(wc);
+      }
+      return wc;
+    };
     const headerRow = sheet.getRow(headerRowNumber);
     headerRow.eachCell({ includeEmpty: false }, (cell, cellIdx) => {
       if (usedColIndices.has(cellIdx)) return;
@@ -619,10 +654,15 @@ export class ImportsService {
       const norm = normalizeHeader(raw);
       if (!norm) return;
       if (fixedHeaderNorms.has(norm) || NON_WAREHOUSE_HEADERS.has(norm)) return;
-      if (!STOCK_PREFIX_RE.test(raw)) return;
-      const name = raw.replace(STOCK_PREFIX_RE, '').trim();
-      if (name === '') return;
-      warehouseColumns.push({ colIndex: cellIdx, name });
+      if (STOCK_PREFIX_RE.test(raw)) {
+        const name = raw.replace(STOCK_PREFIX_RE, '').trim();
+        if (name === '') return;
+        ensureWarehouse(name).stockColIndex = cellIdx;
+      } else if (LOCATION_PREFIX_RE.test(raw)) {
+        const name = raw.replace(LOCATION_PREFIX_RE, '').trim();
+        if (name === '') return;
+        ensureWarehouse(name).locationColIndex = cellIdx;
+      }
     });
 
     const valid: Omit<ProductImportRowDto, 'action' | 'existingProductId'>[] = [];
@@ -646,7 +686,11 @@ export class ImportsService {
       const isFullyEmpty =
         COLUMNS.every((col) => cellText(col) === '') &&
         warehouseColumns.every(
-          (wc) => readCellText(row.getCell(wc.colIndex)) === '',
+          (wc) =>
+            (wc.stockColIndex === undefined ||
+              readCellText(row.getCell(wc.stockColIndex)) === '') &&
+            (wc.locationColIndex === undefined ||
+              readCellText(row.getCell(wc.locationColIndex)) === ''),
         );
       if (isFullyEmpty) {
         consecutiveEmptyRows += 1;
@@ -781,11 +825,14 @@ export class ImportsService {
       }
       const compatibleCodesUnique = Array.from(new Set(compatibleCodes));
 
-      // Compatibilidad vehicular. Formato NUEVO: 4 columnas separadas
-      // (Marca de vehiculo / Modelo de vehiculo / Año desde / Año hasta). Para
-      // varios vehículos, cada columna trae una lista separada por ';' ALINEADA
-      // por posición (índice 0 con índice 0, etc.). Si esas columnas no vienen,
-      // se acepta la columna combinada legacy "Marca:Modelo:Año-Año; ...".
+      // Compatibilidad vehicular. Formato NUEVO: columnas separadas
+      // (Marca de vehiculo / Modelo de vehiculo / Año). Para varios vehículos,
+      // cada columna trae una lista separada por ';' ALINEADA por posición
+      // (índice 0 con índice 0, etc.). La columna "Año" trae, por vehículo, la
+      // lista de años separados por ',' (ej. "2015, 2016, 2017") — se guarda
+      // como rango [min, max]. Si no viene "Año", se aceptan las columnas legacy
+      // "Año desde"/"Año hasta". Si no vienen las columnas separadas, se acepta
+      // la columna combinada legacy "Marca:Modelo:Año-Año; ...".
       const vehicleModels: VehicleModelImportInput[] = [];
       let modelsError: string | null = null;
 
@@ -794,11 +841,14 @@ export class ImportsService {
 
       const makeCell = cellText('vehicleMake');
       const modelCell = cellText('vehicleModel');
+      const yearsCell = cellText('vehicleYears');
       const yearFromCell = cellText('vehicleYearFrom');
       const yearToCell = cellText('vehicleYearTo');
+      const hasYearsCombined = yearsCell !== '';
       const hasSeparated =
         makeCell !== '' ||
         modelCell !== '' ||
+        yearsCell !== '' ||
         yearFromCell !== '' ||
         yearToCell !== '';
 
@@ -806,40 +856,64 @@ export class ImportsService {
         const split = (s: string) => s.split(';').map((x) => x.trim());
         const makes = split(makeCell);
         const models = split(modelCell);
+        const yearSegs = hasYearsCombined ? split(yearsCell) : [];
         const froms = split(yearFromCell);
         const tos = split(yearToCell);
         const count = Math.max(makes.length, models.length);
         for (let i = 0; i < count; i += 1) {
           const mk = (makes[i] ?? '').trim();
           const md = (models[i] ?? '').trim();
+          const yearsSeg = (yearSegs[i] ?? '').trim();
           const yf = (froms[i] ?? '').trim();
           const yt = (tos[i] ?? '').trim();
-          if (mk === '' && md === '' && yf === '' && yt === '') continue;
+          if (mk === '' && md === '' && yearsSeg === '' && yf === '' && yt === '') {
+            continue;
+          }
           if (mk === '' || md === '') {
             modelsError = `Vehículo #${i + 1}: "Marca de vehiculo" y "Modelo de vehiculo" son obligatorios (revisá que las columnas estén alineadas con ";").`;
             break;
           }
           let yearFrom: number | null = null;
           let yearTo: number | null = null;
-          if (yf !== '') {
-            const n = Number(yf);
-            if (!yearValid(n)) {
-              modelsError = `"Año desde" inválido para "${mk} ${md}": "${yf}".`;
+          if (hasYearsCombined) {
+            // Lista de años separados por "," → se guarda el rango [min, max].
+            if (yearsSeg !== '') {
+              const years = yearsSeg
+                .split(',')
+                .map((y) => y.trim())
+                .filter(Boolean)
+                .map((y) => Number(y));
+              const bad = years.find((n) => !yearValid(n));
+              if (bad !== undefined) {
+                modelsError = `"Año" inválido para "${mk} ${md}": "${yearsSeg}" (use años enteros 1900-2100 separados por ",").`;
+                break;
+              }
+              if (years.length > 0) {
+                yearFrom = Math.min(...years);
+                yearTo = Math.max(...years);
+              }
+            }
+          } else {
+            if (yf !== '') {
+              const n = Number(yf);
+              if (!yearValid(n)) {
+                modelsError = `"Año desde" inválido para "${mk} ${md}": "${yf}".`;
+                break;
+              }
+              yearFrom = n;
+            }
+            if (yt !== '') {
+              const n = Number(yt);
+              if (!yearValid(n)) {
+                modelsError = `"Año hasta" inválido para "${mk} ${md}": "${yt}".`;
+                break;
+              }
+              yearTo = n;
+            }
+            if (yearFrom != null && yearTo != null && yearFrom > yearTo) {
+              modelsError = `"Año desde" > "Año hasta" para "${mk} ${md}".`;
               break;
             }
-            yearFrom = n;
-          }
-          if (yt !== '') {
-            const n = Number(yt);
-            if (!yearValid(n)) {
-              modelsError = `"Año hasta" inválido para "${mk} ${md}": "${yt}".`;
-              break;
-            }
-            yearTo = n;
-          }
-          if (yearFrom != null && yearTo != null && yearFrom > yearTo) {
-            modelsError = `"Año desde" > "Año hasta" para "${mk} ${md}".`;
-            break;
           }
           vehicleModels.push({ makeName: mk, modelName: md, yearFrom, yearTo });
         }
@@ -895,19 +969,40 @@ export class ImportsService {
         continue;
       }
 
-      // Stock por bodega: una columna por bodega (header = nombre de la bodega).
-      // Cada celda con valor establece el stock de esa bodega al número dado.
-      const warehouseStocks: { warehouseName: string; quantity: number }[] = [];
+      // Stock + ubicación por bodega: hasta dos columnas por bodega
+      // ("Stock bodega X" / "Ubicación bodega X"). El stock con valor ESTABLECE
+      // el stock de esa bodega; la ubicación con valor setea el locationCode.
+      // Celda vacía = no toca ese campo.
+      const warehouseStocks: WarehouseStockImportInput[] = [];
       let stockError: string | null = null;
       for (const wc of warehouseColumns) {
-        const raw = readCellText(row.getCell(wc.colIndex));
-        if (raw === '') continue;
-        const n = parseInteger(raw);
-        if (n === null || n < 0) {
-          stockError = `Stock de la bodega "${wc.name}" inválido: "${raw}" (debe ser entero ≥ 0)`;
+        const stockRaw =
+          wc.stockColIndex !== undefined
+            ? readCellText(row.getCell(wc.stockColIndex))
+            : '';
+        const locRaw =
+          wc.locationColIndex !== undefined
+            ? readCellText(row.getCell(wc.locationColIndex)).trim()
+            : '';
+        if (stockRaw === '' && locRaw === '') continue;
+        let quantity: number | null = null;
+        if (stockRaw !== '') {
+          const n = parseInteger(stockRaw);
+          if (n === null || n < 0) {
+            stockError = `Stock de la bodega "${wc.name}" inválido: "${stockRaw}" (debe ser entero ≥ 0)`;
+            break;
+          }
+          quantity = n;
+        }
+        if (locRaw.length > 30) {
+          stockError = `Ubicación de la bodega "${wc.name}" supera 30 caracteres: "${locRaw}"`;
           break;
         }
-        warehouseStocks.push({ warehouseName: wc.name, quantity: n });
+        warehouseStocks.push({
+          warehouseName: wc.name,
+          quantity,
+          locationCode: locRaw !== '' ? locRaw : null,
+        });
       }
       if (stockError) {
         errors.push({ rowNumber: r, sku, message: stockError });
@@ -948,16 +1043,24 @@ export class ImportsService {
     const categoryId = row.categoryName ? catByName.get(row.categoryName) ?? null : null;
     const brandId = row.brandName ? brandByName.get(row.brandName) ?? null : null;
 
-    // Resolver las bodegas de las columnas de stock. `warehouseByName` ya trae
-    // las bodegas existentes + las recién creadas (ver confirm). Si por alguna
-    // razón falta una, fallamos con un error claro.
-    const stockTargets: { warehouseId: string; quantity: number }[] = [];
+    // Resolver las bodegas de las columnas de stock/ubicación. `warehouseByName`
+    // ya trae las bodegas existentes + las recién creadas (ver confirm). Si por
+    // alguna razón falta una, fallamos con un error claro.
+    const stockTargets: {
+      warehouseId: string;
+      quantity: number | null;
+      locationCode: string | null;
+    }[] = [];
     for (const ws of row.warehouseStocks) {
       const whId = warehouseByName.get(ws.warehouseName);
       if (!whId) {
         throw new Error(`Bodega "${ws.warehouseName}" no encontrada.`);
       }
-      stockTargets.push({ warehouseId: whId, quantity: ws.quantity });
+      stockTargets.push({
+        warehouseId: whId,
+        quantity: ws.quantity,
+        locationCode: ws.locationCode,
+      });
     }
 
     const productId = await this.ds.transaction(async (manager) => {
@@ -969,7 +1072,10 @@ export class ImportsService {
         name: row.name,
         partNumber: row.partNumber,
         barcode: row.barcode,
-        description: row.description,
+        // 'Descripción' ya NO va en la plantilla nueva (el cliente la quitó del
+        // import). Si un archivo viejo todavía la trae se respeta; si la celda
+        // viene vacía/ausente, se PRESERVA la descripción actual (no se pisa).
+        description: row.description ?? existing?.description ?? null,
         observation: row.observation,
         categoryId,
         brandId,
@@ -1022,16 +1128,54 @@ export class ImportsService {
     // upsert de stocks). El delta puede ser positivo o negativo según el
     // stock previo. Una entrada por cada columna de bodega con valor.
     for (const target of stockTargets) {
-      await this.setStockToTarget(
+      if (target.quantity !== null) {
+        await this.setStockToTarget(
+          productId,
+          target.warehouseId,
+          target.quantity,
+          userId,
+          // El costo del Excel (si vino) se usa como costo unitario del stock que
+          // INGRESA por este ajuste → se integra al ponderado (WAC). Para salidas
+          // (delta < 0) el motor lo ignora y consume lotes FIFO.
+          row.cost,
+        );
+      }
+      // La ubicación por bodega se setea aparte del stock (puede venir sola).
+      if (target.locationCode !== null) {
+        await this.setWarehouseLocation(
+          productId,
+          target.warehouseId,
+          target.locationCode,
+        );
+      }
+    }
+  }
+
+  /**
+   * Setea el `locationCode` (ubicación física) de un producto en una bodega.
+   * Si todavía no existe un registro de stock para ese par producto/bodega,
+   * lo crea con cantidad 0 (solo para guardar la ubicación). No registra
+   * ningún movimiento de inventario.
+   */
+  private async setWarehouseLocation(
+    productId: string,
+    warehouseId: string,
+    locationCode: string,
+  ): Promise<void> {
+    const existing = await this.stocks.findOne({
+      where: { productId, warehouseId },
+    });
+    if (existing) {
+      existing.locationCode = locationCode;
+      await this.stocks.save(existing);
+    } else {
+      const stock = this.stocks.create({
         productId,
-        target.warehouseId,
-        target.quantity,
-        userId,
-        // El costo del Excel (si vino) se usa como costo unitario del stock que
-        // INGRESA por este ajuste → se integra al ponderado (WAC). Para salidas
-        // (delta < 0) el motor lo ignora y consume lotes FIFO.
-        row.cost,
-      );
+        warehouseId,
+        quantity: 0,
+        locationCode,
+      });
+      await this.stocks.save(stock);
     }
   }
 

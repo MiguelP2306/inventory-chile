@@ -177,12 +177,12 @@ export const GROUPS: HelpGroup[] = [
         icon: Building2,
         route: '/almacenes',
         tagline: 'Tus bodegas.',
-        what: 'Los lugares donde guardas stock (Principal, Mercado Libre Full, etc.).',
+        what: 'Los lugares donde guardas stock (Bodega, Tienda, Mercado libre, etc.).',
         bullets: [
           'Crear y editar bodegas.',
           'Manejar el stock de forma separada en cada bodega.',
         ],
-        tip: 'Mercado Libre Full se maneja como una bodega aparte.',
+        tip: 'Mercado libre se maneja como una bodega aparte.',
       },
       {
         id: 'transferencias',
@@ -509,10 +509,10 @@ export const FAQS: { q: string; a: string }[] = [
   },
   {
     q: '¿Qué es una transferencia y en qué se diferencia de una venta?',
-    a: 'Una transferencia mueve mercadería de una bodega a otra (por ejemplo, hacia Mercado Libre Full). No es una venta y no afecta la caja: solo cambia el stock de lugar.',
+    a: 'Una transferencia mueve mercadería de una bodega a otra (por ejemplo, hacia Mercado libre). No es una venta y no afecta la caja: solo cambia el stock de lugar.',
   },
   {
-    q: '¿Cómo manejo Mercado Libre Full?',
+    q: '¿Cómo manejo Mercado libre?',
     a: 'Se maneja como una bodega aparte. Transfieres el stock hacia esa bodega y, cuando se vende allá, lo descuentas de esa bodega. Así tu inventario sigue cuadrado.',
   },
   {

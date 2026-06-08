@@ -42,40 +42,45 @@ async function run() {
     console.log(`[seed] Admin ya existe: ${adminEmail}`);
   }
 
-  // 2. Almacenes iniciales
-  //    - "Principal": activo por default (es el que usa la operación diaria).
-  //    - "Mercado Libre Full": inactivo. Aparece deshabilitado en /almacenes;
-  //      el operador lo activa cuando empieza a operar con ML Full. Esto deja
-  //      preparado el id correcto cuando se decida la integración API ML real
-  //      (decisión #5 pendiente). La migración 1778900000000 también lo crea
-  //      idempotentemente — este seed cubre el caso de instalaciones nuevas
-  //      que corren `db:seed` antes de las migraciones.
-  const existingWarehouse = await warehouseRepo.findOne({
-    where: { name: 'Principal' },
-  });
-  if (!existingWarehouse) {
-    await warehouseRepo.insert({
-      name: 'Principal',
-      address: null,
-      isActive: true,
-    });
-    console.log('[seed] Almacén "Principal" creado');
-  } else {
-    console.log('[seed] Almacén "Principal" ya existe');
+  // 2. Almacenes iniciales — siempre precargados: "Bodega", "Tienda" y
+  //    "Mercado libre", las tres activas.
+  //
+  //    Migración de nombres legacy (idempotente, preserva stock/historial e
+  //    ids): las instalaciones viejas tenían "Principal" y "Mercado Libre Full".
+  //    Los renombramos a "Bodega" y "Mercado libre" en vez de crear duplicados.
+  //    "Bodega" es la bodega operativa por defecto (la lógica de ventas/compras
+  //    la prefiere por nombre — ver *.service.ts `defaultWarehouseId`).
+  const warehouseRenames: Array<{ from: string; to: string }> = [
+    { from: 'Principal', to: 'Bodega' },
+    { from: 'Mercado Libre Full', to: 'Mercado libre' },
+  ];
+  for (const { from, to } of warehouseRenames) {
+    // Si ya existe la bodega con el nombre nuevo, no hay nada que migrar.
+    const alreadyRenamed = await warehouseRepo.findOne({ where: { name: to } });
+    if (alreadyRenamed) continue;
+    const legacy = await warehouseRepo.findOne({ where: { name: from } });
+    if (legacy) {
+      legacy.name = to;
+      legacy.isActive = true;
+      await warehouseRepo.save(legacy);
+      console.log(`[seed] Almacén "${from}" renombrado a "${to}" (activo)`);
+    }
   }
 
-  const existingMlFull = await warehouseRepo.findOne({
-    where: { name: 'Mercado Libre Full' },
-  });
-  if (!existingMlFull) {
-    await warehouseRepo.insert({
-      name: 'Mercado Libre Full',
-      address: null,
-      isActive: false,
-    });
-    console.log('[seed] Almacén "Mercado Libre Full" creado (inactivo)');
-  } else {
-    console.log('[seed] Almacén "Mercado Libre Full" ya existe');
+  // Asegurar las 3 bodegas requeridas, activas. Crea las que falten y reactiva
+  // las que estuvieran inactivas. Idempotente.
+  const requiredWarehouses = ['Bodega', 'Tienda', 'Mercado libre'];
+  for (const name of requiredWarehouses) {
+    const existing = await warehouseRepo.findOne({ where: { name } });
+    if (!existing) {
+      await warehouseRepo.insert({ name, address: null, isActive: true });
+      console.log(`[seed] Almacén "${name}" creado (activo)`);
+    } else if (!existing.isActive) {
+      await warehouseRepo.update({ id: existing.id }, { isActive: true });
+      console.log(`[seed] Almacén "${name}" reactivado`);
+    } else {
+      console.log(`[seed] Almacén "${name}" ya existe`);
+    }
   }
 
   // 3. Categorías base de productos

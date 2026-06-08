@@ -187,7 +187,7 @@ export function SaleForm({
       setWarehouseId(bagWhId);
       return;
     }
-    const principal = activeWarehouses.find((w) => w.name === 'Principal');
+    const principal = activeWarehouses.find((w) => w.name === 'Bodega');
     setWarehouseId((principal ?? activeWarehouses[0]!).id);
   }, [warehouseId, activeWarehouses, initialBagItems]);
 

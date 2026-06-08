@@ -65,7 +65,7 @@ export default function NuevaCompraPage() {
     : warehousesQ.data?.items ?? [];
   useEffect(() => {
     if (warehouseId || activeWarehouses.length === 0) return;
-    const principal = activeWarehouses.find((w) => w.name === 'Principal');
+    const principal = activeWarehouses.find((w) => w.name === 'Bodega');
     setWarehouseId((principal ?? activeWarehouses[0]!).id);
   }, [warehouseId, activeWarehouses]);
   const selectedWarehouse = activeWarehouses.find((w) => w.id === warehouseId) ?? null;

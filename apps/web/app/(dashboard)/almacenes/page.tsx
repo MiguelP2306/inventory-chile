@@ -320,7 +320,7 @@ export default function AlmacenesPage() {
                   autoFocus
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="ej: Principal, Mercado Libre Full…"
+                  placeholder="ej: Bodega, Tienda, Mercado libre…"
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs font-semibold focus:border-[#2F6BFF] focus:outline-none focus:ring-2 focus:ring-[#2F6BFF]/15 dark:border-slate-800 dark:bg-slate-900"
                 />
               </div>

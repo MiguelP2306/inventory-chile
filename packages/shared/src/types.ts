@@ -1563,12 +1563,17 @@ export interface ProductImportRowDto {
 }
 
 /**
- * Stock a establecer en una bodega puntual, parseado de una columna por-bodega
- * del Excel. `warehouseName` es el header de la columna.
+ * Stock y/o ubicación a establecer en una bodega puntual, parseado de las
+ * columnas por-bodega del Excel ("Stock bodega X" y "Ubicación bodega X").
+ * `warehouseName` es el nombre de la bodega (lo que sigue al prefijo del
+ * header). `quantity` es `null` cuando la celda de stock está vacía (no se
+ * toca el stock, solo eventualmente la ubicación). `locationCode` es `null`
+ * cuando la celda de ubicación está vacía.
  */
 export interface WarehouseStockImportInput {
   warehouseName: string;
-  quantity: number;
+  quantity: number | null;
+  locationCode: string | null;
 }
 
 /**

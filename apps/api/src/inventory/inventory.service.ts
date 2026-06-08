@@ -1056,17 +1056,17 @@ export class InventoryService {
   }
 
   /**
-   * Bodega activa por defecto. Filtramos activas y preferimos "Principal"
-   * explícitamente — antes el orden alfabético hacía que "Mercado Libre Full"
-   * ganara y los ajustes terminaban en la bodega equivocada (bug Ronda 5/7).
-   * El frontend siempre debería pasar warehouseId explícito; este fallback
-   * es defensa en profundidad.
+   * Bodega activa por defecto. Filtramos activas y preferimos "Bodega"
+   * explícitamente — antes el orden alfabético hacía que otra bodega (ej.
+   * "Mercado libre") ganara y los ajustes terminaban en la equivocada (bug
+   * Ronda 5/7). El frontend siempre debería pasar warehouseId explícito; este
+   * fallback es defensa en profundidad.
    */
   private async defaultWarehouseId(): Promise<string> {
     const rows = await this.warehouses
       .createQueryBuilder('w')
       .where('w.isActive = TRUE')
-      .orderBy(`(w.name = 'Principal')`, 'DESC')
+      .orderBy(`(w.name = 'Bodega')`, 'DESC')
       .addOrderBy('w.name', 'ASC')
       .limit(1)
       .getMany();

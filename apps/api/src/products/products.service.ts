@@ -40,6 +40,23 @@ const DEFAULT_PAGE_SIZE = 20;
 const SKU_COUNTER_KIND = 'PRODUCT_SKU';
 const SKU_PREFIX = 'AUTO';
 
+/**
+ * Enumera todos los años de un rango [from, to] separados por ", " para la
+ * columna "Año" del export (ej. 2015-2018 → "2015, 2016, 2017, 2018"). Si solo
+ * viene uno de los extremos, devuelve ese año. Si no hay años, string vacío.
+ * El importer colapsa esta lista de vuelta a min/max al reimportar.
+ */
+function enumerateYears(from: number | null, to: number | null): string {
+  if (from == null && to == null) return '';
+  if (from != null && to != null) {
+    if (from > to) return String(from);
+    const years: number[] = [];
+    for (let y = from; y <= to; y += 1) years.push(y);
+    return years.join(', ');
+  }
+  return String(from ?? to);
+}
+
 @Injectable()
 export class ProductsService {
   constructor(
@@ -737,11 +754,24 @@ export class ProductsService {
   async stockByProduct(
     productIds: string[],
   ): Promise<
-    Map<string, { warehouseId: string; warehouseName: string; qty: number }[]>
+    Map<
+      string,
+      {
+        warehouseId: string;
+        warehouseName: string;
+        qty: number;
+        locationCode: string | null;
+      }[]
+    >
   > {
     const map = new Map<
       string,
-      { warehouseId: string; warehouseName: string; qty: number }[]
+      {
+        warehouseId: string;
+        warehouseName: string;
+        qty: number;
+        locationCode: string | null;
+      }[]
     >();
     if (productIds.length === 0) return map;
     const rows: Array<{
@@ -749,12 +779,14 @@ export class ProductsService {
       warehouseId: string;
       warehouseName: string;
       qty: number;
+      locationCode: string | null;
     }> = await this.dataSource
       .createQueryBuilder()
       .select('s.productId', 'productId')
       .addSelect('s.warehouseId', 'warehouseId')
       .addSelect('w.name', 'warehouseName')
       .addSelect('s.quantity', 'qty')
+      .addSelect('s.locationCode', 'locationCode')
       .from('stocks', 's')
       .innerJoin('warehouses', 'w', 'w.id = s.warehouseId')
       .where('s.productId IN (:...ids)', { ids: productIds })
@@ -765,6 +797,7 @@ export class ProductsService {
         warehouseId: r.warehouseId,
         warehouseName: r.warehouseName,
         qty: Number(r.qty),
+        locationCode: r.locationCode ?? null,
       });
       map.set(r.productId, arr);
     }
@@ -819,19 +852,21 @@ export class ProductsService {
   }
 
   /**
-   * Igual que `compatibleModelsByProduct` pero devuelve los fitments en 4
-   * cadenas SEPARADAS y ALINEADAS por posición (Marca / Modelo / Año desde /
-   * Año hasta), unidas con "; ". Se usa en el export XLSX para las 4 columnas de
-   * vehículo (Fase 12), de modo que el archivo round-trip al reimportar.
+   * Igual que `compatibleModelsByProduct` pero devuelve los fitments en 3
+   * cadenas SEPARADAS y ALINEADAS por posición (Marca / Modelo / Año), unidas
+   * con "; ". Se usa en el export XLSX para las columnas de vehículo, de modo
+   * que el archivo round-trip al reimportar.
+   *
+   * La columna `years` ENUMERA todos los años del rango de cada fitment,
+   * separados por ", " (ej. un fitment 2015-2018 → "2015, 2016, 2017, 2018").
+   * Los vehículos entre sí se separan con "; " (alineado con makes/models).
    */
   async compatibleModelsStructuredByProduct(
     productIds: string[],
-  ): Promise<
-    Map<string, { makes: string; models: string; from: string; to: string }>
-  > {
+  ): Promise<Map<string, { makes: string; models: string; years: string }>> {
     const map = new Map<
       string,
-      { makes: string; models: string; from: string; to: string }
+      { makes: string; models: string; years: string }
     >();
     if (productIds.length === 0) return map;
     const rows: Array<{
@@ -856,24 +891,21 @@ export class ProductsService {
       .getRawMany();
     const groups = new Map<
       string,
-      { makes: string[]; models: string[]; from: string[]; to: string[] }
+      { makes: string[]; models: string[]; years: string[] }
     >();
     for (const r of rows) {
       const g =
-        groups.get(r.productId) ??
-        { makes: [], models: [], from: [], to: [] };
+        groups.get(r.productId) ?? { makes: [], models: [], years: [] };
       g.makes.push(r.makeName);
       g.models.push(r.modelName);
-      g.from.push(r.yearFrom != null ? String(r.yearFrom) : '');
-      g.to.push(r.yearTo != null ? String(r.yearTo) : '');
+      g.years.push(enumerateYears(r.yearFrom, r.yearTo));
       groups.set(r.productId, g);
     }
     for (const [pid, g] of groups) {
       map.set(pid, {
         makes: g.makes.join('; '),
         models: g.models.join('; '),
-        from: g.from.join('; '),
-        to: g.to.join('; '),
+        years: g.years.join('; '),
       });
     }
     return map;
