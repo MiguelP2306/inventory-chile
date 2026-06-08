@@ -25,6 +25,7 @@ import { Brackets, DataSource, In, Repository } from 'typeorm';
 import { CashboxService } from '../cashbox/cashbox.service';
 import { CountersService } from '../common/counters.service';
 import { dayRange } from '../common/date-range';
+import { businessNoonToday, parseBusinessDate } from '../common/timezone';
 import {
   CashTransaction,
   Product,
@@ -376,7 +377,7 @@ export class ReturnsService {
       }
     }
 
-    const date = dto.date ? new Date(dto.date) : new Date();
+    const date = dto.date ? parseBusinessDate(dto.date) : businessNoonToday();
     const year = date.getFullYear();
 
     const id = await this.ds.transaction(async (manager) => {

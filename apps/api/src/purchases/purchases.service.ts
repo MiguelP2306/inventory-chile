@@ -15,6 +15,13 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { Between, DataSource, In, Repository } from 'typeorm';
 import { CashboxService } from '../cashbox/cashbox.service';
 import { dayRange } from '../common/date-range';
+import {
+  businessNoonToday,
+  businessTodayStr,
+  endOfBusinessDay,
+  parseBusinessDate,
+  startOfBusinessMonth,
+} from '../common/timezone';
 import { InventoryService } from '../inventory/inventory.service';
 import { SupplierCreditsService } from '../supplier-credits/supplier-credits.service';
 import {
@@ -168,7 +175,7 @@ export class PurchasesService {
       const entry = manager.create(PurchaseEntry, {
         supplierId: dto.supplierId,
         warehouseId,
-        date: dto.date ? new Date(dto.date) : new Date(),
+        date: dto.date ? parseBusinessDate(dto.date) : businessNoonToday(),
         total,
         subtotal,
         taxAmount,
@@ -279,16 +286,13 @@ export class PurchasesService {
       from = range.from;
       to = range.to;
     } else {
-      const now = new Date();
-      from = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-      to = new Date(
-        now.getFullYear(),
-        now.getMonth() + 1,
-        0,
-        23,
-        59,
-        59,
-        999,
+      // Mes actual en hora Chile.
+      from = startOfBusinessMonth();
+      const ymd = businessTodayStr(); // YYYY-MM-DD
+      const [yy, mm] = ymd.split('-').map(Number);
+      const lastDay = new Date(Date.UTC(yy!, mm!, 0)).getUTCDate();
+      to = endOfBusinessDay(
+        `${ymd.slice(0, 7)}-${String(lastDay).padStart(2, '0')}`,
       );
     }
 

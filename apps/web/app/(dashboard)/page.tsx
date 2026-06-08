@@ -59,7 +59,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { publicImageUrl } from '@/lib/catalog-api';
 import { getDashboardSummary } from '@/lib/dashboard-api';
-import { formatCurrency } from '@/lib/format';
+import { formatCurrency, isoDaysAgo, todayIso } from '@/lib/format';
 import { useUrlFilters } from '@/lib/use-url-filters';
 import { cn } from '@/lib/utils';
 import type { DashboardRangeDto } from '@inventory/shared';
@@ -145,28 +145,19 @@ function todayHuman(): string {
 }
 
 function monthStartIso(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+  // Primer día del mes actual en hora Chile (todayIso ya viene en hora Chile).
+  return `${todayIso().slice(0, 7)}-01`;
 }
 
 function rangeToDateParams(range: DashboardRangeDto): {
   from: string;
   to: string;
 } {
-  const now = new Date();
-  const todayIso = now.toISOString().slice(0, 10);
-  if (range === 'hoy') return { from: todayIso, to: todayIso };
-  if (range === '7d') {
-    const d = new Date(now);
-    d.setDate(d.getDate() - 6);
-    return { from: d.toISOString().slice(0, 10), to: todayIso };
-  }
-  if (range === '30d') {
-    const d = new Date(now);
-    d.setDate(d.getDate() - 29);
-    return { from: d.toISOString().slice(0, 10), to: todayIso };
-  }
-  return { from: monthStartIso(), to: todayIso };
+  const today = todayIso();
+  if (range === 'hoy') return { from: today, to: today };
+  if (range === '7d') return { from: isoDaysAgo(6), to: today };
+  if (range === '30d') return { from: isoDaysAgo(29), to: today };
+  return { from: monthStartIso(), to: today };
 }
 
 /** Formatea CLP compacto ($1.2M, $80K, $250). */

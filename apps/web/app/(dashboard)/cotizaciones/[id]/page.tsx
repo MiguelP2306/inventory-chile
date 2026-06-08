@@ -26,6 +26,7 @@ import { ConfirmDialog } from '@/components/confirm-dialog';
 import { QuotationFormDialog } from '@/components/forms/quotation-form-dialog';
 import { QuotationStatusBadge } from '@/components/quotation-status-badge';
 import { SendContactDialog } from '@/components/quotations/send-contact-dialog';
+import { WhatsappSendDialog } from '@/components/whatsapp-send-dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -104,13 +105,17 @@ export default function QuotationDetailPage() {
   });
 
   const sendWaMut = useMutation({
-    mutationFn: (to?: string) => sendWhatsapp(id, to),
-    onSuccess: (result) => {
+    mutationFn: (opts: { to?: string; choose?: boolean }) =>
+      sendWhatsapp(id, opts.to),
+    onSuccess: (result, opts) => {
       qc.invalidateQueries({ queryKey: ['quotation', id] });
       qc.invalidateQueries({ queryKey: ['quotations'] });
-      if (result.whatsappUrl) {
-        window.open(result.whatsappUrl, '_blank', 'noopener,noreferrer');
-      }
+      // `choose` → link sin número; si no, el del número (con fallback al
+      // selector de contacto si el cliente no tenía número).
+      const url = opts.choose
+        ? result.whatsappChooseUrl
+        : (result.whatsappUrl ?? result.whatsappChooseUrl);
+      if (url) window.open(url, '_blank', 'noopener,noreferrer');
       toast.success('Se abrió WhatsApp en otra pestaña');
       setWaDialogOpen(false);
     },
@@ -221,11 +226,8 @@ export default function QuotationDetailPage() {
   }
 
   function handleSendWhatsapp() {
-    if (phone) {
-      sendWaMut.mutate(undefined);
-    } else {
-      setWaDialogOpen(true);
-    }
+    // Siempre mostramos el selector: número registrado vs elegir contacto.
+    setWaDialogOpen(true);
   }
 
   const hasTempItems = (q.items ?? []).some((it) => it.isTemporary);
@@ -634,13 +636,12 @@ export default function QuotationDetailPage() {
         onConfirm={(to) => sendEmailMut.mutateAsync(to)}
       />
 
-      <SendContactDialog
+      <WhatsappSendDialog
         open={waDialogOpen}
         onOpenChange={setWaDialogOpen}
-        channel="whatsapp"
-        defaultValue={phone ?? ''}
+        registeredPhone={phone ?? null}
         busy={sendWaMut.isPending}
-        onConfirm={(to) => sendWaMut.mutateAsync(to)}
+        onSend={(opts) => sendWaMut.mutate(opts)}
       />
     </div>
   );

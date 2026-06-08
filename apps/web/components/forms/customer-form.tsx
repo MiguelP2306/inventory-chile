@@ -90,6 +90,8 @@ const schema = z.object({
       (v) => !v || v.trim() === '' || isValidPhone(v),
       'WhatsApp inválido (ej: +56 9 1234 5678)',
     ),
+  // Fase 12 — borrador / cliente libre.
+  isDraft: z.boolean().optional(),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -127,6 +129,7 @@ export function CustomerForm({ customer }: Props) {
       internalNotes: customer?.internalNotes ?? '',
       source: customer?.source ?? 'OTHER',
       whatsappPhone: customer?.whatsappPhone ?? '',
+      isDraft: customer?.isDraft ?? false,
     },
   });
 
@@ -170,6 +173,7 @@ export function CustomerForm({ customer }: Props) {
       whatsappPhone: values.whatsappPhone?.trim()
         ? normalizePhone(values.whatsappPhone)
         : null,
+      isDraft: values.isDraft ?? false,
     };
     mut.mutate(input);
   }
@@ -245,6 +249,49 @@ export function CustomerForm({ customer }: Props) {
           </button>
         </div>
       </div>
+
+      {/* ============================================================
+          BORRADOR / CLIENTE LIBRE (Fase 12)
+          ============================================================ */}
+      <Controller
+        control={form.control}
+        name="isDraft"
+        render={({ field }) => (
+          <button
+            type="button"
+            onClick={() => field.onChange(!field.value)}
+            className={`flex w-full items-center gap-3 rounded-2xl border p-4 text-left transition-colors ${
+              field.value
+                ? 'border-amber-300 bg-amber-50/60 dark:border-amber-500/30 dark:bg-amber-500/5'
+                : 'border-slate-100 bg-white dark:border-slate-850 dark:bg-[#11151C]'
+            }`}
+          >
+            <span
+              className={`relative h-5 w-9 shrink-0 rounded-full border transition-colors ${
+                field.value
+                  ? 'border-amber-500 bg-amber-500'
+                  : 'border-slate-300 bg-slate-200 dark:border-slate-600 dark:bg-slate-700'
+              }`}
+            >
+              <span
+                className={`absolute top-[1px] h-4 w-4 rounded-full bg-white shadow-sm transition-all ${
+                  field.value ? 'left-[17px]' : 'left-[1px]'
+                }`}
+              />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-xs font-bold text-slate-800 dark:text-slate-200">
+                Guardar como borrador (cliente libre)
+              </span>
+              <span className="block text-[11px] text-slate-500 dark:text-slate-400">
+                Crea el cliente solo con el nombre, sin registrarlo del todo. No
+                aparece en los listados ni selectores normales. Lo podés
+                completar después destildando esta opción.
+              </span>
+            </span>
+          </button>
+        )}
+      />
 
       {/* ============================================================
           CARD: datos

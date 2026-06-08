@@ -35,6 +35,11 @@ export class CustomersService {
         { q: `%${query.q}%` },
       );
     }
+    // Por default ocultamos los borradores ("clientes libres") de los listados
+    // y selectores. `draft=only` los muestra solos; `draft=all`, junto al resto.
+    const draftMode = query.draft ?? 'exclude';
+    if (draftMode === 'exclude') qb.andWhere('c.isDraft = FALSE');
+    else if (draftMode === 'only') qb.andWhere('c.isDraft = TRUE');
 
     const paginated = query.page !== undefined || query.pageSize !== undefined;
     if (!paginated) return qb.getMany();
@@ -80,6 +85,7 @@ export class CustomersService {
       whatsappPhone: dto.whatsappPhone
         ? normalizePhone(dto.whatsappPhone)
         : null,
+      isDraft: dto.isDraft ?? false,
     });
     const saved = await this.repo.save(entity);
     return this.getOne(saved.id);
@@ -127,6 +133,9 @@ export class CustomersService {
         ? normalizePhone(dto.whatsappPhone)
         : null;
     }
+    // Completar/promover un borrador: al setear isDraft=false el cliente pasa a
+    // figurar en listados y selectores normales.
+    if (dto.isDraft !== undefined) entity.isDraft = dto.isDraft;
 
     await this.repo.save(entity);
     return this.getOne(id);

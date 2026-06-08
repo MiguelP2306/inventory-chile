@@ -64,6 +64,11 @@ export class CreateProductDto {
   @IsString()
   description?: string | null;
 
+  // Nota interna del producto (Fase 12). Texto libre.
+  @IsOptional()
+  @IsString()
+  observation?: string | null;
+
   @IsOptional()
   @IsUUID()
   categoryId?: string | null;

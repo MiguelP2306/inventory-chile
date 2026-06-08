@@ -14,6 +14,9 @@ export interface ListCustomersParams {
   q?: string;
   page?: number;
   pageSize?: number;
+  // 'exclude' (default backend) oculta borradores; 'only' solo borradores;
+  // 'all' ambos.
+  draft?: 'exclude' | 'only' | 'all';
 }
 
 export const listCustomers = (params: ListCustomersParams = {}) =>
@@ -44,6 +47,8 @@ export interface CustomerInput {
   // Fase 8.5
   source?: CustomerSourceDto;
   whatsappPhone?: string | null;
+  // Fase 12 — crear/mantener como borrador ("cliente libre").
+  isDraft?: boolean;
 }
 
 export const createCustomer = (input: CustomerInput) =>

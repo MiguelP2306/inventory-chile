@@ -11,6 +11,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, EntityManager, Repository } from 'typeorm';
 import { dayRange } from '../common/date-range';
+import { businessNoonToday, parseBusinessDate } from '../common/timezone';
 import { CashTransaction } from '../database/entities';
 import { ListCashTransactionsQueryDto, SetOpeningBalanceDto } from './dto';
 
@@ -81,7 +82,7 @@ export class CashboxService {
     await repo.save(original);
 
     const compensation = repo.create({
-      date: new Date(),
+      date: businessNoonToday(),
       type:
         original.type === CashTransactionType.INCOME
           ? CashTransactionType.EXPENSE
@@ -243,7 +244,7 @@ export class CashboxService {
       throw new BadRequestException('El monto debe ser mayor que 0.');
     }
     const tx = this.txRepo.create({
-      date: input.date ? new Date(input.date) : new Date(),
+      date: input.date ? parseBusinessDate(input.date) : businessNoonToday(),
       type: CashTransactionType.INCOME,
       source: CashTransactionSource.OPENING,
       sourceId: null,
@@ -274,7 +275,7 @@ export class CashboxService {
     }
     existing.amount = input.amount;
     existing.paymentMethod = input.paymentMethod;
-    if (input.date) existing.date = new Date(input.date);
+    if (input.date) existing.date = parseBusinessDate(input.date);
     return this.txRepo.save(existing);
   }
 

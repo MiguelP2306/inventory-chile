@@ -82,6 +82,21 @@ export interface SaleBagItem {
   name: string;
   qty: number;
   unitPrice: string;
+  // Bodega elegida en el bolso (Fase 12). Si todos los items comparten una, la
+  // venta predefine esa bodega.
+  warehouseId?: string | null;
+}
+
+/**
+ * Devuelve la bodega común a TODOS los items del bolso, o null si vienen de
+ * bodegas distintas (o algún item no trae bodega). Se usa para predefinir la
+ * bodega de la venta cuando se crea desde el bolso.
+ */
+function unanimousBagWarehouse(items?: SaleBagItem[]): string | null {
+  if (!items || items.length === 0) return null;
+  const first = items[0]?.warehouseId ?? null;
+  if (!first) return null;
+  return items.every((it) => it.warehouseId === first) ? first : null;
 }
 
 interface Props {
@@ -164,9 +179,17 @@ export function SaleForm({
 
   useEffect(() => {
     if (warehouseId || activeWarehouses.length === 0) return;
+    // Si la venta viene del bolso y TODOS los items comparten una misma bodega
+    // (activa), la predefinimos. Si hay items de bodegas distintas, caemos al
+    // default normal (Principal / primera activa) y el operador elige.
+    const bagWhId = unanimousBagWarehouse(initialBagItems);
+    if (bagWhId && activeWarehouses.some((w) => w.id === bagWhId)) {
+      setWarehouseId(bagWhId);
+      return;
+    }
     const principal = activeWarehouses.find((w) => w.name === 'Principal');
     setWarehouseId((principal ?? activeWarehouses[0]!).id);
-  }, [warehouseId, activeWarehouses]);
+  }, [warehouseId, activeWarehouses, initialBagItems]);
 
   const [items, setItems] = useState<ItemRow[]>(() => {
     if (initialBagItems && initialBagItems.length > 0) {
@@ -972,6 +995,8 @@ function CustomerCombobox({
         q: debouncedQ || undefined,
         page: 1,
         pageSize: 20,
+        // Incluir borradores ("clientes libres") para poder seleccionarlos.
+        draft: 'all',
       }),
     enabled: open,
   });

@@ -416,6 +416,8 @@ export function QuotationForm({
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['quotations'] });
+      // Cliente libre → posible borrador nuevo en Clientes.
+      qc.invalidateQueries({ queryKey: ['customers'] });
     },
   });
 
@@ -552,6 +554,8 @@ export function QuotationForm({
 
     qc.invalidateQueries({ queryKey: ['quotations'] });
     qc.invalidateQueries({ queryKey: ['quotation', saved.id] });
+    // Un cliente libre pudo haberse creado como borrador → refrescar Clientes.
+    qc.invalidateQueries({ queryKey: ['customers'] });
 
     if (after === 'email') {
       try {
@@ -571,8 +575,11 @@ export function QuotationForm({
     } else if (after === 'whatsapp') {
       try {
         const result = await sendWhatsappMut.mutateAsync(saved.id);
-        if (result.whatsappUrl) {
-          window.open(result.whatsappUrl, '_blank', 'noopener,noreferrer');
+        // Híbrido: si el cliente tiene número, abre ese chat; si no, abre el
+        // selector de contacto de WhatsApp con el mensaje listo.
+        const url = result.whatsappUrl ?? result.whatsappChooseUrl;
+        if (url) {
+          window.open(url, '_blank', 'noopener,noreferrer');
         }
         toast.success('Cotización guardada. Se abrió WhatsApp en otra pestaña.');
       } catch (err) {
@@ -1236,6 +1243,8 @@ function CustomerCombobox({
         q: debouncedQ || undefined,
         page: 1,
         pageSize: 20,
+        // Incluir borradores ("clientes libres") para poder seleccionarlos.
+        draft: 'all',
       }),
     enabled: open,
   });

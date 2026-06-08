@@ -219,9 +219,9 @@ export class ProductsController {
       products.map((p) => p.id),
     );
 
-    // Modelos compatibles por producto (mismo formato del importer:
-    // "Marca:Modelo:AñoFrom-AñoTo; ..."). Cargado en batch para evitar N+1.
-    const modelsByProduct = await this.svc.compatibleModelsByProduct(
+    // Modelos compatibles por producto en 4 cadenas separadas y alineadas
+    // (Marca / Modelo / Año desde / Año hasta). Cargado en batch (evita N+1).
+    const modelsByProduct = await this.svc.compatibleModelsStructuredByProduct(
       products.map((p) => p.id),
     );
 
@@ -231,31 +231,41 @@ export class ProductsController {
       products.map((p) => p.id),
     );
 
+    // Bodegas activas → una columna de stock por bodega (Fase 12). El header es
+    // el NOMBRE de la bodega, que es justo lo que el importer reconoce como
+    // columna de stock por bodega → el archivo round-trip al reimportar.
+    const warehouses = await this.svc.listActiveWarehouses();
+
     const sheet = wb.addWorksheet('Productos');
-    // El orden de columnas espeja la plantilla del importer (imports.service.ts):
-    // SKU, Codigo universal, Cod Compatibles, Categoria, Nombre, Marca, Modelo,
-    // luego Costo, Precio, Bodega, y el resto. Los headers de los campos del
-    // catálogo usan EXACTAMENTE los nombres que reconoce el importer (match
-    // normalizado, sin acentos/símbolos), para que el export se pueda reimportar
-    // sin perderlos. Costo/Precio/Stock se dejan con headers "humanos" a
-    // propósito: así el importer los IGNORA y reimportar NO pisa el costo
-    // ponderado ni el stock (que se gestionan solos).
+    // Orden de columnas pedido por el cliente (Fase 12): primero inventario
+    // (datos básicos → stock por bodega → stock mínimo → tipo → nº parte), luego
+    // lo administrativo. Los headers de los campos que el importer reconoce usan
+    // EXACTAMENTE sus nombres canónicos (match normalizado) para que el export
+    // se pueda reimportar. Costo/Precio se dejan con headers "humanos" a
+    // propósito: el importer los IGNORA al reimportar y así NO se pisa el costo
+    // ponderado (autogestionado).
     sheet.columns = [
       { header: 'SKU', key: 'sku', width: 18 },
-      { header: 'Codigo universal', key: 'barcode', width: 18 },
-      {
-        header: 'Cod Compatibles',
-        key: 'compatibleCodes',
-        width: 32,
-      },
-      { header: 'Categoria', key: 'category', width: 22 },
       { header: 'Nombre', key: 'name', width: 36 },
+      { header: 'Categoria', key: 'category', width: 22 },
       { header: 'Marca', key: 'brand', width: 18 },
-      {
-        header: 'Modelo (Marca:Modelo:Año-Año, separados por ;)',
-        key: 'models',
-        width: 40,
-      },
+      // Compatibilidad vehicular en 4 columnas separadas (alineadas por ';').
+      { header: 'Marca de vehiculo', key: 'vMake', width: 20 },
+      { header: 'Modelo de vehiculo', key: 'vModel', width: 20 },
+      { header: 'Año desde', key: 'vFrom', width: 12 },
+      { header: 'Año hasta', key: 'vTo', width: 12 },
+      // Columnas dinámicas: una por bodega, header "Stock bodega <Nombre>" para
+      // dejar claro que la celda es stock de esa bodega.
+      ...warehouses.map((w) => ({
+        header: `Stock bodega ${w.name}`,
+        key: `wh:${w.id}`,
+        width: Math.max(w.name.length + 14, 16),
+      })),
+      { header: 'Stock minimo', key: 'minStock', width: 12 },
+      { header: 'Tipo (ORIGINAL/ALTERNATIVE)', key: 'kind', width: 16 },
+      { header: 'Numero de parte', key: 'partNumber', width: 16 },
+      { header: 'Codigo universal', key: 'barcode', width: 18 },
+      { header: 'Cod Compatibles', key: 'compatibleCodes', width: 32 },
       // La columna Costo solo aparece para usuarios con permiso. Es informativa:
       // al reimportar, el costo de productos existentes NO se pisa (autogestionado).
       ...(canSeeCost
@@ -274,12 +284,8 @@ export class ProductsController {
         width: 14,
         style: { numFmt: MONEY_FMT },
       },
-      { header: 'Stock por bodega', key: 'stockByWarehouse', width: 28 },
-      { header: 'Stock actual (total)', key: 'totalStock', width: 14 },
-      { header: 'PartNumber', key: 'partNumber', width: 16 },
-      { header: 'Tipo (ORIGINAL/ALTERNATIVE)', key: 'kind', width: 16 },
-      { header: 'Stock minimo', key: 'minStock', width: 10 },
-      { header: 'Descripción', key: 'description', width: 40 },
+      { header: 'Descripcion', key: 'description', width: 40 },
+      { header: 'Observacion', key: 'observation', width: 32 },
       { header: 'Activo', key: 'isActive', width: 8 },
     ];
 
@@ -290,10 +296,16 @@ export class ProductsController {
       // nombre, preservando la categoría del producto.
       const categoryName = cat?.name ?? '';
       const stocks = stockByProduct.get(p.id) ?? [];
-      const totalStock = stocks.reduce((acc, s) => acc + s.qty, 0);
-      const stockByWarehouse = stocks
-        .map((s) => `${s.warehouseName}:${s.qty}`)
-        .join('; ');
+      const qtyByWarehouseId = new Map(
+        stocks.map((s) => [s.warehouseId, s.qty]),
+      );
+      // Una celda por bodega con el stock actual (0 si el producto no tiene
+      // registro en esa bodega).
+      const warehouseCells: Record<string, number> = {};
+      for (const w of warehouses) {
+        warehouseCells[`wh:${w.id}`] = qtyByWarehouseId.get(w.id) ?? 0;
+      }
+      const vm = modelsByProduct.get(p.id);
       sheet.addRow({
         sku: p.sku ?? '',
         name: p.name,
@@ -301,16 +313,19 @@ export class ProductsController {
         barcode: p.barcode ?? '',
         category: categoryName,
         brand: p.brand?.name ?? '',
-        models: modelsByProduct.get(p.id) ?? '',
+        vMake: vm?.makes ?? '',
+        vModel: vm?.models ?? '',
+        vFrom: vm?.from ?? '',
+        vTo: vm?.to ?? '',
         compatibleCodes: codesByProduct.get(p.id) ?? '',
         // Valor en mayúsculas para que el archivo round-trip con el importer.
         kind: p.productKind === 'ORIGINAL' ? 'ORIGINAL' : 'ALTERNATIVE',
         ...(canSeeCost ? { cost: parseFloat(p.cost ?? '0') } : {}),
         price: parseFloat(p.price ?? '0'),
         minStock: p.minStock ?? 0,
-        stockByWarehouse,
-        totalStock,
+        ...warehouseCells,
         description: p.description ?? '',
+        observation: p.observation ?? '',
         isActive: p.isActive ? 'Sí' : 'No',
       });
     }
@@ -414,6 +429,35 @@ export class ProductsController {
   @Patch('bulk-category')
   bulkUpdateCategory(@Body() dto: BulkUpdateCategoryDto) {
     return this.svc.bulkUpdateCategory(dto.productIds, dto.categoryId);
+  }
+
+  /**
+   * Fase 12 — "Basura": productos eliminados (soft delete). Solo lectura.
+   * Ruta concreta antes de `:id` para que "trash" no matchee como UUID.
+   */
+  @Get('trash')
+  async trash(@CurrentUser() viewer: JwtPayload) {
+    const items = await this.svc.listDeleted();
+    return redactProductCostList(items, viewer);
+  }
+
+  /**
+   * Fase 12 — conteo de relaciones del producto. Lo consume el modal de
+   * confirmación de borrado para informar el impacto antes de eliminar (el
+   * borrado es soft: estos registros se conservan).
+   */
+  @Get(':id/relations')
+  relations(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.svc.relations(id);
+  }
+
+  /**
+   * Fase 12 — desglose de stock por bodega de un producto (todas las bodegas,
+   * no solo la activa). Lo consume el modal "Agregar al bolso".
+   */
+  @Get(':id/stock')
+  stock(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.svc.stockBreakdown(id);
   }
 
   @Get(':id')

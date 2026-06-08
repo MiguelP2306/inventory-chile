@@ -29,3 +29,25 @@ export function formatNumber(value: string | number | null | undefined) {
   if (!Number.isFinite(n)) return '—';
   return numberFormatter.format(n);
 }
+
+// Zona horaria del negocio (Chile). Usar SIEMPRE para los defaults de los
+// `<input type="date">` y los rangos por fecha, en vez de `toISOString()` (que
+// devuelve la fecha en UTC y, de noche en Chile, adelanta un día).
+const BUSINESS_TZ = 'America/Santiago';
+
+const isoDateFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: BUSINESS_TZ,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+/** Fecha de hoy en hora Chile como `YYYY-MM-DD`. */
+export function todayIso(): string {
+  return isoDateFormatter.format(new Date());
+}
+
+/** Fecha de hace `days` días en hora Chile como `YYYY-MM-DD`. */
+export function isoDaysAgo(days: number): string {
+  return isoDateFormatter.format(new Date(Date.now() - days * 86_400_000));
+}

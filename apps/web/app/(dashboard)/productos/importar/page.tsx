@@ -74,6 +74,9 @@ export default function ImportProductsPage() {
       qc.invalidateQueries({ queryKey: ['products'] });
       qc.invalidateQueries({ queryKey: ['categories'] });
       qc.invalidateQueries({ queryKey: ['brands'] });
+      qc.invalidateQueries({ queryKey: ['warehouses'] });
+      qc.invalidateQueries({ queryKey: ['vehicle-makes'] });
+      qc.invalidateQueries({ queryKey: ['vehicle-models'] });
       toast.success(
         `Importación completa: ${data.importedCount} productos${
           data.failedCount ? ` (${data.failedCount} fallidos)` : ''
@@ -240,7 +243,10 @@ function PreviewSection({
         />
       </div>
 
-      {(preview.newCategories.length > 0 || preview.newBrands.length > 0) && (
+      {(preview.newCategories.length > 0 ||
+        preview.newBrands.length > 0 ||
+        preview.newWarehouses.length > 0 ||
+        preview.newVehicleModels.length > 0) && (
         <div className="rounded-md border border-violet-500/40 bg-violet-500/5 p-4 text-sm">
           <div className="font-medium">Se crearán automáticamente al confirmar:</div>
           {preview.newCategories.length > 0 && (
@@ -253,6 +259,18 @@ function PreviewSection({
             <div className="mt-1">
               <strong>{preview.newBrands.length} marca{preview.newBrands.length === 1 ? '' : 's'}:</strong>{' '}
               {preview.newBrands.join(', ')}
+            </div>
+          )}
+          {preview.newWarehouses.length > 0 && (
+            <div className="mt-1">
+              <strong>{preview.newWarehouses.length} bodega{preview.newWarehouses.length === 1 ? '' : 's'}:</strong>{' '}
+              {preview.newWarehouses.join(', ')}
+            </div>
+          )}
+          {preview.newVehicleModels.length > 0 && (
+            <div className="mt-1">
+              <strong>{preview.newVehicleModels.length} modelo{preview.newVehicleModels.length === 1 ? '' : 's'} de vehículo:</strong>{' '}
+              {preview.newVehicleModels.join(', ')}
             </div>
           )}
         </div>
@@ -407,7 +425,10 @@ function ResultSection({
         />
       </div>
 
-      {(result.createdCategories.length > 0 || result.createdBrands.length > 0) && (
+      {(result.createdCategories.length > 0 ||
+        result.createdBrands.length > 0 ||
+        result.createdWarehouses.length > 0 ||
+        result.createdVehicleModels.length > 0) && (
         <div className="rounded-md border bg-card p-4 text-sm">
           <div className="font-medium">Entidades creadas como efecto colateral:</div>
           {result.createdCategories.length > 0 && (
@@ -419,6 +440,17 @@ function ResultSection({
           {result.createdBrands.length > 0 && (
             <div className="mt-1">
               <strong>Marcas:</strong> {result.createdBrands.join(', ')}
+            </div>
+          )}
+          {result.createdWarehouses.length > 0 && (
+            <div className="mt-1">
+              <strong>Bodegas:</strong> {result.createdWarehouses.join(', ')}
+            </div>
+          )}
+          {result.createdVehicleModels.length > 0 && (
+            <div className="mt-1">
+              <strong>Modelos de vehículo:</strong>{' '}
+              {result.createdVehicleModels.join(', ')}
             </div>
           )}
         </div>

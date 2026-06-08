@@ -31,6 +31,14 @@ import { CashboxService } from '../cashbox/cashbox.service';
 import { CountersService } from '../common/counters.service';
 import { dayRange } from '../common/date-range';
 import {
+  businessNoonToday,
+  businessTodayStr,
+  endOfBusinessDay,
+  parseBusinessDate,
+  startOfBusinessDay,
+  startOfBusinessMonth,
+} from '../common/timezone';
+import {
   CashTransaction,
   CompanySettings,
   Customer,
@@ -187,7 +195,7 @@ export class SalesService {
     // link de pago. Cada uno tiene su propia tasa en CompanySettings.
     const commissionRate = commissionRateFor(dto.paymentMethod, settings);
 
-    const date = dto.date ? new Date(dto.date) : new Date();
+    const date = dto.date ? parseBusinessDate(dto.date) : businessNoonToday();
     const year = date.getFullYear();
 
     const chargesCommission = commissionRate > 0;
@@ -494,39 +502,20 @@ export class SalesService {
       from = range.from;
       to = range.to;
     } else {
-      const now = new Date();
-      from = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-      to = new Date(
-        now.getFullYear(),
-        now.getMonth() + 1,
-        0,
-        23,
-        59,
-        59,
-        999,
+      // Mes actual en hora Chile.
+      from = startOfBusinessMonth();
+      const ymd = businessTodayStr(); // YYYY-MM-DD
+      const [yy, mm] = ymd.split('-').map(Number);
+      const lastDay = new Date(Date.UTC(yy!, mm!, 0)).getUTCDate();
+      to = endOfBusinessDay(
+        `${ymd.slice(0, 7)}-${String(lastDay).padStart(2, '0')}`,
       );
     }
 
-    // Día actual (independiente del período).
-    const now = new Date();
-    const todayStart = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-      0,
-      0,
-      0,
-      0,
-    );
-    const todayEnd = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-      23,
-      59,
-      59,
-      999,
-    );
+    // Día actual (independiente del período), en hora Chile.
+    const todayStr = businessTodayStr();
+    const todayStart = startOfBusinessDay(todayStr);
+    const todayEnd = endOfBusinessDay(todayStr);
 
     // Ventas del período (excluye canceladas).
     const sales = await this.repo.find({
@@ -696,6 +685,7 @@ export class SalesService {
         ? {
             id: s.customer.id,
             name: s.customer.name,
+            isDraft: s.customer.isDraft,
             taxId: s.customer.taxId,
             email: s.customer.email,
             phone: s.customer.phone,

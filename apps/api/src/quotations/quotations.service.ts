@@ -1,4 +1,5 @@
 import {
+  CustomerSource,
   PublicQuotationDto,
   QuotationCustomerView,
   QuotationDto,
@@ -18,7 +19,9 @@ import { randomBytes } from 'crypto';
 import { Brackets, DataSource, EntityManager, Repository } from 'typeorm';
 import { CountersService } from '../common/counters.service';
 import { dayRange } from '../common/date-range';
+import { businessNoonToday, parseBusinessDate } from '../common/timezone';
 import { rethrowFkAsConflict } from '../common/fk-error';
+import { normalizePhone } from '../common/validators/phone';
 import { normalizeRut } from '../common/validators/rut';
 import { LifecycleService } from '../lifecycle/lifecycle.service';
 import {
@@ -221,10 +224,10 @@ export class QuotationsService {
     const settings = await this.getSettings();
     const taxRate = parseFloat(settings.taxRate);
 
-    const date = new Date(dto.date);
+    const date = dto.date ? parseBusinessDate(dto.date) : businessNoonToday();
     const year = date.getFullYear();
     const validUntil = dto.validUntil
-      ? new Date(dto.validUntil)
+      ? parseBusinessDate(dto.validUntil)
       : addDays(date, settings.defaultValidityDays);
 
     const id = await this.ds.transaction(async (manager) => {
@@ -234,13 +237,20 @@ export class QuotationsService {
 
       const totals = computeTotals(dto.items, taxRate);
 
+      // Cliente libre → se persiste como cliente BORRADOR y se vincula (queda en
+      // Clientes > Borradores y se puede completar/reusar). Si ya hay customerId
+      // o no hay nombre, se respeta tal cual.
+      const customerId =
+        dto.customerId ?? (await this.resolveDraftCustomer(manager, dto));
+
       const quotation = manager.getRepository(Quotation).create({
         number,
-        customerId: dto.customerId ?? null,
-        customerNameSnapshot: dto.customerId ? null : dto.customerNameSnapshot ?? null,
-        customerPhoneSnapshot: dto.customerId ? null : dto.customerPhoneSnapshot ?? null,
-        customerEmailSnapshot: dto.customerId ? null : dto.customerEmailSnapshot ?? null,
-        customerTaxIdSnapshot: dto.customerId
+        customerId,
+        // Al vincular un cliente (borrador o catálogo) ya no hace falta snapshot.
+        customerNameSnapshot: customerId ? null : dto.customerNameSnapshot ?? null,
+        customerPhoneSnapshot: customerId ? null : dto.customerPhoneSnapshot ?? null,
+        customerEmailSnapshot: customerId ? null : dto.customerEmailSnapshot ?? null,
+        customerTaxIdSnapshot: customerId
           ? null
           : dto.customerTaxIdSnapshot
             ? normalizeRut(dto.customerTaxIdSnapshot)
@@ -280,11 +290,11 @@ export class QuotationsService {
       }
 
       // Fase 8.5 — mover el lifecycle del cliente a QUOTED y agendar
-      // follow-up dentro de la MISMA transacción del create. No-op si la
-      // cotización es de cliente libre.
+      // follow-up dentro de la MISMA transacción del create. Aplica también al
+      // borrador recién creado a partir del cliente libre.
       await this.lifecycle.applyQuotationCreated(
         manager,
-        dto.customerId ?? null,
+        customerId,
         saved.id,
         userId,
       );
@@ -356,9 +366,11 @@ export class QuotationsService {
             : null;
       }
 
-      if (dto.date) existing.date = new Date(dto.date);
+      if (dto.date) existing.date = parseBusinessDate(dto.date);
       if (dto.validUntil !== undefined)
-        existing.validUntil = dto.validUntil ? new Date(dto.validUntil) : null;
+        existing.validUntil = dto.validUntil
+          ? parseBusinessDate(dto.validUntil)
+          : null;
       if (dto.notes !== undefined) existing.notes = dto.notes ?? null;
 
       if (dto.items) {
@@ -635,6 +647,54 @@ export class QuotationsService {
     }
   }
 
+  /**
+   * Fase 12 — "Cliente libre" → cliente BORRADOR. Dado un dto sin `customerId`
+   * pero con datos de cliente libre (snapshot), resuelve un `customerId`:
+   *   1. Si hay RUT y ya existe un cliente con ese RUT, lo reutiliza.
+   *   2. Si existe un BORRADOR con el mismo nombre, lo reutiliza (evita duplicar).
+   *   3. Si no, crea un cliente borrador con los datos disponibles.
+   * Devuelve null si no hay nombre (cliente "sin especificar" → no se persiste).
+   */
+  private async resolveDraftCustomer(
+    manager: EntityManager,
+    dto: CreateQuotationDto,
+  ): Promise<string | null> {
+    const name = dto.customerNameSnapshot?.trim();
+    if (!name) return null;
+
+    const repo = manager.getRepository(Customer);
+    const taxId = dto.customerTaxIdSnapshot
+      ? normalizeRut(dto.customerTaxIdSnapshot)
+      : null;
+
+    if (taxId) {
+      const byTax = await repo.findOne({ where: { taxId } });
+      if (byTax) return byTax.id;
+    }
+
+    const existingDraft = await repo
+      .createQueryBuilder('c')
+      .where('c.isDraft = TRUE')
+      .andWhere('LOWER(c.name) = LOWER(:name)', { name })
+      .getOne();
+    if (existingDraft) return existingDraft.id;
+
+    const phone = dto.customerPhoneSnapshot
+      ? normalizePhone(dto.customerPhoneSnapshot)
+      : null;
+    const draft = repo.create({
+      name,
+      taxId,
+      email: dto.customerEmailSnapshot?.trim() || null,
+      phone,
+      whatsappPhone: phone,
+      isDraft: true,
+      source: CustomerSource.OTHER,
+    });
+    const saved = await repo.save(draft);
+    return saved.id;
+  }
+
   private assertNoCustomerConflict(dto: CreateQuotationDto): void {
     // Cliente catálogo y libre simultáneo: ambiguo. Cliente vacío SÍ es válido
     // (cliente sin especificar — flujo rápido para enviar al instante).
@@ -693,6 +753,7 @@ export class QuotationsService {
       ? {
           id: q.customer.id,
           name: q.customer.name,
+          isDraft: q.customer.isDraft,
           taxId: q.customer.taxId,
           email: q.customer.email,
           phone: q.customer.phone,

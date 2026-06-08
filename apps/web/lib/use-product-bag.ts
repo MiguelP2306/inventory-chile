@@ -15,13 +15,35 @@ import { useCallback, useMemo, useSyncExternalStore } from 'react';
 
 const STORAGE_KEY = 'inventory-chile:bag:v1';
 
+/**
+ * Clave de LÍNEA del bolso: producto + bodega. Permite tener el MISMO producto
+ * en líneas separadas si se agregó desde bodegas distintas (Fase 12). Si el
+ * item no trae bodega, la clave cae sólo al productId.
+ */
+export function bagLineKey(item: {
+  productId: string;
+  warehouseId?: string | null;
+}): string {
+  return `${item.productId}::${item.warehouseId ?? ''}`;
+}
+
 export interface BagItem {
   productId: string;
   sku: string | null;
   name: string;
+  // Número de parte del fabricante — se muestra en el bolso (Fase 12).
+  partNumber?: string | null;
   unitPrice: string; // bruto, formato "0.00"
   qty: number;
   coverUrl: string | null; // ya resuelta a URL absoluta cuando se agregó
+  // Bodega elegida en el modal "Agregar al bolso" (Fase 12). Se recuerda para
+  // mostrarla en el bolso y para predefinir la bodega al crear la venta. El
+  // `warehouseQty` es el stock que tenía esa bodega al momento de agregar.
+  warehouseId?: string | null;
+  warehouseName?: string | null;
+  warehouseAddress?: string | null;
+  locationCode?: string | null;
+  warehouseQty?: number | null;
   addedAt: number; // timestamp ms para ordenar
 }
 
@@ -84,14 +106,23 @@ class BagStore {
   getSnapshot = (): BagState => this.state;
 
   add(input: Omit<BagItem, 'addedAt'>) {
+    // Identidad por producto + bodega: el mismo producto desde dos bodegas
+    // distintas son DOS líneas separadas.
+    const key = bagLineKey(input);
     const existingIdx = this.state.items.findIndex(
-      (i) => i.productId === input.productId,
+      (i) => bagLineKey(i) === key,
     );
     let nextItems: BagItem[];
     if (existingIdx >= 0) {
-      // Si ya está, sumamos la qty (caso típico de re-elegir el mismo SKU).
+      // Mismo producto Y misma bodega → sumamos la cantidad.
       nextItems = this.state.items.map((it, i) =>
-        i === existingIdx ? { ...it, qty: it.qty + input.qty } : it,
+        i === existingIdx
+          ? {
+              ...it,
+              qty: it.qty + input.qty,
+              warehouseQty: input.warehouseQty ?? it.warehouseQty,
+            }
+          : it,
       );
     } else {
       nextItems = [...this.state.items, { ...input, addedAt: Date.now() }];
@@ -101,33 +132,33 @@ class BagStore {
     this.notify();
   }
 
-  setQty(productId: string, qty: number) {
+  setQty(key: string, qty: number) {
     if (qty <= 0) {
-      this.remove(productId);
+      this.remove(key);
       return;
     }
     this.state = {
       items: this.state.items.map((i) =>
-        i.productId === productId ? { ...i, qty } : i,
+        bagLineKey(i) === key ? { ...i, qty } : i,
       ),
     };
     this.writeToStorage();
     this.notify();
   }
 
-  remove(productId: string) {
+  remove(key: string) {
     this.state = {
-      items: this.state.items.filter((i) => i.productId !== productId),
+      items: this.state.items.filter((i) => bagLineKey(i) !== key),
     };
     this.writeToStorage();
     this.notify();
   }
 
-  removeMany(productIds: string[]) {
-    if (productIds.length === 0) return;
-    const set = new Set(productIds);
+  removeMany(keys: string[]) {
+    if (keys.length === 0) return;
+    const set = new Set(keys);
     this.state = {
-      items: this.state.items.filter((i) => !set.has(i.productId)),
+      items: this.state.items.filter((i) => !set.has(bagLineKey(i))),
     };
     this.writeToStorage();
     this.notify();
@@ -160,11 +191,12 @@ export function useProductBag() {
   const add = useCallback((input: Omit<BagItem, 'addedAt'>) => {
     store.add(input);
   }, []);
-  const setQty = useCallback((productId: string, qty: number) => {
-    store.setQty(productId, qty);
+  // `key` es la clave de línea (producto + bodega) — ver bagLineKey.
+  const setQty = useCallback((key: string, qty: number) => {
+    store.setQty(key, qty);
   }, []);
-  const remove = useCallback((productId: string) => {
-    store.remove(productId);
+  const remove = useCallback((key: string) => {
+    store.remove(key);
   }, []);
   const clear = useCallback(() => {
     store.clear();
@@ -198,9 +230,10 @@ export function clearProductBag() {
 }
 
 // Quita solo un subconjunto del bolso (ej: tras convertir en venta/cotización
-// los productos que el operador seleccionó, dejando el resto en el bolso).
-export function clearProductBagItems(productIds: string[]) {
-  store.removeMany(productIds);
+// las líneas que el operador seleccionó, dejando el resto en el bolso). Recibe
+// CLAVES de línea (producto + bodega) — ver bagLineKey.
+export function clearProductBagItems(keys: string[]) {
+  store.removeMany(keys);
 }
 
 /**

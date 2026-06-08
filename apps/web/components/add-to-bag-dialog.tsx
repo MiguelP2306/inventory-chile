@@ -12,11 +12,11 @@ import {
 } from '@/components/ui/soft-modal';
 import {
   getProduct,
+  getProductStock,
   listProductImages,
   publicImageUrl,
 } from '@/lib/catalog-api';
 import { formatCurrency } from '@/lib/format';
-import { listStock } from '@/lib/inventory-api';
 import { listWarehouses } from '@/lib/warehouses-api';
 import { useProductBag } from '@/lib/use-product-bag';
 import { cn } from '@/lib/utils';
@@ -38,6 +38,9 @@ export function AddToBagDialog({ productId, onClose }: Props) {
   const open = productId != null;
   const [qty, setQty] = useState(1);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  // Bodega seleccionada en el modal. Visual: cambia el stock/ubicación que se
+  // muestra, no afecta a la venta (la venta elige su bodega aparte).
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>('');
   const { add } = useProductBag();
 
   useEffect(() => {
@@ -45,7 +48,10 @@ export function AddToBagDialog({ productId, onClose }: Props) {
     // al cerrar y volver a buscar otro producto el lightbox quedaba "abierto"
     // con el índice anterior y se mostraba solo, sin que el usuario lo pidiera.
     setLightboxIndex(null);
-    if (open) setQty(1);
+    if (open) {
+      setQty(1);
+      setSelectedWarehouseId('');
+    }
   }, [open]);
 
   const product = useQuery({
@@ -76,15 +82,13 @@ export function AddToBagDialog({ productId, onClose }: Props) {
     staleTime: 30 * 1000,
   });
 
+  // Desglose de stock en TODAS las bodegas (no solo la activa). Endpoint
+  // dedicado para que el modal no dependa de la bodega activa del inventario.
   const stock = useQuery({
-    queryKey: ['product-stock', productId],
-    queryFn: () => listStock({ q: undefined }),
+    queryKey: ['product-stock-breakdown', productId],
+    queryFn: () => getProductStock(productId as string),
     enabled: open,
     staleTime: 30 * 1000,
-    select: (rows) =>
-      Array.isArray(rows)
-        ? rows.filter((r) => r.product.id === productId)
-        : [],
   });
 
   const imageUrls = useMemo(
@@ -100,15 +104,71 @@ export function AddToBagDialog({ productId, onClose }: Props) {
     [stock.data],
   );
 
+  const stockRows = stock.data ?? [];
+
+  // Filas de bodega para el selector: TODAS las bodegas activas (con 0 si el
+  // producto no tiene stock ahí) + cualquier bodega que tenga stock aunque esté
+  // inactiva. Así el operador ve siempre todas las bodegas, no solo donde hay
+  // existencias.
+  const warehouseRows = useMemo(() => {
+    const stockByWh = new Map(stockRows.map((s) => [s.warehouseId, s]));
+    const active = (warehouses.data ?? []).filter((w) => w.isActive);
+    const rows = active.map((w) => {
+      const s = stockByWh.get(w.id);
+      return {
+        warehouseId: w.id,
+        name: w.name,
+        address: w.address ?? null,
+        quantity: s?.quantity ?? 0,
+        locationCode: s?.locationCode ?? null,
+      };
+    });
+    // Bodegas con stock que no estén en la lista de activas (ej. inactivas).
+    const seen = new Set(rows.map((r) => r.warehouseId));
+    for (const s of stockRows) {
+      if (seen.has(s.warehouseId)) continue;
+      rows.push({
+        warehouseId: s.warehouseId,
+        name: warehouseNameById.get(s.warehouseId) ?? 'Bodega',
+        address: null,
+        quantity: s.quantity,
+        locationCode: s.locationCode,
+      });
+    }
+    return rows;
+  }, [warehouses.data, stockRows, warehouseNameById]);
+
+  // Default de la bodega seleccionada: la que tenga más stock (la más útil para
+  // despachar). Se setea cuando llegan las bodegas y aún no hay selección.
+  useEffect(() => {
+    if (selectedWarehouseId || warehouseRows.length === 0) return;
+    const top = [...warehouseRows].sort((a, b) => b.quantity - a.quantity)[0];
+    if (top) setSelectedWarehouseId(top.warehouseId);
+  }, [warehouseRows, selectedWarehouseId]);
+
+  const selectedStock = useMemo(
+    () =>
+      warehouseRows.find((s) => s.warehouseId === selectedWarehouseId) ?? null,
+    [warehouseRows, selectedWarehouseId],
+  );
+
   function handleAdd() {
     if (!product.data) return;
     add({
       productId: product.data.id,
       sku: product.data.sku,
       name: product.data.name,
+      partNumber: product.data.partNumber,
       unitPrice: product.data.price,
       qty,
       coverUrl: publicImageUrl(product.data.coverUrl ?? null),
+      // Bodega elegida en el selector (la usa el bolso y, al crear venta, para
+      // predefinir la bodega).
+      warehouseId: selectedStock?.warehouseId ?? null,
+      warehouseName: selectedStock?.name ?? null,
+      warehouseAddress: selectedStock?.address ?? null,
+      locationCode: selectedStock?.locationCode ?? null,
+      warehouseQty: selectedStock?.quantity ?? null,
     });
     toast.success(`Agregado al bolso (${qty} un.)`);
     onClose();
@@ -175,6 +235,14 @@ export function AddToBagDialog({ productId, onClose }: Props) {
                   <h3 className="mt-0.5 text-lg font-bold tracking-tight">
                     {product.data.name}
                   </h3>
+                  {product.data.partNumber && (
+                    <p className="mt-1 text-[11px] font-medium text-muted-foreground">
+                      N° de parte:{' '}
+                      <span className="font-mono font-semibold text-foreground">
+                        {product.data.partNumber}
+                      </span>
+                    </p>
+                  )}
                   {product.data.description && (
                     <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
                       {product.data.description}
@@ -199,7 +267,7 @@ export function AddToBagDialog({ productId, onClose }: Props) {
                     <p className="mt-1 text-xs text-muted-foreground">
                       Cargando…
                     </p>
-                  ) : (stock.data ?? []).length === 0 ? (
+                  ) : stockRows.length === 0 ? (
                     <p className="mt-1 font-mono text-sm font-bold text-rose-500">
                       Sin stock registrado
                     </p>
@@ -207,28 +275,63 @@ export function AddToBagDialog({ productId, onClose }: Props) {
                     <>
                       <p className="mt-0.5 font-mono text-lg font-bold tabular-nums">
                         {totalStock} un.
+                        <span className="ml-2 align-middle text-[11px] font-normal text-muted-foreground">
+                          en total
+                        </span>
                       </p>
-                      <ul className="mt-1 space-y-0.5 text-[11px] text-muted-foreground">
-                        {(stock.data ?? []).map((s) => (
-                          <li
-                            key={`${s.product.id}-${s.warehouseId}`}
-                            className="flex items-center justify-between gap-2"
-                          >
-                            <span className="truncate">
-                              {warehouseNameById.get(s.warehouseId) ??
-                                'Bodega'}
-                              {s.locationCode ? (
-                                <span className="text-muted-foreground/70">
-                                  {' · '}Ubic.: {s.locationCode}
-                                </span>
-                              ) : null}
+
+                      {/* Selector de bodega (visual): cambia el stock y la
+                          ubicación que se muestran abajo. */}
+                      <div className="mt-2 flex flex-col gap-1">
+                        <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          Bodega
+                        </label>
+                        <select
+                          value={selectedWarehouseId}
+                          onChange={(e) =>
+                            setSelectedWarehouseId(e.target.value)
+                          }
+                          className="h-9 w-full rounded-md border bg-background px-2 text-sm outline-none focus:border-primary"
+                        >
+                          {warehouseRows.map((w) => (
+                            <option key={w.warehouseId} value={w.warehouseId}>
+                              {w.name} ({w.quantity} un.)
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Detalle dinámico de la bodega seleccionada. */}
+                      {selectedStock && (
+                        <div className="mt-2 space-y-2 rounded-lg border bg-muted/30 p-2.5 text-[11px]">
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <span className="block text-muted-foreground">
+                                Stock en bodega
+                              </span>
+                              <span className="font-mono text-sm font-bold tabular-nums">
+                                {selectedStock.quantity} un.
+                              </span>
+                            </div>
+                            <div>
+                              <span className="block text-muted-foreground">
+                                Ubicación física
+                              </span>
+                              <span className="font-mono text-sm font-bold">
+                                {selectedStock.locationCode ?? '—'}
+                              </span>
+                            </div>
+                          </div>
+                          <div>
+                            <span className="block text-muted-foreground">
+                              Dirección de la bodega
                             </span>
-                            <span className="font-mono font-semibold">
-                              {s.quantity} un.
+                            <span className="text-xs font-semibold text-foreground">
+                              {selectedStock.address ?? '—'}
                             </span>
-                          </li>
-                        ))}
-                      </ul>
+                          </div>
+                        </div>
+                      )}
                     </>
                   )}
                 </div>

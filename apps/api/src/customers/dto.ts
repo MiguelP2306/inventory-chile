@@ -2,8 +2,10 @@ import { CustomerSource } from '@inventory/shared';
 import { PartialType } from '@nestjs/mapped-types';
 import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsEmail,
   IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -71,6 +73,12 @@ export class CreateCustomerDto {
   @IsString()
   @IsValidPhone()
   whatsappPhone?: string | null;
+
+  // Fase 12 — marca el cliente como borrador ("cliente libre"). Solo requiere
+  // nombre; el resto se completa luego.
+  @IsOptional()
+  @IsBoolean()
+  isDraft?: boolean;
 }
 
 export class UpdateCustomerDto extends PartialType(CreateCustomerDto) {}
@@ -79,6 +87,14 @@ export class ListCustomersQueryDto {
   @IsOptional()
   @IsString()
   q?: string;
+
+  // Filtro por estado borrador:
+  //   'exclude' (default) → solo clientes completos (oculta borradores).
+  //   'only'              → solo borradores ("clientes libres").
+  //   'all'               → ambos.
+  @IsOptional()
+  @IsIn(['exclude', 'only', 'all'])
+  draft?: 'exclude' | 'only' | 'all';
 
   @IsOptional()
   @Type(() => Number)

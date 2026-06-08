@@ -390,14 +390,32 @@ export class PdfService {
   }
 
   private async generateThermal(input: PdfInput): Promise<Buffer> {
-    // 80 mm = ~226.77 pt; alto crece con el contenido. Empezamos con uno
-    // generoso y dejamos que jsPDF agregue páginas si hace falta.
+    // 80 mm = ~226.77 pt. El alto del rollo térmico debe ajustarse EXACTO al
+    // contenido (si no, el papel avanza de más al final). jsPDF fija el alto al
+    // crear el doc y no lo redimensiona después, así que medimos en dos pasos:
+    //   1) render en un doc "alto" para conocer la altura real del contenido.
+    //   2) render definitivo en un doc con ese alto exacto.
     const widthPt = 226.77;
-    const doc = new jsPDF({
-      unit: 'pt',
-      format: [widthPt, 800],
-    });
     const margin = 8;
+    const measure = new jsPDF({ unit: 'pt', format: [widthPt, 5000] });
+    const contentH = this.renderThermalSale(measure, input, widthPt, margin);
+    const doc = new jsPDF(thermalDocOptions(contentH, margin, widthPt));
+    this.renderThermalSale(doc, input, widthPt, margin);
+    const arrayBuffer = doc.output('arraybuffer');
+    return Buffer.from(arrayBuffer);
+  }
+
+  /**
+   * Dibuja el ticket de venta/cotización 80mm en `doc` y devuelve la
+   * coordenada Y final (alto del contenido). No crea ni exporta el doc — eso
+   * lo hace `generateThermal` (que llama dos veces: medir + dibujar).
+   */
+  private renderThermalSale(
+    doc: jsPDF,
+    input: PdfInput,
+    widthPt: number,
+    margin: number,
+  ): number {
     let y = margin + 6;
 
     doc.setFont('helvetica', 'bold');
@@ -526,13 +544,16 @@ export class PdfService {
     if (input.company.quotationFooter) {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(6);
-      doc.text(input.company.quotationFooter, margin, totalsY, {
-        maxWidth: widthPt - margin * 2,
-      });
+      const wrapped = doc.splitTextToSize(
+        input.company.quotationFooter,
+        widthPt - margin * 2,
+      );
+      doc.text(wrapped, margin, totalsY);
+      const lines = Array.isArray(wrapped) ? wrapped.length : 1;
+      totalsY += lines * 8;
     }
 
-    const arrayBuffer = doc.output('arraybuffer');
-    return Buffer.from(arrayBuffer);
+    return totalsY;
   }
 
   // ============================================================
@@ -783,9 +804,24 @@ export class PdfService {
   private async generateDispatchThermal(
     input: DispatchPdfInput,
   ): Promise<Buffer> {
+    // Mismo enfoque de dos pasos que `generateThermal` para ajustar el alto del
+    // rollo al contenido exacto.
     const widthPt = 226.77;
-    const doc = new jsPDF({ unit: 'pt', format: [widthPt, 800] });
     const margin = 8;
+    const measure = new jsPDF({ unit: 'pt', format: [widthPt, 5000] });
+    const contentH = this.renderDispatchThermal(measure, input, widthPt, margin);
+    const doc = new jsPDF(thermalDocOptions(contentH, margin, widthPt));
+    this.renderDispatchThermal(doc, input, widthPt, margin);
+    const arrayBuffer = doc.output('arraybuffer');
+    return Buffer.from(arrayBuffer);
+  }
+
+  private renderDispatchThermal(
+    doc: jsPDF,
+    input: DispatchPdfInput,
+    widthPt: number,
+    margin: number,
+  ): number {
     let y = margin + 6;
 
     doc.setFont('helvetica', 'bold');
@@ -887,10 +923,11 @@ export class PdfService {
         widthPt - margin * 2,
       );
       doc.text(wrapped, margin, tableEnd);
+      const lines = Array.isArray(wrapped) ? wrapped.length : 1;
+      tableEnd += lines * 8;
     }
 
-    const arrayBuffer = doc.output('arraybuffer');
-    return Buffer.from(arrayBuffer);
+    return tableEnd;
   }
 
   /**
@@ -1128,6 +1165,32 @@ export interface DispatchPdfInput {
   notes: string | null;
   voided: boolean;
   company: CompanyInfo;
+}
+
+/**
+ * Opciones de jsPDF para el ticket térmico: alto EXACTO al contenido (sin
+ * relleno, para ahorrar papel) manteniendo los 80mm de ancho.
+ *
+ * Truco: jsPDF normaliza las dimensiones según la orientación —
+ *   - portrait  → ancho <= alto (voltea si ancho > alto)
+ *   - landscape → ancho >= alto (voltea si ancho < alto)
+ * Para que el ANCHO siempre quede en `widthPt` sin importar el alto:
+ *   - si el contenido es más alto que ancho → portrait.
+ *   - si es más bajo (ticket corto)         → landscape.
+ * Así nunca se voltea y el alto queda pegado al contenido (no más espacio en
+ * blanco al final).
+ */
+function thermalDocOptions(
+  contentH: number,
+  margin: number,
+  widthPt: number,
+): { orientation: 'portrait' | 'landscape'; unit: 'pt'; format: [number, number] } {
+  const height = Math.ceil(contentH + margin);
+  return {
+    orientation: height >= widthPt ? 'portrait' : 'landscape',
+    unit: 'pt',
+    format: [widthPt, height],
+  };
 }
 
 function formatMoney(value: string | null): string {

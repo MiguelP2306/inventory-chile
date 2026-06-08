@@ -92,6 +92,8 @@ export interface ProductDto {
   barcode: string | null;
   name: string;
   description: string | null;
+  // Nota interna del operador (distinta de `description`, que es comercial).
+  observation: string | null;
   categoryId: string | null;
   brandId: string | null;
   supplierId: string | null;
@@ -116,6 +118,35 @@ export interface ProductDto {
   category?: CategoryDto | null;
   brand?: BrandDto | null;
   fitments?: VehicleFitmentDto[];
+}
+
+/**
+ * Stock de un producto en una bodega puntual. Lo devuelve
+ * `GET /products/:id/stock` (TODAS las bodegas donde el producto tiene fila de
+ * stock), para que el modal "Agregar al bolso" muestre el desglose completo sin
+ * depender de la bodega activa.
+ */
+export interface ProductStockRowDto {
+  warehouseId: string;
+  warehouseName: string;
+  quantity: number;
+  locationCode: string | null;
+}
+
+/**
+ * Conteo de relaciones de un producto. Lo consume el modal de confirmación de
+ * borrado para informar el impacto (el producto se elimina vía SOFT DELETE, así
+ * que estos registros históricos se conservan). `total` es la suma de todos.
+ */
+export interface ProductRelationsDto {
+  movements: number;
+  sales: number;
+  purchases: number;
+  quotations: number;
+  warranties: number;
+  returns: number;
+  transfers: number;
+  total: number;
 }
 
 export interface PaginatedResult<T> {
@@ -454,6 +485,9 @@ export type LifecycleStatusDto =
 export interface CustomerDto {
   id: string;
   name: string;
+  // Fase 12 — borrador ("cliente libre"): creado solo con nombre, se completa
+  // luego. Oculto de listados/selectores normales salvo que se pidan.
+  isDraft: boolean;
   // Ronda 9 — RUT opcional para soportar clientes lite (sólo WhatsApp).
   // SalesService.create bloquea facturar a clientes sin RUT.
   taxId: string | null;
@@ -1501,6 +1535,8 @@ export interface ProductImportRowDto {
   partNumber: string | null;
   barcode: string | null;
   description: string | null;
+  // Nota interna del producto. Importable/exportable vía Excel.
+  observation: string | null;
   // Nombre tal como vino en el Excel; al confirmar, si la categoría/marca no
   // existe se crea automáticamente.
   categoryName: string | null;
@@ -1517,13 +1553,22 @@ export interface ProductImportRowDto {
   // confirmar, marca/modelo se crean si no existen y se reemplazan los
   // fitments del producto (estrategia replace).
   vehicleModels: VehicleModelImportInput[];
-  // Bodega + stock actual. Si `warehouseName` viene seteado y existe,
-  // el importer establece el stock de esa bodega al valor `stockQuantity`
-  // (registra un ADJUSTMENT). Si la bodega no existe, la fila se rechaza.
-  warehouseName: string | null;
-  stockQuantity: number | null;
+  // Stock por bodega. El Excel trae UNA COLUMNA POR BODEGA (el header es el
+  // nombre de la bodega). Cada entrada establece el stock de esa bodega al
+  // valor indicado (el importer registra un ADJUSTMENT con el delta). Si la
+  // bodega no existe, se crea automáticamente al confirmar.
+  warehouseStocks: WarehouseStockImportInput[];
   // Si `action='update'`, el id del producto existente. Null si es create.
   existingProductId: string | null;
+}
+
+/**
+ * Stock a establecer en una bodega puntual, parseado de una columna por-bodega
+ * del Excel. `warehouseName` es el header de la columna.
+ */
+export interface WarehouseStockImportInput {
+  warehouseName: string;
+  quantity: number;
 }
 
 /**
@@ -1559,10 +1604,15 @@ export interface ProductImportPreviewDto {
   // confirmar. Si hay menos de 10 válidas, devuelve las que haya.
   previewRows: ProductImportRowDto[];
   errors: ProductImportErrorDto[];
-  // Nombres de categorías/marcas que aparecen en el Excel y todavía NO
-  // existen en el sistema. Al confirmar se crean automáticamente.
+  // Nombres de categorías/marcas/bodegas y modelos de vehículo que aparecen en
+  // el Excel y todavía NO existen en el sistema. Al confirmar se crean
+  // automáticamente. Se muestran en el preview para que el operador sepa qué
+  // se va a crear antes de confirmar.
   newCategories: string[];
   newBrands: string[];
+  newWarehouses: string[];
+  // Modelos de vehículo a crear, formateados "Marca Modelo".
+  newVehicleModels: string[];
 }
 
 /**
@@ -1576,9 +1626,12 @@ export interface ProductImportResultDto {
   updatedCount: number;
   failedCount: number;
   errors: ProductImportErrorDto[];
-  // Categorías/marcas que se crearon como efecto colateral.
+  // Categorías/marcas/bodegas y modelos de vehículo que se crearon como efecto
+  // colateral de la importación.
   createdCategories: string[];
   createdBrands: string[];
+  createdWarehouses: string[];
+  createdVehicleModels: string[];
 }
 
 // ---------- Importers de clientes / proveedores (polish Mayo 2026) ----------

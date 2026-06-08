@@ -102,9 +102,18 @@ export const convertQuotation = (id: string) =>
 
 // Si se pasa `to`, sobrescribe el destino y (para cliente libre) lo persiste
 // en el snapshot — la próxima vez no hace falta volver a ingresarlo.
+export interface WhatsappSendResult
+  extends Omit<QuotationSendResultDto, 'whatsappUrl'> {
+  // Link al número registrado del cliente (null si no tiene número).
+  whatsappUrl: string | null;
+  // Link sin número: el usuario elige el contacto en WhatsApp. Siempre presente.
+  whatsappChooseUrl: string;
+  phone: string | null;
+}
+
 export const sendWhatsapp = (id: string, to?: string) =>
   api
-    .post<QuotationSendResultDto & { whatsappUrl: string }>(
+    .post<WhatsappSendResult>(
       `/quotations/${id}/send/whatsapp`,
       to ? { to } : {},
     )

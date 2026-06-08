@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { ProductPicker } from '@/components/product-picker';
 import { getCompanySettings, publicDocumentUrl, uploadPurchaseInvoice } from '@/lib/cashbox-api';
 import { apiErrorMessage } from '@/lib/catalog-api';
-import { formatCurrency } from '@/lib/format';
+import { formatCurrency, todayIso } from '@/lib/format';
 import { createPurchase, listSuppliers, type PurchaseInput } from '@/lib/inventory-api';
 import { invalidateProductCaches } from '@/lib/invalidate-product-caches';
 import { listAvailableSupplierCredits } from '@/lib/supplier-credits-api';
@@ -50,7 +50,7 @@ export default function NuevaCompraPage() {
   const qc = useQueryClient();
   const [supplierId, setSupplierId] = useState('');
   const [warehouseId, setWarehouseId] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(todayIso());
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<ItemRow[]>([]);
   const [invoices, setInvoices] = useState<Array<{ url: string; originalName: string }>>([]);

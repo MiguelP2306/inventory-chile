@@ -36,6 +36,7 @@ import {
   Search,
   SlidersHorizontal,
   Tag,
+  Trash2,
   Upload,
   X,
   type LucideIcon,
@@ -314,6 +315,10 @@ export default function ProductosPage() {
           {/* Importar Excel — Link conservado */}
           <ActionButton as="link" href="/productos/importar" icon={Upload}>
             Importar Excel
+          </ActionButton>
+          {/* Basura — productos eliminados (soft delete), solo lectura */}
+          <ActionButton as="link" href="/productos/basura" icon={Trash2}>
+            Basura
           </ActionButton>
           {/* Nuevo producto — Link conservado, botón azul de marca */}
           <Link

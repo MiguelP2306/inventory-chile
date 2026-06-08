@@ -57,6 +57,7 @@ import {
   apiErrorMessage,
   createProduct,
   deleteProduct,
+  getProductRelations,
   listBrands,
   listCategories,
   listVehicleMakes,
@@ -69,7 +70,11 @@ import {
 import { Permission, useCan } from '@/lib/current-user-context';
 import { formatCurrency } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import type { ProductDto, ProductKindDto } from '@inventory/shared';
+import type {
+  ProductDto,
+  ProductKindDto,
+  ProductRelationsDto,
+} from '@inventory/shared';
 
 const NULL_OPTION = '__none__';
 const MIN_YEAR = 1980;
@@ -108,6 +113,7 @@ const schema = z
     barcode: z.string().max(80).optional().or(z.literal('')),
     productKind: z.enum(['ORIGINAL', 'ALTERNATIVE']),
     description: z.string().optional().or(z.literal('')),
+    observation: z.string().optional().or(z.literal('')),
     categoryId: z.string().optional(),
     brandId: z.string().optional(),
     cost: z
@@ -226,6 +232,7 @@ export function ProductForm({ product }: Props) {
       barcode: product?.barcode ?? '',
       productKind: (product?.productKind as ProductKindDto) ?? 'ORIGINAL',
       description: product?.description ?? '',
+      observation: product?.observation ?? '',
       categoryId: product?.categoryId ?? NULL_OPTION,
       brandId: product?.brandId ?? NULL_OPTION,
       cost: product?.cost ?? '',
@@ -298,6 +305,14 @@ export function ProductForm({ product }: Props) {
     onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo eliminar')),
   });
 
+  // Conteo de relaciones para informar el impacto en el modal de borrado. Solo
+  // se dispara cuando el modal está abierto (y hay un producto guardado).
+  const relations = useQuery({
+    queryKey: ['product-relations', product?.id],
+    queryFn: () => getProductRelations(product!.id),
+    enabled: !!product && confirmDelete,
+  });
+
   function onInvalid() {
     toast.error('Hay errores en los tabs marcados. Revisá los campos resaltados.');
     // Saltar al primer tab con errores para que el usuario vea la falla.
@@ -328,6 +343,7 @@ export function ProductForm({ product }: Props) {
       barcode: values.barcode || null,
       productKind: values.productKind,
       description: values.description || null,
+      observation: values.observation || null,
       categoryId:
         values.categoryId === NULL_OPTION ? null : (values.categoryId ?? null),
       brandId: values.brandId === NULL_OPTION ? null : (values.brandId ?? null),
@@ -366,6 +382,7 @@ export function ProductForm({ product }: Props) {
       'brandId',
       'location',
       'description',
+      'observation',
       'isActive',
     ]),
     precios: countTabErrors(errorsAsRecord, [
@@ -716,6 +733,20 @@ export function ProductForm({ product }: Props) {
                     <textarea
                       {...form.register('description')}
                       rows={3}
+                      className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                  </Field>
+                </div>
+                <div className="md:col-span-2">
+                  <Field
+                    label="Observación"
+                    optional="opcional · nota interna, no se muestra al cliente"
+                    error={errors.observation?.message}
+                  >
+                    <textarea
+                      {...form.register('observation')}
+                      rows={2}
+                      placeholder="Nota interna del producto…"
                       className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     />
                   </Field>
@@ -1073,11 +1104,16 @@ export function ProductForm({ product }: Props) {
       >
         <div className="space-y-5 p-5">
           <p className="text-xs font-medium leading-relaxed text-slate-500 dark:text-slate-400">
-            Esta acción es permanente. El producto &ldquo;{product?.name}&rdquo;
-            se eliminará del catálogo. Si tiene movimientos de inventario
-            asociados, no podrá eliminarse y tendrás que desactivarlo en su
-            lugar.
+            El producto &ldquo;{product?.name}&rdquo; se eliminará del catálogo y
+            dejará de aparecer en búsquedas y listados. Es un borrado lógico
+            (soft delete): el historial asociado se conserva intacto.
           </p>
+
+          <DeleteImpact
+            loading={relations.isLoading}
+            data={relations.data ?? null}
+          />
+
           <div className="flex items-center justify-end gap-2">
             <button
               type="button"
@@ -1302,6 +1338,69 @@ function ToggleField({
         </span>
       </span>
     </button>
+  );
+}
+
+/* ============================================================
+   DELETE IMPACT — relaciones afectadas en el modal de borrado
+   ============================================================ */
+
+function DeleteImpact({
+  loading,
+  data,
+}: {
+  loading: boolean;
+  data: ProductRelationsDto | null;
+}) {
+  if (loading) {
+    return (
+      <div className="rounded-lg border bg-muted/30 px-3.5 py-3 text-xs text-muted-foreground">
+        Calculando impacto…
+      </div>
+    );
+  }
+  if (!data) return null;
+
+  if (data.total === 0) {
+    return (
+      <div className="rounded-lg border border-emerald-300/50 bg-emerald-50/60 px-3.5 py-3 text-xs text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/5 dark:text-emerald-300">
+        Este producto no tiene relaciones registradas. Se puede eliminar sin
+        impacto en otros módulos.
+      </div>
+    );
+  }
+
+  const rows: Array<[string, number]> = [
+    ['Movimientos de inventario', data.movements],
+    ['Ventas', data.sales],
+    ['Compras', data.purchases],
+    ['Cotizaciones', data.quotations],
+    ['Garantías', data.warranties],
+    ['Devoluciones', data.returns],
+    ['Transferencias', data.transfers],
+  ];
+
+  return (
+    <div className="space-y-2 rounded-lg border border-orange-300/50 bg-orange-50/60 px-3.5 py-3 dark:border-orange-500/30 dark:bg-orange-500/5">
+      <p className="text-xs font-semibold text-orange-700 dark:text-orange-300">
+        Este producto tiene registros asociados que se conservarán:
+      </p>
+      <ul className="grid grid-cols-2 gap-x-4 gap-y-1">
+        {rows
+          .filter(([, n]) => n > 0)
+          .map(([label, n]) => (
+            <li
+              key={label}
+              className="flex items-center justify-between text-xs text-muted-foreground"
+            >
+              <span>{label}</span>
+              <span className="font-mono font-semibold text-foreground tabular-nums">
+                {n}
+              </span>
+            </li>
+          ))}
+      </ul>
+    </div>
   );
 }
 

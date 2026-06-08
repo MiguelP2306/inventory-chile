@@ -12,6 +12,7 @@ import { Brackets, DataSource, Repository } from 'typeorm';
 import { CashboxService } from '../cashbox/cashbox.service';
 import { CountersService } from '../common/counters.service';
 import { dayRange } from '../common/date-range';
+import { businessTodayStr, parseBusinessDate } from '../common/timezone';
 import {
   CashTransaction,
   Expense,
@@ -94,7 +95,7 @@ export class ExpensesService {
     });
     if (!category) throw new NotFoundException('Categoría no encontrada');
 
-    const expenseDate = new Date(dto.date);
+    const expenseDate = parseBusinessDate(dto.date);
     const year = expenseDate.getFullYear();
 
     return this.ds.transaction(async (manager) => {
@@ -163,7 +164,7 @@ export class ExpensesService {
         // Caso de borde: la transacción quedó huérfana. La recreamos.
         const newTx = await this.cashbox.recordTransaction(
           {
-            date: dto.date ? new Date(dto.date) : existing.date,
+            date: dto.date ? parseBusinessDate(dto.date) : existing.date,
             type: CashTransactionType.EXPENSE,
             source: CashTransactionSource.MANUAL,
             sourceId: null,
@@ -177,7 +178,7 @@ export class ExpensesService {
         );
         existing.cashTxId = newTx.id;
       } else {
-        cashTx.date = dto.date ? new Date(dto.date) : cashTx.date;
+        cashTx.date = dto.date ? parseBusinessDate(dto.date) : cashTx.date;
         cashTx.amount = dto.amount ?? cashTx.amount;
         cashTx.paymentMethod = dto.paymentMethod ?? cashTx.paymentMethod;
         cashTx.expenseCategoryId = dto.categoryId ?? cashTx.expenseCategoryId;
@@ -185,7 +186,7 @@ export class ExpensesService {
         await manager.getRepository(CashTransaction).save(cashTx);
       }
 
-      if (dto.date) existing.date = new Date(dto.date);
+      if (dto.date) existing.date = parseBusinessDate(dto.date);
       if (dto.categoryId) existing.categoryId = dto.categoryId;
       if (dto.amount) existing.amount = dto.amount;
       if (dto.paymentMethod) existing.paymentMethod = dto.paymentMethod;
@@ -224,8 +225,8 @@ export class ExpensesService {
 }
 
 function isInCurrentMonth(d: Date): boolean {
-  const now = new Date();
-  return (
-    d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
-  );
+  // Comparamos año-mes en la zona del negocio (no en la del servidor).
+  const currentYm = businessTodayStr().slice(0, 7); // YYYY-MM
+  const dYm = businessTodayStr(d).slice(0, 7);
+  return dYm === currentYm;
 }

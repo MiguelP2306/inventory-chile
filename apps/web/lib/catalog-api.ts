@@ -8,6 +8,8 @@ import type {
   ProductDto,
   ProductImageDto,
   ProductKindDto,
+  ProductRelationsDto,
+  ProductStockRowDto,
   VehicleMakeDto,
   VehicleModelDto,
 } from '@inventory/shared';
@@ -190,6 +192,8 @@ export interface ProductInput {
   partNumber: string;
   barcode?: string | null;
   description?: string | null;
+  // Nota interna del producto (Fase 12).
+  observation?: string | null;
   categoryId?: string | null;
   brandId?: string | null;
   supplierId?: string | null;
@@ -212,6 +216,30 @@ export const updateProduct = (id: string, input: Partial<ProductInput>) =>
 
 export const deleteProduct = (id: string) =>
   api.delete(`/products/${id}`).then((r) => r.data);
+
+/**
+ * Fase 12 — conteo de relaciones del producto para el modal de confirmación de
+ * borrado (informar impacto antes de eliminar; el borrado es soft).
+ */
+export const getProductRelations = (id: string) =>
+  api
+    .get<ProductRelationsDto>(`/products/${id}/relations`)
+    .then((r) => r.data);
+
+/**
+ * Fase 12 — "Basura": productos eliminados por soft delete. Solo lectura.
+ */
+export const listDeletedProducts = () =>
+  api.get<ProductDto[]>('/products/trash').then((r) => r.data);
+
+/**
+ * Fase 12 — desglose de stock de un producto en TODAS las bodegas (no solo la
+ * activa). Lo usa el modal "Agregar al bolso".
+ */
+export const getProductStock = (id: string) =>
+  api
+    .get<ProductStockRowDto[]>(`/products/${id}/stock`)
+    .then((r) => r.data);
 
 /**
  * Ronda 7 — bulk update de categoría sobre N productos.

@@ -27,10 +27,8 @@ import {
 } from '@/components/ui/sheet';
 import { listProductImages, publicImageUrl } from '@/lib/catalog-api';
 import { formatCurrency } from '@/lib/format';
-import { listStock } from '@/lib/inventory-api';
-import { useProductBag } from '@/lib/use-product-bag';
+import { bagLineKey, useProductBag } from '@/lib/use-product-bag';
 import { cn } from '@/lib/utils';
-import { listWarehouses } from '@/lib/warehouses-api';
 
 /**
  * Botón del header que abre el drawer del bolso. Muestra un badge con la
@@ -82,8 +80,8 @@ function BagDrawerBody({
 }: {
   items: ReturnType<typeof useProductBag>['items'];
   onClose: () => void;
-  onSetQty: (productId: string, qty: number) => void;
-  onRemove: (productId: string) => void;
+  onSetQty: (key: string, qty: number) => void;
+  onRemove: (key: string) => void;
   onClear: () => void;
 }) {
   const router = useRouter();
@@ -110,11 +108,11 @@ function BagDrawerBody({
       return next;
     });
   }
-  const selectedItems = items.filter((it) => isSelected(it.productId));
+  const selectedItems = items.filter((it) => isSelected(bagLineKey(it)));
   const allSelected = items.length > 0 && selectedItems.length === items.length;
   function toggleAll() {
     setDeselected(
-      allSelected ? new Set(items.map((i) => i.productId)) : new Set(),
+      allSelected ? new Set(items.map((i) => bagLineKey(i))) : new Set(),
     );
   }
   // En modo selección operamos sobre lo elegido; si no, sobre TODO el bolso.
@@ -128,43 +126,9 @@ function BagDrawerBody({
     null,
   );
 
-  // Stock vivo de los productos del bolso, desglosado por bodega. Solo corre
-  // cuando el drawer está montado (Radix desmonta el contenido al cerrar).
-  const warehouses = useQuery({
-    queryKey: ['warehouses'],
-    queryFn: () => listWarehouses(),
-    staleTime: 5 * 60 * 1000,
-    select: (rows) => (Array.isArray(rows) ? rows : rows.items),
-  });
-  const warehouseNameById = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const w of warehouses.data ?? []) m.set(w.id, w.name);
-    return m;
-  }, [warehouses.data]);
-
-  const stock = useQuery({
-    queryKey: ['bag-stock'],
-    queryFn: () => listStock({ q: undefined }),
-    staleTime: 30 * 1000,
-    enabled: items.length > 0,
-  });
-  const stockByProduct = useMemo(() => {
-    const m = new Map<
-      string,
-      { warehouseId: string; quantity: number; locationCode: string | null }[]
-    >();
-    const rows = Array.isArray(stock.data) ? stock.data : [];
-    for (const r of rows) {
-      const arr = m.get(r.product.id) ?? [];
-      arr.push({
-        warehouseId: r.warehouseId,
-        quantity: r.quantity,
-        locationCode: r.locationCode,
-      });
-      m.set(r.product.id, arr);
-    }
-    return m;
-  }, [stock.data]);
+  // El bolso muestra la bodega + ubicación ELEGIDA al agregar cada producto
+  // (guardada en el item), no el stock vivo — así refleja la selección del
+  // modal "Agregar al bolso".
 
   // Todas las imágenes del producto cuyo lightbox está abierto.
   const lightboxImagesQ = useQuery({
@@ -185,7 +149,7 @@ function BagDrawerBody({
   }, [lightboxImagesQ.data, items, lightboxProductId]);
 
   function goToFlow(target: 'quotation' | 'sale') {
-    const ids = effectiveItems.map((i) => i.productId);
+    const ids = effectiveItems.map((i) => bagLineKey(i));
     if (ids.length === 0) return;
     onClose();
     // La página destino lee del bolso con useProductBag(); `fromBag=1` le dice
@@ -270,23 +234,20 @@ function BagDrawerBody({
           <ul className="divide-y">
             {items.map((it) => {
               const lineTotal = Number(it.unitPrice) * it.qty;
-              const stockRows = stockByProduct.get(it.productId) ?? [];
-              const totalStock = stockRows.reduce((a, r) => a + r.quantity, 0);
+              const key = bagLineKey(it);
               return (
                 <li
-                  key={it.productId}
+                  key={key}
                   className={cn(
                     'flex items-start gap-3 px-5 py-4 transition-opacity',
-                    selectionMode &&
-                      !isSelected(it.productId) &&
-                      'opacity-45',
+                    selectionMode && !isSelected(key) && 'opacity-45',
                   )}
                 >
                   {selectionMode && (
                     <input
                       type="checkbox"
-                      checked={isSelected(it.productId)}
-                      onChange={() => toggleSelected(it.productId)}
+                      checked={isSelected(key)}
+                      onChange={() => toggleSelected(key)}
                       aria-label={`Seleccionar ${it.name}`}
                       className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-[#2F6BFF]"
                     />
@@ -312,52 +273,51 @@ function BagDrawerBody({
                     </p>
                     <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
                       {it.sku ?? '—'}
+                      {it.partNumber ? (
+                        <span className="ml-2 text-muted-foreground/80">
+                          · N° parte: {it.partNumber}
+                        </span>
+                      ) : null}
                     </p>
 
-                    {/* Stock actual + bodega(s) de donde sale */}
+                    {/* Bodega elegida en el modal + su ubicación + dirección. */}
                     <div className="mt-1.5 text-[11px]">
-                      {stock.isLoading ? (
-                        <span className="text-muted-foreground">
-                          Cargando stock…
-                        </span>
-                      ) : stockRows.length === 0 ? (
-                        <span className="font-semibold text-rose-500">
-                          Sin stock registrado
-                        </span>
-                      ) : (
+                      {it.warehouseName ? (
                         <>
-                          <span className="font-semibold text-foreground">
-                            Stock actual:{' '}
-                            <span className="font-mono tabular-nums">
-                              {totalStock} un.
+                          <span className="flex items-center gap-1 text-muted-foreground">
+                            <Warehouse className="h-3 w-3 shrink-0" />
+                            <span className="truncate">
+                              <span className="font-semibold text-foreground">
+                                {it.warehouseName}
+                              </span>
+                              <span>
+                                {' '}
+                                · Ubic.: {it.locationCode ? it.locationCode : '—'}
+                              </span>
                             </span>
+                            {it.warehouseQty != null && (
+                              <span className="ml-auto font-mono tabular-nums">
+                                {it.warehouseQty} un.
+                              </span>
+                            )}
                           </span>
-                          <ul className="mt-0.5 space-y-0.5 text-muted-foreground">
-                            {stockRows.map((r) => (
-                              <li
-                                key={r.warehouseId}
-                                className="flex items-center gap-1"
-                              >
-                                <Warehouse className="h-3 w-3 shrink-0" />
-                                <span className="truncate">
-                                  {warehouseNameById.get(r.warehouseId) ??
-                                    'Bodega'}
-                                  {r.locationCode ? ` · ${r.locationCode}` : ''}
-                                </span>
-                                <span className="ml-auto font-mono tabular-nums">
-                                  {r.quantity} un.
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
+                          {it.warehouseAddress && (
+                            <span className="ml-4 block truncate text-muted-foreground/80">
+                              Dirección: {it.warehouseAddress}
+                            </span>
+                          )}
                         </>
+                      ) : (
+                        <span className="text-muted-foreground">
+                          Bodega sin especificar
+                        </span>
                       )}
                     </div>
 
                     <div className="mt-2 flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => onSetQty(it.productId, it.qty - 1)}
+                        onClick={() => onSetQty(key, it.qty - 1)}
                         aria-label="Restar uno"
                         className="inline-flex h-7 w-7 items-center justify-center rounded-md border bg-background text-sm font-bold hover:bg-muted"
                       >
@@ -370,14 +330,14 @@ function BagDrawerBody({
                         onChange={(e) => {
                           const n = Number(e.target.value);
                           if (Number.isFinite(n) && n >= 0) {
-                            onSetQty(it.productId, Math.floor(n));
+                            onSetQty(key, Math.floor(n));
                           }
                         }}
                         className="h-7 w-14 rounded-md border bg-background px-2 text-center font-mono text-xs"
                       />
                       <button
                         type="button"
-                        onClick={() => onSetQty(it.productId, it.qty + 1)}
+                        onClick={() => onSetQty(key, it.qty + 1)}
                         aria-label="Sumar uno"
                         className="inline-flex h-7 w-7 items-center justify-center rounded-md border bg-background text-sm font-bold hover:bg-muted"
                       >
@@ -404,7 +364,7 @@ function BagDrawerBody({
                       </Link>
                       <button
                         type="button"
-                        onClick={() => onRemove(it.productId)}
+                        onClick={() => onRemove(key)}
                         aria-label="Quitar del bolso"
                         title="Quitar del bolso"
                         className="inline-flex h-7 w-7 items-center justify-center rounded-md border bg-background text-destructive hover:bg-destructive/10"

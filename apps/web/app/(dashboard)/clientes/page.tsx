@@ -26,19 +26,22 @@ const PAGE_SIZE = 20;
  * paginación. Acento azul #2F6BFF.
  */
 export default function ClientesPage() {
-  const filters = useUrlFilters({ q: '', page: '' });
-  const { values, setFilter } = filters;
+  const filters = useUrlFilters({ q: '', page: '', draft: '' });
+  const { values, setFilter, setFilters } = filters;
   const search = useDebouncedUrlFilter(filters, 'q', { resetKeys: ['page'] });
   const page = Number(values.page || '1');
   const debouncedQ = (values.q ?? '').trim();
+  // 'exclude' (default) = activos; 'only' = borradores; 'all' = todos.
+  const draftMode = (values.draft || 'exclude') as 'exclude' | 'only' | 'all';
 
   const list = useQuery({
-    queryKey: ['customers', { q: debouncedQ, page }],
+    queryKey: ['customers', { q: debouncedQ, page, draft: draftMode }],
     queryFn: () =>
       listCustomersPaginated({
         q: debouncedQ || undefined,
         page,
         pageSize: PAGE_SIZE,
+        draft: draftMode,
       }),
   });
 
@@ -87,17 +90,41 @@ export default function ClientesPage() {
       </div>
 
       {/* ============================================================
-          SEARCH
+          SEARCH + FILTRO BORRADORES
           ============================================================ */}
-      <div className="relative max-w-[480px]">
-        <Search className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400" />
-        <input
-          type="text"
-          value={search.value}
-          onChange={(e) => search.setValue(e.target.value)}
-          placeholder="Buscar por nombre, RUT, email o teléfono…"
-          className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-xs font-medium text-slate-700 shadow-sm transition-all placeholder:text-slate-400 focus:border-[#2F6BFF] focus:outline-none dark:border-slate-850 dark:bg-[#11151C] dark:text-white"
-        />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative max-w-[480px] flex-1">
+          <Search className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={search.value}
+            onChange={(e) => search.setValue(e.target.value)}
+            placeholder="Buscar por nombre, RUT, email o teléfono…"
+            className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-xs font-medium text-slate-700 shadow-sm transition-all placeholder:text-slate-400 focus:border-[#2F6BFF] focus:outline-none dark:border-slate-850 dark:bg-[#11151C] dark:text-white"
+          />
+        </div>
+        <div className="flex items-center gap-1 rounded-2xl bg-slate-50 p-1 text-[11px] dark:bg-slate-950">
+          {(
+            [
+              ['exclude', 'Activos'],
+              ['only', 'Borradores'],
+              ['all', 'Todos'],
+            ] as const
+          ).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setFilters({ draft: mode === 'exclude' ? null : mode, page: null })}
+              className={`rounded-xl px-3 py-1.5 font-bold transition-all ${
+                draftMode === mode
+                  ? 'bg-white text-[#2F6BFF] shadow-sm dark:bg-slate-800 dark:text-blue-400'
+                  : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ============================================================
@@ -151,6 +178,11 @@ export default function ClientesPage() {
                     >
                       {c.name}
                     </Link>
+                    {c.isDraft && (
+                      <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wider text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
+                        Borrador
+                      </span>
+                    )}
                   </td>
                   <td className="py-5 font-mono text-[11.5px] font-medium text-slate-500 dark:text-slate-400">
                     {c.taxId ? formatRutPretty(c.taxId) : '—'}

@@ -2,6 +2,7 @@ import { ProductKind } from '@inventory/shared';
 import {
   Column,
   CreateDateColumn,
+  DeleteDateColumn,
   Entity,
   Index,
   JoinColumn,
@@ -40,6 +41,12 @@ export class Product {
 
   @Column({ type: 'text', nullable: true })
   description!: string | null;
+
+  // Observación libre del producto. Distinta de `description` (que es comercial
+  // y se muestra en catálogo/cotizaciones): la observación es una nota interna
+  // del operador. Editable en alta/edición, exportable e importable vía Excel.
+  @Column({ type: 'text', nullable: true })
+  observation!: string | null;
 
   @ManyToOne(() => Category, { onDelete: 'RESTRICT', nullable: true })
   @JoinColumn({ name: 'categoryId' })
@@ -100,4 +107,13 @@ export class Product {
 
   @UpdateDateColumn({ type: 'datetime', precision: 6 })
   updatedAt!: Date;
+
+  // Soft delete (Fase 12). Todo producto puede "eliminarse" sin importar sus
+  // relaciones (movimientos, ventas, compras, cotizaciones, garantías, etc.):
+  // marcamos `deletedAt` y TypeORM lo excluye automáticamente de TODAS las
+  // queries (find/QueryBuilder) sin necesidad de filtrar a mano. Las filas
+  // hijas (sale_items, movimientos, ...) conservan su FK intacta, así el
+  // histórico no se rompe.
+  @DeleteDateColumn({ type: 'datetime', precision: 6, nullable: true })
+  deletedAt!: Date | null;
 }

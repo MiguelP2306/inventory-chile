@@ -24,6 +24,7 @@ import { EmailService } from '../notifications/email.service';
 import { PdfService } from '../notifications/pdf.service';
 import {
   buildQuotationMessage,
+  buildWhatsAppChooseUrl,
   buildWhatsAppUrl,
 } from '../notifications/whatsapp.util';
 import {
@@ -170,11 +171,8 @@ export class QuotationsController {
   ) {
     const dto = await this.svc.getOne(id);
     const phone = body.to ?? dto.customerView.phone;
-    if (!phone) {
-      throw new BadRequestException(
-        'Falta el teléfono del cliente para enviar por WhatsApp.',
-      );
-    }
+    // El teléfono ya NO es obligatorio: si no hay, devolvemos solo el link "sin
+    // número" para que el usuario elija el contacto en WhatsApp.
     if (body.to && !dto.customerId) {
       await this.svc.setSnapshotPhone(id, body.to);
     }
@@ -189,10 +187,13 @@ export class QuotationsController {
       totalFormatted,
       publicUrl: updated.publicUrl,
     });
-    const whatsappUrl = buildWhatsAppUrl(phone, message);
 
     return {
-      whatsappUrl,
+      // Link al número registrado del cliente (null si no tiene número).
+      whatsappUrl: phone ? buildWhatsAppUrl(phone, message) : null,
+      // Link sin número: el usuario elige el contacto en WhatsApp. Siempre presente.
+      whatsappChooseUrl: buildWhatsAppChooseUrl(message),
+      phone: phone ?? null,
       status: updated.status,
       sentAt: updated.sentAt,
     };

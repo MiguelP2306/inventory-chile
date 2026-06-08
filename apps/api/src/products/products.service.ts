@@ -10,14 +10,21 @@ import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { CategoriesService } from '../categories/categories.service';
 import { CountersService } from '../common/counters.service';
 import { dayRange } from '../common/date-range';
-import { rethrowFkAsConflict } from '../common/fk-error';
 import {
+  InventoryMovement,
   Product,
   ProductCode,
   ProductImage,
+  PurchaseEntryItem,
+  QuotationItem,
+  ReturnItem,
+  SaleItem,
+  TransferItem,
   VehicleFitment,
   VehicleModel,
+  WarrantyClaim,
 } from '../database/entities';
+import type { ProductRelationsDto } from '@inventory/shared';
 import { PRODUCT_IMAGES_SUBDIR } from '../uploads/upload-config';
 import { StorageService } from '../uploads/storage.service';
 import {
@@ -220,27 +227,84 @@ export class ProductsService {
     return this.getOne(id);
   }
 
+  /**
+   * Cuenta las relaciones del producto para el modal de confirmación de
+   * borrado. Como el borrado es SOFT (ver `remove`), estos registros se
+   * conservan — el conteo solo informa el impacto al operador.
+   *
+   * Para ventas/compras/cotizaciones/devoluciones/transferencias contamos
+   * documentos DISTINTOS (no ítems), que es lo que el usuario entiende por
+   * "3 ventas". Movimientos y garantías se cuentan directo.
+   */
+  async relations(id: string): Promise<ProductRelationsDto> {
+    const product = await this.products.findOne({ where: { id } });
+    if (!product) throw new NotFoundException('Producto no encontrado');
+
+    const distinctParents = async (
+      entity: Function,
+      parentColumn: string,
+    ): Promise<number> => {
+      const { count } = (await this.dataSource
+        .createQueryBuilder()
+        .select(`COUNT(DISTINCT i.${parentColumn})`, 'count')
+        .from(entity, 'i')
+        .where('i.productId = :id', { id })
+        .getRawOne<{ count: string }>()) ?? { count: '0' };
+      return Number(count) || 0;
+    };
+
+    const [movements, sales, purchases, quotations, warranties, returns, transfers] =
+      await Promise.all([
+        this.dataSource.getRepository(InventoryMovement).count({ where: { productId: id } }),
+        distinctParents(SaleItem, 'saleId'),
+        distinctParents(PurchaseEntryItem, 'entryId'),
+        distinctParents(QuotationItem, 'quotationId'),
+        this.dataSource.getRepository(WarrantyClaim).count({ where: { productId: id } }),
+        distinctParents(ReturnItem, 'returnId'),
+        distinctParents(TransferItem, 'transferId'),
+      ]);
+
+    const total =
+      movements + sales + purchases + quotations + warranties + returns + transfers;
+    return {
+      movements,
+      sales,
+      purchases,
+      quotations,
+      warranties,
+      returns,
+      transfers,
+      total,
+    };
+  }
+
+  /**
+   * Fase 12 — "Basura": lista los productos eliminados por soft delete
+   * (deletedAt no nulo). Solo lectura, sin paginación pesada (cap razonable).
+   * Trae categoría/marca para mostrar contexto. Ordenado por fecha de borrado
+   * descendente (lo más reciente primero).
+   */
+  async listDeleted(): Promise<Product[]> {
+    return this.products
+      .createQueryBuilder('p')
+      .withDeleted()
+      .leftJoinAndSelect('p.category', 'category')
+      .leftJoinAndSelect('p.brand', 'brand')
+      .where('p.deletedAt IS NOT NULL')
+      .orderBy('p.deletedAt', 'DESC')
+      .take(1000)
+      .getMany();
+  }
+
   async remove(id: string) {
     const product = await this.products.findOne({ where: { id } });
     if (!product) throw new NotFoundException('Producto no encontrado');
 
-    // Capturamos las imágenes ANTES de borrar — se eliminan los archivos físicos
-    // después del commit (CASCADE borra los registros en product_images).
-    const productImages = await this.images.find({ where: { productId: id } });
-
-    try {
-      await this.products.remove(product);
-    } catch (err) {
-      rethrowFkAsConflict(
-        err,
-        'No se puede eliminar: el producto tiene movimientos de inventario o ítems asociados. Desactívalo en su lugar.',
-      );
-    }
-
-    // Limpieza de archivos físicos. No falla la operación si alguno no existe.
-    await Promise.all(
-      productImages.map((img) => this.storage.delete(img.url)),
-    );
+    // SOFT DELETE: marca `deletedAt` y TypeORM excluye el producto de todas las
+    // queries. Funciona SIEMPRE, tenga o no relaciones (movimientos, ventas,
+    // compras, cotizaciones, garantías, ...). El histórico se conserva intacto
+    // y las imágenes físicas NO se borran (por si más adelante se restaura).
+    await this.products.softRemove(product);
     return { ok: true };
   }
 
@@ -439,6 +503,7 @@ export class ProductsService {
     if (dto.barcode !== undefined) fields.barcode = dto.barcode ?? null;
     if (dto.name !== undefined) fields.name = dto.name;
     if (dto.description !== undefined) fields.description = dto.description ?? null;
+    if (dto.observation !== undefined) fields.observation = dto.observation ?? null;
     if (dto.categoryId !== undefined) fields.categoryId = dto.categoryId ?? null;
     if (dto.brandId !== undefined) fields.brandId = dto.brandId ?? null;
     if (dto.supplierId !== undefined) fields.supplierId = dto.supplierId ?? null;
@@ -610,6 +675,61 @@ export class ProductsService {
   }
 
   /**
+   * Desglose de stock de UN producto en TODAS las bodegas donde tiene fila de
+   * stock (con cantidad y ubicación física). Independiente de la bodega activa.
+   * Lo usa el modal "Agregar al bolso". Ordenado por nombre de bodega.
+   */
+  async stockBreakdown(
+    productId: string,
+  ): Promise<
+    Array<{
+      warehouseId: string;
+      warehouseName: string;
+      quantity: number;
+      locationCode: string | null;
+    }>
+  > {
+    const rows: Array<{
+      warehouseId: string;
+      warehouseName: string;
+      quantity: number;
+      locationCode: string | null;
+    }> = await this.dataSource
+      .createQueryBuilder()
+      .select('s.warehouseId', 'warehouseId')
+      .addSelect('w.name', 'warehouseName')
+      .addSelect('s.quantity', 'quantity')
+      .addSelect('s.locationCode', 'locationCode')
+      .from('stocks', 's')
+      .innerJoin('warehouses', 'w', 'w.id = s.warehouseId')
+      .where('s.productId = :productId', { productId })
+      .orderBy('w.name', 'ASC')
+      .getRawMany();
+    return rows.map((r) => ({
+      warehouseId: r.warehouseId,
+      warehouseName: r.warehouseName,
+      quantity: Number(r.quantity),
+      locationCode: r.locationCode ?? null,
+    }));
+  }
+
+  /**
+   * Bodegas activas (id + nombre, alfabético). Se usa en el export XLSX para
+   * generar una columna de stock por bodega.
+   */
+  async listActiveWarehouses(): Promise<{ id: string; name: string }[]> {
+    const rows: Array<{ id: string; name: string }> = await this.dataSource
+      .createQueryBuilder()
+      .select('w.id', 'id')
+      .addSelect('w.name', 'name')
+      .from('warehouses', 'w')
+      .where('w.isActive = TRUE')
+      .orderBy('w.name', 'ASC')
+      .getRawMany();
+    return rows;
+  }
+
+  /**
    * Devuelve, por producto, la lista de bodegas en las que tiene stock con
    * su cantidad. Se usa para anotar `currentStock` (suma) en /products y
    * para el export XLSX. Una sola query con join contra `warehouses`.
@@ -694,6 +814,67 @@ export class ProductsService {
     }
     for (const [pid, tokens] of groups) {
       map.set(pid, tokens.join('; '));
+    }
+    return map;
+  }
+
+  /**
+   * Igual que `compatibleModelsByProduct` pero devuelve los fitments en 4
+   * cadenas SEPARADAS y ALINEADAS por posición (Marca / Modelo / Año desde /
+   * Año hasta), unidas con "; ". Se usa en el export XLSX para las 4 columnas de
+   * vehículo (Fase 12), de modo que el archivo round-trip al reimportar.
+   */
+  async compatibleModelsStructuredByProduct(
+    productIds: string[],
+  ): Promise<
+    Map<string, { makes: string; models: string; from: string; to: string }>
+  > {
+    const map = new Map<
+      string,
+      { makes: string; models: string; from: string; to: string }
+    >();
+    if (productIds.length === 0) return map;
+    const rows: Array<{
+      productId: string;
+      makeName: string;
+      modelName: string;
+      yearFrom: number | null;
+      yearTo: number | null;
+    }> = await this.dataSource
+      .createQueryBuilder()
+      .select('f.productId', 'productId')
+      .addSelect('mk.name', 'makeName')
+      .addSelect('m.name', 'modelName')
+      .addSelect('f.yearFrom', 'yearFrom')
+      .addSelect('f.yearTo', 'yearTo')
+      .from('vehicle_fitments', 'f')
+      .innerJoin('vehicle_models', 'm', 'm.id = f.modelId')
+      .innerJoin('vehicle_makes', 'mk', 'mk.id = m.makeId')
+      .where('f.productId IN (:...ids)', { ids: productIds })
+      .orderBy('mk.name', 'ASC')
+      .addOrderBy('m.name', 'ASC')
+      .getRawMany();
+    const groups = new Map<
+      string,
+      { makes: string[]; models: string[]; from: string[]; to: string[] }
+    >();
+    for (const r of rows) {
+      const g =
+        groups.get(r.productId) ??
+        { makes: [], models: [], from: [], to: [] };
+      g.makes.push(r.makeName);
+      g.models.push(r.modelName);
+      g.from.push(r.yearFrom != null ? String(r.yearFrom) : '');
+      g.to.push(r.yearTo != null ? String(r.yearTo) : '');
+      groups.set(r.productId, g);
+    }
+    for (const [pid, g] of groups) {
+      map.set(pid, {
+        makes: g.makes.join('; '),
+        models: g.models.join('; '),
+        from: g.from.join('; '),
+        to: g.to.join('; '),
+      });
     }
     return map;
   }

@@ -20,6 +20,14 @@ export class Customer {
   @Column({ type: 'varchar', length: 180 })
   name!: string;
 
+  // Fase 12 — "Cliente libre" como borrador. Un cliente puede crearse en estado
+  // borrador (solo con nombre, sin RUT ni datos completos) y completarse más
+  // tarde. Los borradores se ocultan de los listados/selectores normales salvo
+  // que se pidan explícitamente.
+  @Index('idx_customers_is_draft')
+  @Column({ type: 'boolean', default: false })
+  isDraft!: boolean;
+
   // Ronda 9 — RUT opcional para soportar clientes "lite" registrados sólo
   // con WhatsApp. La unicidad sigue vigente (MySQL ignora NULLs en índices
   // únicos). `SalesService.create` valida que el cliente tenga RUT antes

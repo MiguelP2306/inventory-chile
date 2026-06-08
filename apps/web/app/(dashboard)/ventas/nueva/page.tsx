@@ -12,6 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { createDispatchNote } from '@/lib/dispatch-api';
 import { getQuotation } from '@/lib/quotations-api';
 import {
+  bagLineKey,
   clearProductBagItems,
   useProductBag,
 } from '@/lib/use-product-bag';
@@ -43,8 +44,8 @@ export default function NuevaVentaPage() {
   const bagItems = useMemo(() => {
     if (!fromBag) return [];
     if (!bagIdsParam) return bag.items;
-    const ids = new Set(bagIdsParam.split(','));
-    return bag.items.filter((it) => ids.has(it.productId));
+    const keys = new Set(bagIdsParam.split(',').map(decodeURIComponent));
+    return bag.items.filter((it) => keys.has(bagLineKey(it)));
   }, [fromBag, bagIdsParam, bag.items]);
   const bagPrefill: SaleBagItem[] | undefined =
     bagItems.length > 0
@@ -54,6 +55,9 @@ export default function NuevaVentaPage() {
           name: it.name,
           qty: it.qty,
           unitPrice: it.unitPrice,
+          // Bodega elegida en el bolso → predefine la bodega de la venta si es
+          // la misma para todos los items.
+          warehouseId: it.warehouseId ?? null,
         }))
       : undefined;
 
@@ -155,10 +159,18 @@ export default function NuevaVentaPage() {
           // productos que realmente quedaron en la venta creada. Así, si en el
           // formulario se quitó alguno, ese permanece en el bolso.
           if (fromBag) {
-            const involvedIds = (sale.items ?? [])
-              .map((it) => it.productId)
-              .filter((id): id is string => !!id);
-            if (involvedIds.length > 0) clearProductBagItems(involvedIds);
+            // Limpiamos las LÍNEAS del bolso (producto+bodega) cuyo producto
+            // quedó en la venta. Si un producto se quitó en el form, su línea
+            // permanece en el bolso.
+            const saleProductIds = new Set(
+              (sale.items ?? [])
+                .map((it) => it.productId)
+                .filter((id): id is string => !!id),
+            );
+            const keys = bagItems
+              .filter((it) => saleProductIds.has(it.productId))
+              .map(bagLineKey);
+            if (keys.length > 0) clearProductBagItems(keys);
           }
           // Ronda 9 — flujo "convertir y generar guía". Tras confirmar la
           // venta, generamos la guía con datos mínimos y redirigimos a su

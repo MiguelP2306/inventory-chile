@@ -10,7 +10,11 @@ import { QuotationStatusBadge } from '@/components/quotation-status-badge';
 import { apiAbsoluteUrl } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
 import { listQuotations } from '@/lib/quotations-api';
-import { clearProductBagItems, useProductBag } from '@/lib/use-product-bag';
+import {
+  bagLineKey,
+  clearProductBagItems,
+  useProductBag,
+} from '@/lib/use-product-bag';
 import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
 import type { QuotationStatusDto } from '@inventory/shared';
@@ -98,7 +102,9 @@ export default function CotizacionesPage() {
       if (searchParams.get('fromBag') === '1' && bag.items.length > 0) {
         setBagPrefillActive(true);
         const idsParam = searchParams.get('bagIds');
-        setBagIds(idsParam ? idsParam.split(',') : null);
+        setBagIds(
+          idsParam ? idsParam.split(',').map(decodeURIComponent) : null,
+        );
       }
       const next = new URLSearchParams(searchParams.toString());
       next.delete('new');
@@ -113,7 +119,7 @@ export default function CotizacionesPage() {
   // Productos del bolso a precargar, acotados a la selección si la hubo.
   const bagPrefillItems = bagPrefillActive
     ? bagIds
-      ? bag.items.filter((it) => bagIds.includes(it.productId))
+      ? bag.items.filter((it) => bagIds.includes(bagLineKey(it)))
       : bag.items
     : [];
 
@@ -379,12 +385,17 @@ export default function CotizacionesPage() {
         onSaved={(saved) => {
           qc.invalidateQueries({ queryKey: ['quotations'] });
           if (bagPrefillActive) {
-            // Quitamos del bolso SOLO los productos que quedaron en la
-            // cotización creada (los temporales no tienen productId; se ignoran).
-            const involvedIds = (saved.items ?? [])
-              .map((it) => it.productId)
-              .filter((id): id is string => !!id);
-            if (involvedIds.length > 0) clearProductBagItems(involvedIds);
+            // Quitamos del bolso SOLO las líneas (producto+bodega) cuyo producto
+            // quedó en la cotización (los temporales no tienen productId).
+            const savedProductIds = new Set(
+              (saved.items ?? [])
+                .map((it) => it.productId)
+                .filter((id): id is string => !!id),
+            );
+            const keys = bagPrefillItems
+              .filter((it) => savedProductIds.has(it.productId))
+              .map(bagLineKey);
+            if (keys.length > 0) clearProductBagItems(keys);
             setBagPrefillActive(false);
             setBagIds(null);
           }

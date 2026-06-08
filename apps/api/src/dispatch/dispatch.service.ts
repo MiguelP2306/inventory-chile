@@ -15,6 +15,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { Brackets, DataSource, EntityManager, Repository } from 'typeorm';
 import { CountersService } from '../common/counters.service';
 import { dayRange } from '../common/date-range';
+import { businessNoonToday, parseBusinessDate } from '../common/timezone';
 import {
   Commune,
   Customer,
@@ -179,8 +180,8 @@ export class DispatchService {
     }
 
     const dispatchedAt = dto.dispatchedAt
-      ? new Date(dto.dispatchedAt)
-      : new Date();
+      ? parseBusinessDate(dto.dispatchedAt)
+      : businessNoonToday();
     const year = dispatchedAt.getFullYear();
 
     const id = await this.ds.transaction(async (manager) => {

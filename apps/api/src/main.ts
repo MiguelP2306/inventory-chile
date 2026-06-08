@@ -1,3 +1,9 @@
+// Fija la zona horaria del proceso ANTES de cualquier uso de Date, para que
+// toda operación con hora local (rangos de reportes, charts del dashboard, etc.)
+// trabaje en la hora del negocio. Las fechas-solo-día se anclan aparte (ver
+// common/timezone.ts). Override con APP_TZ si el deploy no es chileno.
+process.env.TZ = process.env.APP_TZ ?? 'America/Santiago';
+
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
