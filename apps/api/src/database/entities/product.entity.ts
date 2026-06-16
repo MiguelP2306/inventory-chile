@@ -35,6 +35,14 @@ export class Product {
   @Column({ type: 'varchar', length: 80, nullable: true })
   barcode!: string | null;
 
+  // Código identificatorio opcional y único del producto (re-incorporado).
+  // El índice es UNIQUE pero la columna es nullable — MySQL ignora los NULL en
+  // índices únicos, así que múltiples productos sin código no chocan. Usable en
+  // búsqueda libre y lookup exacto (scanner).
+  @Index('idx_products_universal_code', { unique: true })
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  universalCode!: string | null;
+
   @Index('idx_products_name')
   @Column({ type: 'varchar', length: 200 })
   name!: string;

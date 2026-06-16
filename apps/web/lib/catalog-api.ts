@@ -191,6 +191,8 @@ export interface ProductInput {
   name: string;
   partNumber: string;
   barcode?: string | null;
+  // Código universal opcional y único.
+  universalCode?: string | null;
   description?: string | null;
   // Nota interna del producto (Fase 12).
   observation?: string | null;

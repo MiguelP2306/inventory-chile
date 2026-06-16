@@ -111,6 +111,7 @@ const schema = z
     name: z.string().min(1, 'Nombre obligatorio').max(200),
     partNumber: z.string().min(1, 'Número de parte obligatorio').max(80),
     barcode: z.string().max(80).optional().or(z.literal('')),
+    universalCode: z.string().max(80).optional().or(z.literal('')),
     productKind: z.enum(['ORIGINAL', 'ALTERNATIVE']),
     description: z.string().optional().or(z.literal('')),
     observation: z.string().optional().or(z.literal('')),
@@ -230,6 +231,7 @@ export function ProductForm({ product }: Props) {
       name: product?.name ?? '',
       partNumber: product?.partNumber ?? '',
       barcode: product?.barcode ?? '',
+      universalCode: product?.universalCode ?? '',
       productKind: (product?.productKind as ProductKindDto) ?? 'ORIGINAL',
       description: product?.description ?? '',
       observation: product?.observation ?? '',
@@ -341,6 +343,7 @@ export function ProductForm({ product }: Props) {
       name: values.name,
       partNumber: values.partNumber,
       barcode: values.barcode || null,
+      universalCode: values.universalCode?.trim() || null,
       productKind: values.productKind,
       description: values.description || null,
       observation: values.observation || null,
@@ -377,6 +380,7 @@ export function ProductForm({ product }: Props) {
       'name',
       'partNumber',
       'barcode',
+      'universalCode',
       'productKind',
       'categoryId',
       'brandId',
@@ -601,6 +605,17 @@ export function ProductForm({ product }: Props) {
                   <Input
                     {...form.register('barcode')}
                     placeholder="ej: 7891234567890"
+                  />
+                </Field>
+                <Field
+                  label="Código universal"
+                  optional
+                  error={errors.universalCode?.message}
+                  hint="Código identificatorio único. Sirve para buscar el producto."
+                >
+                  <Input
+                    {...form.register('universalCode')}
+                    placeholder="ej: U-00123"
                   />
                 </Field>
                 <Field

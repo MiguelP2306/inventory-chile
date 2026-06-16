@@ -91,6 +91,7 @@ export class ProductsService {
           p.sku LIKE :q
           OR p.partNumber LIKE :q
           OR p.barcode LIKE :q
+          OR p.universalCode LIKE :q
           OR p.name LIKE :q
           OR EXISTS (
             SELECT 1 FROM product_codes pc
@@ -186,6 +187,20 @@ export class ProductsService {
         throw new ConflictException(`Ya existe un producto con SKU "${trimmedSku}"`);
       }
     }
+    // Código universal opcional pero único: validamos el conflicto acá para
+    // devolver un 409 amigable en vez del error crudo del índice UNIQUE.
+    const trimmedUniversal = dto.universalCode?.trim() || null;
+    if (trimmedUniversal) {
+      if (
+        await this.products.findOne({
+          where: { universalCode: trimmedUniversal },
+        })
+      ) {
+        throw new ConflictException(
+          `Ya existe un producto con código universal "${trimmedUniversal}"`,
+        );
+      }
+    }
     const id = await this.dataSource.transaction(async (manager) => {
       let sku = trimmedSku;
       if (!sku) {
@@ -223,6 +238,20 @@ export class ProductsService {
     if (newSku && newSku !== existing.sku) {
       const dup = await this.products.findOne({ where: { sku: newSku } });
       if (dup) throw new ConflictException(`Ya existe un producto con SKU "${newSku}"`);
+    }
+
+    // Código universal único. Si llega vacío se permite blanquearlo (a
+    // diferencia del SKU, este campo no es auto-generado). Solo validamos
+    // conflicto cuando llega un valor nuevo distinto del actual.
+    const newUniversal = dto.universalCode?.trim();
+    if (newUniversal && newUniversal !== existing.universalCode) {
+      const dup = await this.products.findOne({
+        where: { universalCode: newUniversal },
+      });
+      if (dup)
+        throw new ConflictException(
+          `Ya existe un producto con código universal "${newUniversal}"`,
+        );
     }
 
     await this.dataSource.transaction(async (manager) => {
@@ -419,8 +448,8 @@ export class ProductsService {
   /**
    * Fase 11 — lookup EXACTO por código, optimizado para escaneo (USB o cámara).
    * A diferencia de `quickSearch` (LIKE %q%, devuelve N resultados), acá
-   * comparamos por igualdad estricta contra los 4 códigos que un scanner
-   * puede leer (`barcode`, `sku`, `partNumber` y los
+   * comparamos por igualdad estricta contra los códigos que un scanner
+   * puede leer (`barcode`, `sku`, `partNumber`, `universalCode` y los
    * `product_codes.code` compatibles). Devuelve el primer match con sus
    * datos enriquecidos, o `null`.
    *
@@ -443,6 +472,7 @@ export class ProductsService {
           p.sku = :code
           OR p.partNumber = :code
           OR p.barcode = :code
+          OR p.universalCode = :code
           OR EXISTS (
             SELECT 1 FROM product_codes pc
             WHERE pc.productId = p.id AND pc.code = :code
@@ -469,6 +499,7 @@ export class ProductsService {
           p.sku LIKE :q
           OR p.partNumber LIKE :q
           OR p.barcode LIKE :q
+          OR p.universalCode LIKE :q
           OR p.name LIKE :q
           OR EXISTS (
             SELECT 1 FROM product_codes pc
@@ -518,6 +549,12 @@ export class ProductsService {
     if (dto.sku) fields.sku = dto.sku.trim();
     if (dto.partNumber !== undefined) fields.partNumber = dto.partNumber ?? null;
     if (dto.barcode !== undefined) fields.barcode = dto.barcode ?? null;
+    // Código universal: trim y se normaliza el vacío a null (importa para la
+    // unicidad — "" repetido chocaría, NULL no).
+    if (dto.universalCode !== undefined) {
+      const u = dto.universalCode?.trim();
+      fields.universalCode = u ? u : null;
+    }
     if (dto.name !== undefined) fields.name = dto.name;
     if (dto.description !== undefined) fields.description = dto.description ?? null;
     if (dto.observation !== undefined) fields.observation = dto.observation ?? null;

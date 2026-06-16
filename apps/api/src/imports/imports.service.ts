@@ -44,6 +44,8 @@ import { InventoryService } from '../inventory/inventory.service';
 // lo administrativo. La 'Observación' es una nota interna nueva.
 const COLUMNS = [
   'sku',
+  // Código universal opcional y único del producto. Va al lado del SKU.
+  'universalCode',
   'name',
   'categoryName',
   'brandName',
@@ -82,6 +84,7 @@ type Column = (typeof COLUMNS)[number];
 
 const HEADERS: Record<Column, string> = {
   sku: 'SKU',
+  universalCode: 'Codigo universal',
   name: 'Nombre',
   categoryName: 'Categoría',
   brandName: 'Marca',
@@ -94,7 +97,7 @@ const HEADERS: Record<Column, string> = {
   minStock: 'Stock mínimo',
   productKind: 'Tipo (ORIGINAL/ALTERNATIVE)',
   partNumber: 'Numero de parte',
-  barcode: 'Codigo universal',
+  barcode: 'Codigo de barras',
   compatibleCodes: 'Códigos compatibles',
   cost: 'Costo (bruto)',
   price: 'Precio (bruto)',
@@ -104,12 +107,12 @@ const HEADERS: Record<Column, string> = {
 };
 
 // Orden de columnas FIJAS en la plantilla descargable. Las columnas por bodega
-// (dinámicas) se insertan entre las de vehículo y `minStock`. Orden pedido por
-// el cliente (Fase 12): SKU → códigos compatibles → categoría/nombre/marca →
-// vehículo → bodegas → admin.
+// (dinámicas) se insertan entre las de vehículo y `minStock`. Orden: SKU →
+// código universal → categoría/nombre/marca → vehículo → bodegas → admin →
+// observación → códigos compatibles (al final). Igual que el export.
 const TEMPLATE_BEFORE_WAREHOUSES: Column[] = [
   'sku',
-  'compatibleCodes',
+  'universalCode',
   'categoryName',
   'name',
   'brandName',
@@ -123,13 +126,13 @@ const TEMPLATE_AFTER_WAREHOUSES: Column[] = [
   'cost',
   'price',
   'observation',
+  'compatibleCodes',
 ];
 
 // Alias de headers para no romper archivos viejos / exportados que traen los
 // nombres anteriores. El header canónico (HEADERS) es el que escribe la
 // plantilla nueva; estos también matchean al importar.
 const HEADER_ALIASES: Partial<Record<Column, string[]>> = {
-  barcode: ['Codigo de barras'],
   compatibleCodes: [
     'Cod Compatibles',
     'Codigos compatibles (separados por ;)',
@@ -521,6 +524,7 @@ export class ImportsService {
     };
     const exampleRow: Record<string, unknown> = {
       sku: 'FIL-AC-001',
+      universalCode: 'U-00123',
       name: 'Filtro de aire Toyota Corolla 2018',
       observation: 'Revisar empaque al recibir',
       categoryName: 'Filtros',
@@ -553,7 +557,7 @@ export class ImportsService {
     inst.getRow(1).font = { bold: true };
     const ROWS: Array<[string, boolean, string]> = [
       [HEADERS.sku, true, 'Codigo unico interno. Si ya existe en el sistema, se actualiza ese producto (upsert).'],
-      [HEADERS.compatibleCodes, false, 'Lista de codigos compatibles separados por punto y coma (;). Ej: "A123;B456;XYZ-789".'],
+      [HEADERS.universalCode, false, 'Codigo universal del producto (opcional). Unico: no puede repetirse entre productos. Sirve para buscar el producto. Maximo 80 caracteres.'],
       [HEADERS.categoryName, false, 'Nombre de la categoria. Si no existe, se crea automaticamente.'],
       [HEADERS.name, true, 'Nombre / descripcion comercial del producto.'],
       [HEADERS.brandName, false, 'MARCA DEL PRODUCTO (fabricante del repuesto). Ej: Mahle, Bosch. Si no existe, se crea automaticamente. NO confundir con la marca del vehiculo.'],
@@ -567,6 +571,7 @@ export class ImportsService {
       [HEADERS.cost, false, 'Costo unitario BRUTO en CLP (con IVA). Ej: 8000. Default 0. En productos existentes NO se pisa (costo autogestionado).'],
       [HEADERS.price, false, 'Precio venta BRUTO en CLP (con IVA). Ej: 15000. Default 0.'],
       [HEADERS.observation, false, 'Observacion / nota interna del producto (opcional).'],
+      [HEADERS.compatibleCodes, false, 'Lista de codigos compatibles separados por punto y coma (;). Ej: "A123;B456;XYZ-789".'],
     ];
     for (const [col, req, desc] of ROWS) {
       inst.addRow({ col, req: req ? 'Si' : 'No', desc });
@@ -674,6 +679,7 @@ export class ImportsService {
     let consecutiveEmptyRows = 0;
     const seenSkusInBatch = new Set<string>();
     const seenBarcodesInBatch = new Set<string>();
+    const seenUniversalCodesInBatch = new Set<string>();
 
     for (let r = headerRowNumber + 1; r <= lastRowNumber; r += 1) {
       const row = sheet.getRow(r);
@@ -748,6 +754,30 @@ export class ImportsService {
           continue;
         }
         seenBarcodesInBatch.add(barcode);
+      }
+
+      // Código universal: opcional pero único. Validamos longitud y que no se
+      // repita dentro del mismo Excel (el conflicto contra la base lo atrapa el
+      // índice UNIQUE al guardar y se reporta por fila).
+      const universalCode = cellText('universalCode');
+      if (universalCode !== '') {
+        if (universalCode.length > 80) {
+          errors.push({
+            rowNumber: r,
+            sku,
+            message: `Código universal supera 80 caracteres (tiene ${universalCode.length})`,
+          });
+          continue;
+        }
+        if (seenUniversalCodesInBatch.has(universalCode)) {
+          errors.push({
+            rowNumber: r,
+            sku,
+            message: `Código universal "${universalCode}" aparece más de una vez en el Excel`,
+          });
+          continue;
+        }
+        seenUniversalCodesInBatch.add(universalCode);
       }
 
       const costRaw = cellText('cost');
@@ -859,17 +889,24 @@ export class ImportsService {
         const yearSegs = hasYearsCombined ? split(yearsCell) : [];
         const froms = split(yearFromCell);
         const tos = split(yearToCell);
+        // BROADCAST: el cliente carga UNA marca y varios modelos (ej. marca
+        // "MX" + modelos "T60 2.0; V80 2.0; G10 2.0"). Si una columna trae un
+        // único valor, se aplica a TODOS los modelos. Los MODELOS no se
+        // broadcastean: cada posición es un vehículo distinto. Los años son
+        // opcionales: vacío = cualquier año.
+        const bcast = (arr: string[], i: number) =>
+          (arr.length === 1 ? (arr[0] ?? '') : (arr[i] ?? '')).trim();
         const count = Math.max(makes.length, models.length);
         for (let i = 0; i < count; i += 1) {
-          const mk = (makes[i] ?? '').trim();
+          const mk = bcast(makes, i);
           const md = (models[i] ?? '').trim();
-          const yearsSeg = (yearSegs[i] ?? '').trim();
-          const yf = (froms[i] ?? '').trim();
-          const yt = (tos[i] ?? '').trim();
-          if (mk === '' && md === '' && yearsSeg === '' && yf === '' && yt === '') {
-            continue;
-          }
-          if (mk === '' || md === '') {
+          const yearsSeg = hasYearsCombined ? bcast(yearSegs, i) : '';
+          const yf = bcast(froms, i);
+          const yt = bcast(tos, i);
+          // Posición sin modelo (ej. ";" al final o un hueco): no es un
+          // vehículo, se ignora aunque la marca venga por broadcast.
+          if (md === '') continue;
+          if (mk === '') {
             modelsError = `Vehículo #${i + 1}: "Marca de vehiculo" y "Modelo de vehiculo" son obligatorios (revisá que las columnas estén alineadas con ";").`;
             break;
           }
@@ -1015,6 +1052,7 @@ export class ImportsService {
         name,
         partNumber: cellText('partNumber') || null,
         barcode: barcode || null,
+        universalCode: universalCode || null,
         description: cellText('description') || null,
         observation: cellText('observation') || null,
         categoryName: cellText('categoryName') || null,
@@ -1072,6 +1110,11 @@ export class ImportsService {
         name: row.name,
         partNumber: row.partNumber,
         barcode: row.barcode,
+        // Código universal: único. Si la celda viene vacía se PRESERVA el valor
+        // actual (no se pisa con null) — el export siempre lo incluye, así que
+        // un round-trip lo conserva. El conflicto contra otro producto lo atrapa
+        // el índice UNIQUE y se reporta como error de esa fila.
+        universalCode: row.universalCode ?? existing?.universalCode ?? null,
         // 'Descripción' ya NO va en la plantilla nueva (el cliente la quitó del
         // import). Si un archivo viejo todavía la trae se respeta; si la celda
         // viene vacía/ausente, se PRESERVA la descripción actual (no se pisa).

@@ -55,6 +55,13 @@ export class CreateProductDto {
   @MaxLength(80)
   barcode?: string | null;
 
+  // Código universal opcional y único. El service valida el conflicto antes de
+  // guardar para devolver un 409 con mensaje amigable.
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  universalCode?: string | null;
+
   @IsString()
   @MinLength(1)
   @MaxLength(200)

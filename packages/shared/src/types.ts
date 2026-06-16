@@ -90,6 +90,8 @@ export interface ProductDto {
   sku: string | null;
   partNumber: string | null;
   barcode: string | null;
+  // Código universal opcional y único del producto.
+  universalCode: string | null;
   name: string;
   description: string | null;
   // Nota interna del operador (distinta de `description`, que es comercial).
@@ -1534,6 +1536,8 @@ export interface ProductImportRowDto {
   name: string;
   partNumber: string | null;
   barcode: string | null;
+  // Código universal opcional y único. Importable/exportable vía Excel.
+  universalCode: string | null;
   description: string | null;
   // Nota interna del producto. Importable/exportable vía Excel.
   observation: string | null;

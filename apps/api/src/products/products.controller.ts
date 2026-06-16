@@ -246,7 +246,9 @@ export class ProductsController {
     // ponderado (autogestionado).
     sheet.columns = [
       { header: 'SKU', key: 'sku', width: 18 },
-      { header: 'Códigos compatibles', key: 'compatibleCodes', width: 32 },
+      // Código universal opcional y único. Va al lado del SKU. El importer lo
+      // reconoce con este mismo header → el archivo round-trip.
+      { header: 'Codigo universal', key: 'universalCode', width: 18 },
       { header: 'Categoría', key: 'category', width: 22 },
       { header: 'Nombre', key: 'name', width: 36 },
       // Marca DEL REPUESTO (fabricante de la pieza: Mahle, Bosch).
@@ -290,7 +292,9 @@ export class ProductsController {
         style: { numFmt: MONEY_FMT },
       },
       { header: 'Observación', key: 'observation', width: 32 },
-      { header: 'Activo', key: 'isActive', width: 8 },
+      // Códigos compatibles al final, junto a Observación. El importer los
+      // reconoce con este header → round-trip.
+      { header: 'Códigos compatibles', key: 'compatibleCodes', width: 32 },
     ];
 
     for (const p of products) {
@@ -316,6 +320,7 @@ export class ProductsController {
       const vm = modelsByProduct.get(p.id);
       sheet.addRow({
         sku: p.sku ?? '',
+        universalCode: p.universalCode ?? '',
         name: p.name,
         category: categoryName,
         brand: p.brand?.name ?? '',
@@ -330,7 +335,6 @@ export class ProductsController {
         minStock: p.minStock ?? 0,
         ...warehouseCells,
         observation: p.observation ?? '',
-        isActive: p.isActive ? 'Sí' : 'No',
       });
     }
 
