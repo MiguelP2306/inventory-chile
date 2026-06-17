@@ -6,6 +6,7 @@ import {
   Ban,
   ChevronDown,
   ExternalLink,
+  Eye,
   FileText,
   Printer,
   RotateCcw,
@@ -21,6 +22,7 @@ import { GenerateDispatchDialog } from '@/components/forms/generate-dispatch-dia
 import { MultiWarrantyDialog } from '@/components/forms/multi-warranty-dialog';
 import { OpenWarrantyDialog } from '@/components/forms/open-warranty-dialog';
 import { SaleStatusBadge } from '@/components/sale-status-badge';
+import { SoftModal } from '@/components/ui/soft-modal';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -55,6 +57,7 @@ export default function VentaDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
   const [dispatchOpen, setDispatchOpen] = useState(false);
   const [multiWarrantyOpen, setMultiWarrantyOpen] = useState(false);
@@ -152,6 +155,14 @@ export default function VentaDetailPage() {
               </button>
             </>
           )}
+          <button
+            type="button"
+            className={BTN_OUTLINE}
+            onClick={() => setPreviewOpen(true)}
+          >
+            <Eye className="h-4 w-4" />
+            Vista previa
+          </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button type="button" className={BTN_PRIMARY}>
@@ -327,6 +338,27 @@ export default function VentaDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Vista previa: visor inline de la nota de venta (reusa el mismo PDF
+          que "Imprimir", sin tener que abrir el dropdown). Carta A4. */}
+      <SoftModal
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        title={`Vista previa · ${s.number}`}
+        subtitle="Así queda la nota de venta. Podés imprimirla o descargarla desde el visor."
+        icon={<Eye className="h-5 w-5" />}
+        size="4xl"
+      >
+        <div className="p-3">
+          {/* `#navpanes=0` oculta el panel de miniaturas/páginas del visor PDF
+              nativo del navegador, dejando el resto del visor intacto. */}
+          <iframe
+            title={`Nota de venta ${s.number}`}
+            src={`${getSalePdfUrl(s.id, 'letter')}#navpanes=0`}
+            className="h-[70vh] w-full rounded-xl border border-slate-200 bg-white dark:border-slate-800"
+          />
+        </div>
+      </SoftModal>
 
       <CancelSaleDialog sale={s} open={cancelOpen} onOpenChange={setCancelOpen} />
       <CustomerReturnDialog sale={s} open={returnOpen} onOpenChange={setReturnOpen} />

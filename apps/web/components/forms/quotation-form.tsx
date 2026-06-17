@@ -3,6 +3,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Check,
   ChevronDown,
   Mail,
   MessageCircle,
@@ -10,8 +11,13 @@ import {
   Search,
   Trash2,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-import { Controller, useForm, type FieldErrors } from 'react-hook-form';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Controller,
+  useForm,
+  useWatch,
+  type FieldErrors,
+} from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { ProductPicker } from '@/components/product-picker';
@@ -60,6 +66,7 @@ import {
   type CreateQuotationItemInput,
 } from '@/lib/quotations-api';
 import { getAvailableStock, type AvailableStockRow } from '@/lib/sales-api';
+import { WhatsappSendDialog } from '@/components/whatsapp-send-dialog';
 import { isValidPhone, normalizePhone } from '@/lib/validators/phone';
 import { isValidRut, normalizeRut } from '@/lib/validators/rut';
 import { cn } from '@/lib/utils';
@@ -213,6 +220,22 @@ export function QuotationForm({
   const [savedQuotationId, setSavedQuotationId] = useState<string | null>(
     initialData?.id ?? null,
   );
+  // El id también vive en un ref para que el guardado manual y el autoguardado
+  // compartan el MISMO id sin closures viejos: así nunca se crean dos
+  // cotizaciones aunque ambos corran casi a la vez.
+  const savedQuotationIdRef = useRef<string | null>(initialData?.id ?? null);
+  const setSavedId = (qid: string) => {
+    savedQuotationIdRef.current = qid;
+    setSavedQuotationId(qid);
+  };
+
+  // Envío por WhatsApp: tras guardar, abrimos el MISMO diálogo del detalle
+  // (escribir número o "elegir contacto") en vez de frenar pidiendo teléfono.
+  // Guardamos la cotización ya persistida + el teléfono conocido para mostrarlo.
+  const [waCtx, setWaCtx] = useState<{
+    quotation: QuotationDto;
+    phone: string | null;
+  } | null>(null);
 
   const settings = useQuery({
     queryKey: ['settings', 'company'],
@@ -407,6 +430,80 @@ export function QuotationForm({
     return payload;
   };
 
+  // Fase 2 — payload TOLERANTE para el autoguardado (borrador). No muestra
+  // toasts ni cambia de tab: si falta el cliente o no hay ítems completos,
+  // devuelve null y simplemente no se autoguarda todavía. Filtra los ítems a
+  // medio cargar (sin producto/nombre o sin precio/cantidad) en lugar de
+  // rechazar todo — el backend exige ≥1 ítem válido para crear.
+  const buildDraftPayload = (): CreateQuotationInput | null => {
+    const values = form.getValues();
+    const fromCatalog = values.clientType === 'catalog';
+    const hasCustomer = fromCatalog
+      ? !!values.customerId
+      : !!(values.customerNameSnapshot ?? '').trim();
+    if (!hasCustomer) return null;
+
+    const clean: CreateQuotationItemInput[] = itemsForCalc
+      .map((it) => {
+        const qty = Number(it.qty) || 0;
+        const unit = Number(it.unitPrice) || 0;
+        const gross = qty * unit;
+        const dv = Number(it.discountValue) || 0;
+        let discount = 0;
+        let discountPercent: string | null = null;
+        if (it.discountKind === '%') {
+          const pct = Math.max(0, Math.min(100, dv));
+          discount = (gross * pct) / 100;
+          discountPercent = pct.toFixed(2);
+        } else {
+          discount = Math.max(0, dv);
+        }
+        return {
+          productId: it.productId,
+          tempProductName: it.productId ? null : it.name,
+          tempProductSku: it.productId ? null : it.sku ?? null,
+          tempProductPartNumber: it.productId
+            ? null
+            : it.tempProductPartNumber ?? null,
+          qty,
+          unitPrice: unit.toFixed(2),
+          discount: discount.toFixed(2),
+          discountPercent,
+        };
+      })
+      .filter(
+        (i) =>
+          i.qty >= 1 &&
+          Number(i.unitPrice) > 0 &&
+          (!!i.productId || !!i.tempProductName),
+      );
+    if (clean.length === 0) return null;
+
+    return {
+      customerId: fromCatalog ? values.customerId ?? null : null,
+      customerNameSnapshot: fromCatalog
+        ? null
+        : (values.customerNameSnapshot ?? '').trim() || null,
+      customerPhoneSnapshot: fromCatalog
+        ? null
+        : (values.customerPhoneSnapshot ?? '').trim()
+          ? normalizePhone((values.customerPhoneSnapshot ?? '').trim())
+          : null,
+      customerEmailSnapshot: fromCatalog
+        ? null
+        : (values.customerEmailSnapshot ?? '')?.trim() || null,
+      customerTaxIdSnapshot: fromCatalog
+        ? null
+        : (values.customerTaxIdSnapshot ?? '').trim()
+          ? normalizeRut((values.customerTaxIdSnapshot ?? '').trim())
+          : null,
+      date: values.date,
+      validUntil: values.validUntil,
+      notes: (values.notes ?? '').trim() || null,
+      items: clean,
+    };
+  };
+
   const saveMut = useMutation({
     mutationFn: async (payload: CreateQuotationInput) => {
       if (mode === 'edit' && initialData) {
@@ -425,12 +522,141 @@ export function QuotationForm({
     mutationFn: (id: string) => sendEmail(id),
   });
 
-  const sendWhatsappMut = useMutation({
-    mutationFn: (id: string) => sendWhatsapp(id),
+  // Envío real por WhatsApp desde el diálogo de destino (mismo patrón que el
+  // detalle): `to` envía a un número escrito (que ya quedó en la cotización),
+  // `choose` abre WhatsApp sin número para elegir el contacto.
+  const waSendMut = useMutation({
+    mutationFn: (opts: { to?: string; choose?: boolean }) =>
+      sendWhatsapp(waCtx!.quotation.id, opts.to),
+    onSuccess: (result, opts) => {
+      const url = opts.choose
+        ? result.whatsappChooseUrl
+        : (result.whatsappUrl ?? result.whatsappChooseUrl);
+      if (url) window.open(url, '_blank', 'noopener,noreferrer');
+      toast.success('Cotización guardada. Se abrió WhatsApp en otra pestaña.');
+      const saved = waCtx!.quotation;
+      setWaCtx(null);
+      qc.invalidateQueries({ queryKey: ['quotations'] });
+      onSuccess?.(saved);
+    },
+    onError: (err) =>
+      toast.error(apiErrorMessage(err, 'No se pudo enviar por WhatsApp')),
   });
 
-  const submitting =
-    saveMut.isPending || sendEmailMut.isPending || sendWhatsappMut.isPending;
+  const submitting = saveMut.isPending || sendEmailMut.isPending;
+
+  // ============================================================
+  // AUTOGUARDADO (Fase 2)
+  // Crea la cotización como BORRADOR apenas hay cliente + ≥1 ítem completo, y
+  // la actualiza (con debounce) en cada cambio de ítems/cliente/notas. Es
+  // silencioso: NO abre WhatsApp/email, NO cierra el modal y NO muestra toasts
+  // de error (el guardado manual sigue disponible para eso). Reusa
+  // `savedQuotationId`, así el guardado/envío manual hace UPDATE (sin duplicar).
+  // ============================================================
+  const autoSaveEnabled =
+    mode === 'create' || (mode === 'edit' && initialData?.status === 'DRAFT');
+
+  const [autoSaveState, setAutoSaveState] = useState<
+    'idle' | 'saving' | 'saved'
+  >('idle');
+  const autoSavingRef = useRef(false);
+  const autoSaveDirtyRef = useRef(false);
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoSaveFirstRun = useRef(true);
+
+  // Campos de cliente/meta que afectan el payload (reactivos). Los ítems entran
+  // por `items` en la firma de abajo.
+  const watchedAuto = useWatch({
+    control: form.control,
+    name: [
+      'clientType',
+      'customerId',
+      'customerNameSnapshot',
+      'customerPhoneSnapshot',
+      'customerEmailSnapshot',
+      'customerTaxIdSnapshot',
+      'notes',
+      'date',
+      'validUntil',
+    ],
+  });
+
+  // Firma estable del estado guardable: cambia solo cuando cambia algo editado
+  // por el usuario (NO incluye datos de stock para no autoguardar al cargar).
+  const autoSaveSig = useMemo(
+    () =>
+      JSON.stringify({
+        c: watchedAuto,
+        i: items.map((it) => ({
+          p: it.productId,
+          n: it.name,
+          s: it.sku,
+          pn: it.tempProductPartNumber,
+          q: it.qty,
+          u: it.unitPrice,
+          dk: it.discountKind,
+          dv: it.discountValue,
+        })),
+      }),
+    [watchedAuto, items],
+  );
+
+  // Ref reasignada en cada render → captura siempre los valores frescos
+  // (savedQuotationId, form, items) sin closures viejos en el setTimeout.
+  const doAutoSaveRef = useRef<() => Promise<void>>(async () => {});
+  doAutoSaveRef.current = async () => {
+    if (!autoSaveEnabled) return;
+    if (waCtx) return; // diálogo de envío abierto
+    if (submitting) return; // guardado/envío manual en curso
+    if (autoSavingRef.current) {
+      autoSaveDirtyRef.current = true; // hubo cambios durante el guardado
+      return;
+    }
+    const payload = buildDraftPayload();
+    if (!payload) return;
+    autoSavingRef.current = true;
+    setAutoSaveState('saving');
+    try {
+      let saved: QuotationDto;
+      const existingId = savedQuotationIdRef.current;
+      if (existingId) {
+        saved = await updateQuotation(existingId, payload);
+      } else {
+        saved = await createQuotation(payload);
+        setSavedId(saved.id);
+      }
+      setAutoSaveState('saved');
+      qc.invalidateQueries({ queryKey: ['quotations'] });
+    } catch {
+      // Silencioso: el autoguardado no debe molestar. El guardado manual
+      // reportará el error si el operador intenta guardar/enviar.
+      setAutoSaveState('idle');
+    } finally {
+      autoSavingRef.current = false;
+      if (autoSaveDirtyRef.current) {
+        autoSaveDirtyRef.current = false;
+        void doAutoSaveRef.current();
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!autoSaveEnabled) return;
+    // No autoguardar en el primer render (montaje / carga de un borrador
+    // existente): solo tras un cambio real del operador.
+    if (autoSaveFirstRun.current) {
+      autoSaveFirstRun.current = false;
+      return;
+    }
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => {
+      void doAutoSaveRef.current();
+    }, 800);
+    return () => {
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSaveSig, autoSaveEnabled]);
 
   function onErrors(errors: FieldErrors<FormValues>) {
     if (
@@ -531,21 +757,30 @@ export function QuotationForm({
       onErrors(form.formState.errors);
       return;
     }
-    if (after && !preValidateChannel(after)) return;
+    // El teléfono ya NO es obligatorio para WhatsApp: el diálogo de envío
+    // permite escribir un número o "elegir contacto". Solo pre-validamos email.
+    if (after === 'email' && !preValidateChannel('email')) return;
 
     const payload = buildPayload();
     if (!payload) return;
 
+    // Si el autoguardado está creando el borrador en este instante, esperamos
+    // a que termine para reutilizar SU id (y no crear una segunda cotización).
+    for (let i = 0; i < 60 && autoSavingRef.current; i += 1) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
     let saved: QuotationDto;
     try {
       // Reintento sin duplicar: si en un intento anterior la cotización ya
-      // se guardó pero el envío falló, hacemos UPDATE en vez de CREATE para
-      // no generar un número correlativo nuevo y huérfano.
-      if (savedQuotationId) {
-        saved = await updateQuotation(savedQuotationId, payload);
+      // se guardó (manual o autoguardado), hacemos UPDATE en vez de CREATE
+      // para no generar un número correlativo nuevo y huérfano.
+      const existingId = savedQuotationIdRef.current;
+      if (existingId) {
+        saved = await updateQuotation(existingId, payload);
       } else {
         saved = await saveMut.mutateAsync(payload);
-        setSavedQuotationId(saved.id);
+        setSavedId(saved.id);
       }
     } catch (err) {
       toast.error(apiErrorMessage(err, 'No se pudo guardar la cotización'));
@@ -573,24 +808,20 @@ export function QuotationForm({
         return;
       }
     } else if (after === 'whatsapp') {
-      try {
-        const result = await sendWhatsappMut.mutateAsync(saved.id);
-        // Híbrido: si el cliente tiene número, abre ese chat; si no, abre el
-        // selector de contacto de WhatsApp con el mensaje listo.
-        const url = result.whatsappUrl ?? result.whatsappChooseUrl;
-        if (url) {
-          window.open(url, '_blank', 'noopener,noreferrer');
-        }
-        toast.success('Cotización guardada. Se abrió WhatsApp en otra pestaña.');
-      } catch (err) {
-        toast.error(
-          apiErrorMessage(
-            err,
-            'La cotización se guardó pero falló el envío por WhatsApp. Verificá los datos y reintentá.',
-          ),
-        );
-        return;
-      }
+      // La cotización ya está guardada. En vez de abrir WhatsApp directo,
+      // mostramos el diálogo de destino (mismo del detalle): escribir un número
+      // (queda guardado en la cotización) o elegir el contacto en WhatsApp. El
+      // envío real y la navegación ocurren desde ese diálogo (waSendMut).
+      const v = form.getValues();
+      const knownPhone =
+        v.clientType === 'catalog'
+          ? catalogCustomer?.phone?.trim() || null
+          : (v.customerPhoneSnapshot ?? '').trim() &&
+              isValidPhone((v.customerPhoneSnapshot ?? '').trim())
+            ? normalizePhone((v.customerPhoneSnapshot ?? '').trim())
+            : null;
+      setWaCtx({ quotation: saved, phone: knownPhone });
+      return;
     } else {
       toast.success(
         mode === 'edit' || savedQuotationId !== saved.id
@@ -609,6 +840,18 @@ export function QuotationForm({
 
   const actionButtons = (
     <div className="flex flex-wrap items-center gap-2">
+      {autoSaveEnabled && autoSaveState !== 'idle' && (
+        <span className="mr-1 inline-flex items-center gap-1 text-[11px] font-bold text-slate-400 dark:text-slate-500">
+          {autoSaveState === 'saving' ? (
+            'Guardando…'
+          ) : (
+            <>
+              <Check className="h-3 w-3 text-emerald-500" />
+              Borrador guardado
+            </>
+          )}
+        </span>
+      )}
       <button
         type="button"
         onClick={() => onCancel?.()}
@@ -832,6 +1075,12 @@ export function QuotationForm({
                       {...form.register('customerPhoneSnapshot')}
                       placeholder="+56 9 1234 5678"
                     />
+                    {!form.formState.errors.customerPhoneSnapshot && (
+                      <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500">
+                        Formato: +569XXXXXXXX o +56 9 XXXX XXXX. Se usa para
+                        enviar la cotización por WhatsApp.
+                      </p>
+                    )}
                   </Field>
                   <Field
                     label="Email (opcional)"
@@ -1136,6 +1385,19 @@ export function QuotationForm({
           {actionButtons}
         </div>
       )}
+
+      {/* Destino de WhatsApp: se abre tras guardar al elegir "Enviar por
+          WhatsApp". Permite escribir un número (se guarda en la cotización) o
+          elegir el contacto en WhatsApp. */}
+      <WhatsappSendDialog
+        open={!!waCtx}
+        onOpenChange={(o) => {
+          if (!o) setWaCtx(null);
+        }}
+        registeredPhone={waCtx?.phone ?? null}
+        busy={waSendMut.isPending}
+        onSend={(opts) => waSendMut.mutate(opts)}
+      />
     </form>
   );
 

@@ -165,7 +165,7 @@ export function SaleForm({
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethodDto>('CASH');
 
-  // Bodega de la venta. Default = "Principal" si existe, sino la primera
+  // Bodega de la venta. Default = "Tienda" si existe, sino la primera
   // activa. El selector solo se muestra cuando hay 2+ bodegas activas.
   const [warehouseId, setWarehouseId] = useState<string>('');
   const warehouses = useQuery({
@@ -187,8 +187,10 @@ export function SaleForm({
       setWarehouseId(bagWhId);
       return;
     }
-    const principal = activeWarehouses.find((w) => w.name === 'Bodega');
-    setWarehouseId((principal ?? activeWarehouses[0]!).id);
+    // Default pedido por el cliente: "Tienda". Si no existe, cae a la primera
+    // bodega activa.
+    const preferred = activeWarehouses.find((w) => w.name === 'Tienda');
+    setWarehouseId((preferred ?? activeWarehouses[0]!).id);
   }, [warehouseId, activeWarehouses, initialBagItems]);
 
   const [items, setItems] = useState<ItemRow[]>(() => {
