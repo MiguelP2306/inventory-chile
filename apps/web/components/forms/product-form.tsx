@@ -693,7 +693,7 @@ export function ProductForm({ product }: Props) {
                     )}
                   />
                 </Field>
-                <Field label="Marca">
+                <Field label="Marca de repuesto">
                   <Controller
                     control={form.control}
                     name="brandId"

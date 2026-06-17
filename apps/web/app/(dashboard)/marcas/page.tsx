@@ -130,7 +130,7 @@ export default function MarcasPage() {
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">
-            Marcas
+            Marcas de repuestos
           </h1>
           <p className="mt-1 text-xs font-bold text-slate-400 dark:text-slate-500">
             <strong className="font-extrabold tabular-nums text-slate-700 dark:text-slate-200">

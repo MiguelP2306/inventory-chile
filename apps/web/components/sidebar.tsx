@@ -106,8 +106,8 @@ const SECTIONS: NavSection[] = [
     items: [
       { href: '/productos', label: 'Productos', icon: Package, matchPrefix: ['/productos'] },
       { href: '/categorias', label: 'Categorías', icon: Tag, matchPrefix: ['/categorias'] },
-      { href: '/marcas', label: 'Marcas', icon: Boxes, matchPrefix: ['/marcas'] },
-      { href: '/vehiculos', label: 'Vehículos', icon: Car, matchPrefix: ['/vehiculos'] },
+      { href: '/marcas', label: 'Marcas de repuestos', icon: Boxes, matchPrefix: ['/marcas'] },
+      { href: '/vehiculos', label: 'Marcas de vehículos', icon: Car, matchPrefix: ['/vehiculos'] },
     ],
   },
   {
