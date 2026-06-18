@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsInt,
@@ -49,6 +50,11 @@ export class CreateSaleDto {
 
   @IsEnum(PaymentMethod)
   paymentMethod!: PaymentMethod;
+
+  // Venta NO afecta a IVA (sin documento). Default false → afecta 19%.
+  @IsOptional()
+  @IsBoolean()
+  vatExempt?: boolean;
 
   @IsOptional()
   @IsDateString()

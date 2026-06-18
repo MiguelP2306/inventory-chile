@@ -37,6 +37,7 @@ import {
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { ProductImageGallery } from '@/components/product-image-gallery';
+import { ProductPurchaseHistory } from '@/components/product-purchase-history';
 import { Button } from '@/components/ui/button';
 import {
   SoftModal,
@@ -200,7 +201,7 @@ const YEAR_OPTIONS = Array.from(
   (_, i) => MAX_YEAR - i,
 );
 
-type TabKey = 'datos' | 'precios' | 'compat' | 'codigos' | 'imagenes';
+type TabKey = 'datos' | 'precios' | 'compat' | 'codigos' | 'imagenes' | 'compras';
 
 export function ProductForm({ product }: Props) {
   const router = useRouter();
@@ -550,6 +551,11 @@ export function ProductForm({ product }: Props) {
                 label="Imágenes"
                 count={imageCount}
               />
+              {/* Compras: solo en edición y para roles que ven costos (es dato
+                  de costo de compra). */}
+              {product && canSeeCost && (
+                <TabPill value="compras" index={6} label="Compras" />
+              )}
             </TabsList>
 
             {/* DATOS */}
@@ -1039,6 +1045,20 @@ export function ProductForm({ product }: Props) {
                 />
               )}
             </TabsContent>
+
+            {/* COMPRAS — historial de compras del producto (solo edición + costos) */}
+            {product && canSeeCost && (
+              <TabsContent
+                value="compras"
+                className="mt-0 rounded-b-xl rounded-tr-xl border border-t-0 bg-card p-6 shadow-sm"
+              >
+                <SectionHeader
+                  title="Historial de compras"
+                  description="Última compra de este producto y compras anteriores. Tocá una fila para revisar la compra completa. El costo unitario alimenta el costo ponderado."
+                />
+                <ProductPurchaseHistory productId={product.id} />
+              </TabsContent>
+            )}
           </Tabs>
         </div>
 

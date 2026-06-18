@@ -1,8 +1,15 @@
-import { SaleStatus } from '@inventory/shared';
+import {
+  RefundMode,
+  ReturnStatus,
+  ReturnType,
+  SaleStatus,
+} from '@inventory/shared';
 import type {
   NoMovementReportDto,
   ReportCashFlowResponseDto,
   ReportIvaResponseDto,
+  ReportIvaPurchaseRowDto,
+  ReportIvaSaleRowDto,
   ReportSalesResponseDto,
 } from '@inventory/shared';
 import { Injectable } from '@nestjs/common';
@@ -12,6 +19,7 @@ import { dayRange } from '../common/date-range';
 import {
   CashTransaction,
   PurchaseEntry,
+  Return,
   Sale,
 } from '../database/entities';
 
@@ -36,6 +44,8 @@ export class ReportsService {
     private readonly purchases: Repository<PurchaseEntry>,
     @InjectRepository(CashTransaction)
     private readonly cashTxs: Repository<CashTransaction>,
+    @InjectRepository(Return)
+    private readonly returns: Repository<Return>,
     @InjectDataSource() private readonly ds: DataSource,
   ) {}
 
@@ -110,27 +120,43 @@ export class ReportsService {
       order: { date: 'DESC' },
     });
 
+    // Devoluciones COMPLETADAS del período: las de cliente son notas de
+    // crédito que bajan el IVA débito; las de proveedor bajan el IVA crédito.
+    const returns = await this.returns.find({
+      where: { date: Between(from, to), status: ReturnStatus.COMPLETED },
+      relations: {
+        sale: { customer: true },
+        purchaseEntry: { supplier: true },
+      },
+      order: { date: 'DESC' },
+    });
+
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+
     let debit = 0;
-    const salesRows = sales
-      .filter((s) => s.status !== SaleStatus.CANCELLED)
-      .map((s) => {
-        debit += Number(s.taxAmount);
-        return {
-          id: s.id,
-          number: s.number,
-          date: s.date.toISOString(),
-          customerName: s.customer?.name ?? '—',
-          customerTaxId: s.customer?.taxId ?? null,
-          subtotal: s.subtotal,
-          taxAmount: s.taxAmount,
-          total: s.total,
-        };
+    const salesRows: ReportIvaSaleRowDto[] = [];
+    for (const s of sales) {
+      // Excluimos canceladas y NO afectas a IVA (sin documento): no entran al
+      // libro de IVA ni suman al débito.
+      if (s.status === SaleStatus.CANCELLED || s.vatExempt) continue;
+      debit += Number(s.taxAmount);
+      salesRows.push({
+        id: s.id,
+        number: s.number,
+        date: s.date.toISOString(),
+        customerName: s.customer?.name ?? '—',
+        customerTaxId: s.customer?.taxId ?? null,
+        subtotal: s.subtotal,
+        taxAmount: s.taxAmount,
+        total: s.total,
       });
+    }
 
     let credit = 0;
-    const purchaseRows = purchases.map((p) => {
+    const purchaseRows: ReportIvaPurchaseRowDto[] = [];
+    for (const p of purchases) {
       credit += Number(p.taxAmount);
-      return {
+      purchaseRows.push({
         id: p.id,
         date: p.date.toISOString(),
         supplierName: p.supplier?.name ?? '—',
@@ -138,8 +164,60 @@ export class ReportsService {
         subtotal: p.subtotal,
         taxAmount: p.taxAmount,
         total: p.total,
-      };
-    });
+      });
+    }
+
+    // Notas de crédito (devoluciones). La proporción de IVA se toma del
+    // documento ORIGEN (taxAmount/total): así una venta/compra NO afecta
+    // (taxAmount 0) resta 0. Los canjes (EXCHANGE) NO se tratan como nota de
+    // crédito pura (la mercancía se reemplaza), así que se omiten del libro.
+    for (const r of returns) {
+      const refund = Number(r.refundAmount);
+      if (refund === 0) continue;
+      if (
+        r.type === ReturnType.CUSTOMER &&
+        r.sale &&
+        r.refundMode !== RefundMode.EXCHANGE
+      ) {
+        const total = Number(r.sale.total);
+        const ratio = total > 0 ? Number(r.sale.taxAmount) / total : 0;
+        const ivaR = round2(refund * ratio);
+        if (ivaR === 0) continue; // venta no afecta → no toca el libro de IVA
+        debit -= ivaR;
+        salesRows.push({
+          id: r.id,
+          number: r.number,
+          date: r.date.toISOString(),
+          customerName: r.sale.customer?.name ?? '—',
+          customerTaxId: r.sale.customer?.taxId ?? null,
+          subtotal: (-(refund - ivaR)).toFixed(2),
+          taxAmount: (-ivaR).toFixed(2),
+          total: (-refund).toFixed(2),
+          isReturn: true,
+        });
+      } else if (r.type === ReturnType.SUPPLIER && r.purchaseEntry) {
+        const total = Number(r.purchaseEntry.total);
+        const ratio = total > 0 ? Number(r.purchaseEntry.taxAmount) / total : 0;
+        const ivaR = round2(refund * ratio);
+        if (ivaR === 0) continue;
+        credit -= ivaR;
+        purchaseRows.push({
+          id: r.id,
+          number: r.number,
+          date: r.date.toISOString(),
+          supplierName: r.purchaseEntry.supplier?.name ?? '—',
+          supplierTaxId: r.purchaseEntry.supplier?.taxId ?? null,
+          subtotal: (-(refund - ivaR)).toFixed(2),
+          taxAmount: (-ivaR).toFixed(2),
+          total: (-refund).toFixed(2),
+          isReturn: true,
+        });
+      }
+    }
+
+    // Reordenar por fecha DESC (las devoluciones se agregaron al final).
+    salesRows.sort((a, b) => b.date.localeCompare(a.date));
+    purchaseRows.sort((a, b) => b.date.localeCompare(a.date));
 
     return {
       dateFrom: query.dateFrom ?? null,

@@ -362,6 +362,9 @@ export class DispatchService {
               id: it.id,
               productId: it.productId,
               qty: it.qty,
+              unitPrice: it.unitPrice,
+              discount: it.discount,
+              subtotal: it.subtotal,
               product: it.product
                 ? {
                     id: it.product.id,
@@ -370,6 +373,10 @@ export class DispatchService {
                   }
                 : undefined,
             })),
+            // Totales de la venta para la guía valorizada.
+            subtotal: sale.subtotal,
+            taxAmount: sale.taxAmount,
+            total: sale.total,
           }
         : undefined,
       dispatchedAt: d.dispatchedAt.toISOString(),

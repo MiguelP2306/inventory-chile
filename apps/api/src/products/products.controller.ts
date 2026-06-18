@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   NotFoundException,
   Param,
@@ -348,6 +349,8 @@ export class ProductsController {
     @Query() query: ListProductsQueryDto,
     @Res() res: Response,
   ) {
+    // Catálogo "sin precio público": ?withPrice=0. Default = con precio.
+    const showPrice = query.withPrice !== '0';
     const canSeeCost = viewerHas(viewer, Permission.PRODUCT_VIEW_COST);
     const [products, settings] = await Promise.all([
       this.svc.listForCatalog(query),
@@ -421,6 +424,7 @@ export class ProductsController {
       },
       generatedAt: new Date().toISOString(),
       filterSummary: filterParts.join(' · '),
+      showPrice,
       products: lines,
     });
 
@@ -466,6 +470,23 @@ export class ProductsController {
   @Get(':id/stock')
   stock(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.svc.stockBreakdown(id);
+  }
+
+  /**
+   * Historial de compras del producto (última compra + anteriores). Es dato de
+   * COSTO: solo accesible para roles con `PRODUCT_VIEW_COST`.
+   */
+  @Get(':id/purchases')
+  purchases(
+    @CurrentUser() viewer: JwtPayload,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    if (!viewerHas(viewer, Permission.PRODUCT_VIEW_COST)) {
+      throw new ForbiddenException(
+        'No tenés permiso para ver el costo de las compras.',
+      );
+    }
+    return this.svc.purchaseHistory(id);
   }
 
   @Get(':id')

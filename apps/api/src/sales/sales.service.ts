@@ -211,8 +211,12 @@ export class SalesService {
     }
 
     const id = await this.ds.transaction(async (manager) => {
-      // Calculo de totales y comisión.
-      const totals = computeSaleTotals(dto.items, taxRate);
+      // Calculo de totales y comisión. Si la venta es NO afecta a IVA
+      // (sin documento), usamos tasa 0 → todo el total queda como neto y el
+      // IVA descompuesto es 0.
+      const vatExempt = dto.vatExempt ?? false;
+      const effectiveTaxRate = vatExempt ? 0 : taxRate;
+      const totals = computeSaleTotals(dto.items, effectiveTaxRate);
 
       const commissionAmount = chargesCommission
         ? roundHalfUp(parseFloat(totals.total) * commissionRate)
@@ -228,6 +232,7 @@ export class SalesService {
         date,
         subtotal: totals.subtotal,
         taxAmount: totals.taxAmount,
+        vatExempt,
         commissionAmount: commissionAmount.toFixed(2),
         total: totals.total,
         paymentMethod: dto.paymentMethod,
@@ -715,6 +720,7 @@ export class SalesService {
       taxAmount: s.taxAmount,
       commissionAmount: s.commissionAmount,
       total: s.total,
+      vatExempt: s.vatExempt,
       paymentMethod: s.paymentMethod,
       status: s.status,
       notes: s.notes,

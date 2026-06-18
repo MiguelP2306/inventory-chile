@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { getDispatchNote, getDispatchPdfUrl } from '@/lib/dispatch-api';
+import { formatCurrency } from '@/lib/format';
 
 const CARD =
   'rounded-2xl border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-850 dark:bg-[#11151C]';
@@ -185,9 +186,11 @@ export default function GuiaDetailPage() {
           <table className="w-full min-w-[500px] border-collapse text-left text-[12px]">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/20 font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-850 dark:text-slate-500">
-                <th className="w-[20%] py-3 pl-6">SKU</th>
+                <th className="w-[18%] py-3 pl-6">SKU</th>
                 <th className="py-3">Producto</th>
-                <th className="w-[15%] py-3 pr-6 text-right">Cantidad</th>
+                <th className="py-3 text-right">Cant.</th>
+                <th className="py-3 text-right">P. Unit</th>
+                <th className="py-3 pr-6 text-right">Subtotal</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium dark:divide-slate-850">
@@ -199,14 +202,39 @@ export default function GuiaDetailPage() {
                   <td className="max-w-[300px] truncate py-4 font-bold text-slate-950 dark:text-white">
                     {it.product?.name ?? '—'}
                   </td>
-                  <td className="py-4 pr-6 text-right font-mono text-[13px] font-black text-slate-900 dark:text-white">
+                  <td className="py-4 text-right font-mono text-[13px] font-black text-slate-900 dark:text-white">
                     {it.qty}
+                  </td>
+                  <td className="py-4 text-right font-mono text-slate-600 dark:text-slate-300">
+                    {formatCurrency(it.unitPrice)}
+                  </td>
+                  <td className="py-4 pr-6 text-right font-mono text-[13px] font-black text-slate-900 dark:text-white">
+                    {formatCurrency(it.subtotal)}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        {/* Totales de la guía valorizada (tomados de la venta origen). */}
+        {d.sale && (
+          <div className="flex justify-end border-t border-slate-100 p-5 dark:border-slate-850">
+            <div className="w-full max-w-[260px] space-y-1.5 text-[12px]">
+              <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+                <span>Subtotal neto</span>
+                <span className="font-mono">{formatCurrency(d.sale.subtotal)}</span>
+              </div>
+              <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+                <span>IVA</span>
+                <span className="font-mono">{formatCurrency(d.sale.taxAmount)}</span>
+              </div>
+              <div className="flex items-center justify-between border-t border-slate-100 pt-1.5 text-sm font-black text-slate-900 dark:border-slate-850 dark:text-white">
+                <span>Total</span>
+                <span className="font-mono">{formatCurrency(d.sale.total)}</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* OBSERVACIONES */}

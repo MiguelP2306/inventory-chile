@@ -165,6 +165,10 @@ export function SaleForm({
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethodDto>('CASH');
 
+  // Venta afecta a IVA por default (19%). Si se desactiva → venta NO afecta
+  // (sin documento): el backend la guarda con IVA 0 y no entra al Reporte de IVA.
+  const [vatExempt, setVatExempt] = useState(false);
+
   // Bodega de la venta. Default = "Tienda" si existe, sino la primera
   // activa. El selector solo se muestra cuando hay 2+ bodegas activas.
   const [warehouseId, setWarehouseId] = useState<string>('');
@@ -278,7 +282,9 @@ export function SaleForm({
   );
 
   const totalBruto = itemsForCalc.reduce((acc, it) => acc + it.subtotal, 0);
-  const subtotalNeto = totalBruto / (1 + taxRate);
+  // Si la venta es NO afecta a IVA: neto = total y IVA = 0 (espejo del backend).
+  const effectiveTaxRate = vatExempt ? 0 : taxRate;
+  const subtotalNeto = totalBruto / (1 + effectiveTaxRate);
   const taxAmount = totalBruto - subtotalNeto;
   const commissionAmount = chargesCommission ? totalBruto * commissionRate : 0;
   const netAfterCommission = totalBruto - commissionAmount;
@@ -352,6 +358,7 @@ export function SaleForm({
       customerId: customer.id,
       warehouseId: warehouseId || undefined,
       paymentMethod,
+      vatExempt,
       notes: notes.trim() || null,
       quotationId: prefillFromQuotation?.quotationId ?? null,
       items: items.map((it) => {
@@ -580,6 +587,43 @@ export function SaleForm({
                 </div>
               </div>
             )}
+
+            {canSeeBreakdown && (
+              <div className="space-y-2">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                  Documento
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setVatExempt((v) => !v)}
+                  className="flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-left transition-colors hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900"
+                >
+                  <span
+                    className={`relative h-5 w-9 shrink-0 rounded-full border transition-colors ${
+                      !vatExempt
+                        ? 'border-[#2F6BFF] bg-[#2F6BFF]'
+                        : 'border-slate-300 bg-slate-200 dark:border-slate-600 dark:bg-slate-700'
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-[1px] h-4 w-4 rounded-full bg-white shadow-sm transition-all ${
+                        !vatExempt ? 'left-[17px]' : 'left-[1px]'
+                      }`}
+                    />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-slate-800 dark:text-slate-100">
+                      Afecta a IVA (19%)
+                    </span>
+                    <span className="block text-xs text-slate-500 dark:text-slate-400">
+                      {vatExempt
+                        ? 'NO afecta — venta sin documento: no registra IVA ni entra al Reporte de IVA.'
+                        : 'Venta afecta a IVA. Desactivá si es una venta sin documento (no afecta).'}
+                    </span>
+                  </span>
+                </button>
+              </div>
+            )}
               </div>
             )}
           </div>
@@ -781,7 +825,7 @@ export function SaleForm({
               <span className="font-mono font-semibold">{formatCurrency(subtotalNeto.toFixed(2))}</span>
             </div>
             <div className="flex justify-between text-slate-500 dark:text-slate-400">
-              <span>IVA ({(taxRate * 100).toFixed(0)}%)</span>
+              <span>IVA ({(effectiveTaxRate * 100).toFixed(0)}%)</span>
               <span className="font-mono font-semibold">{formatCurrency(taxAmount.toFixed(2))}</span>
             </div>
           </>

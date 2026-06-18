@@ -207,10 +207,19 @@ export default function ReporteIvaPage() {
                 {pagedSales.map((r) => (
                   <tr
                     key={r.id}
-                    className="transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-800/10"
+                    className={`transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-800/10 ${
+                      r.isReturn ? 'bg-rose-50/40 dark:bg-rose-950/10' : ''
+                    }`}
                   >
                     <td className="py-4 pl-6 font-mono text-[11.5px] font-bold text-slate-900 dark:text-white">
-                      {r.number}
+                      <span className="inline-flex flex-wrap items-center gap-1.5">
+                        {r.number}
+                        {r.isReturn && (
+                          <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-rose-600 dark:bg-rose-950/40 dark:text-rose-400">
+                            Nota de crédito
+                          </span>
+                        )}
+                      </span>
                     </td>
                     <td className="py-4 font-medium text-slate-500 dark:text-slate-400">
                       {new Date(r.date).toLocaleDateString('es-CL', {
@@ -257,15 +266,24 @@ export default function ReporteIvaPage() {
                 {pagedPurchases.map((r) => (
                   <tr
                     key={r.id}
-                    className="transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-800/10"
+                    className={`transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-800/10 ${
+                      r.isReturn ? 'bg-rose-50/40 dark:bg-rose-950/10' : ''
+                    }`}
                   >
                     <td className="py-4 pl-6 font-medium text-slate-500 dark:text-slate-400">
                       {new Date(r.date).toLocaleDateString('es-CL', {
                         dateStyle: 'medium',
                       })}
                     </td>
-                    <td className="max-w-[200px] truncate py-4 font-bold text-slate-800 dark:text-slate-100">
-                      {r.supplierName}
+                    <td className="max-w-[220px] truncate py-4 font-bold text-slate-800 dark:text-slate-100">
+                      <span className="inline-flex flex-wrap items-center gap-1.5">
+                        {r.supplierName}
+                        {r.isReturn && (
+                          <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-rose-600 dark:bg-rose-950/40 dark:text-rose-400">
+                            Nota de crédito
+                          </span>
+                        )}
+                      </span>
                     </td>
                     <td className="py-4 font-mono text-[11px] text-slate-400 dark:text-slate-500">
                       {r.supplierTaxId ?? '—'}

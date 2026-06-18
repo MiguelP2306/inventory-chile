@@ -24,7 +24,10 @@ import {
   VehicleModel,
   WarrantyClaim,
 } from '../database/entities';
-import type { ProductRelationsDto } from '@inventory/shared';
+import type {
+  ProductPurchaseHistoryRowDto,
+  ProductRelationsDto,
+} from '@inventory/shared';
 import { PRODUCT_IMAGES_SUBDIR } from '../uploads/upload-config';
 import { StorageService } from '../uploads/storage.service';
 import {
@@ -322,6 +325,35 @@ export class ProductsService {
       transfers,
       total,
     };
+  }
+
+  /**
+   * Historial de compras de un producto: cada PurchaseEntry en la que aparece,
+   * con fecha, proveedor, cantidad y costo unitario, de la más reciente a la
+   * más antigua. La primera fila es la "última compra". Es DATO DE COSTO — el
+   * controller lo restringe a roles con permiso de ver costos.
+   */
+  async purchaseHistory(
+    productId: string,
+  ): Promise<ProductPurchaseHistoryRowDto[]> {
+    const items = await this.dataSource
+      .getRepository(PurchaseEntryItem)
+      .createQueryBuilder('pei')
+      .innerJoinAndSelect('pei.entry', 'entry')
+      .leftJoinAndSelect('entry.supplier', 'supplier')
+      .where('pei.productId = :productId', { productId })
+      .orderBy('entry.date', 'DESC')
+      .addOrderBy('entry.createdAt', 'DESC')
+      .take(100)
+      .getMany();
+    return items.map((it) => ({
+      entryId: it.entryId,
+      date: it.entry!.date.toISOString(),
+      supplierName: it.entry!.supplier?.name ?? null,
+      qty: it.qty,
+      unitCost: it.unitCost,
+      subtotal: it.subtotal,
+    }));
   }
 
   /**

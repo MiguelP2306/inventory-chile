@@ -593,7 +593,13 @@ export class PdfService {
         code: it.product?.sku ?? '',
         description: it.product?.name ?? '',
         qty: it.qty,
+        unitPrice: it.unitPrice,
+        discount: it.discount,
+        subtotal: it.subtotal,
       })),
+      subtotal: d.sale?.subtotal ?? '0',
+      taxAmount: d.sale?.taxAmount ?? '0',
+      total: d.sale?.total ?? '0',
       notes: d.notes,
       voided: d.status === 'VOIDED',
       company: {
@@ -756,26 +762,56 @@ export class PdfService {
 
     y = Math.max(colLeftY, colRightY) + 10;
 
-    // Tabla de items (sin precios — la guía es un documento operativo).
+    // Tabla de items VALORIZADA: la guía muestra el valor de la mercancía
+    // (precio unitario + subtotal por ítem) tomado de la venta origen.
     autoTable(doc, {
       startY: y,
-      head: [['Código', 'Descripción', 'Cant.']],
+      head: [['Código', 'Descripción', 'Cant.', 'P. Unit', 'Subtotal']],
       body: input.items.map((it) => [
         it.code,
         it.description,
         it.qty.toString(),
+        formatMoney(it.unitPrice),
+        formatMoney(it.subtotal),
       ]),
       styles: { fontSize: 9, cellPadding: 4 },
       headStyles: { fillColor: [40, 40, 40] },
       columnStyles: {
-        2: { halign: 'right', cellWidth: 50 },
+        2: { halign: 'right', cellWidth: 45 },
+        3: { halign: 'right', cellWidth: 70 },
+        4: { halign: 'right', cellWidth: 80 },
       },
       margin: { left: margin, right: margin },
     });
 
     // @ts-expect-error lastAutoTable es agregado por jspdf-autotable
-    let afterTableY = doc.lastAutoTable?.finalY ?? y;
-    afterTableY += 20;
+    const dispTableEnd = doc.lastAutoTable?.finalY ?? y;
+
+    // Totales (Subtotal neto / IVA / Total), igual que la nota de venta.
+    let totalsY = dispTableEnd + 18;
+    const totalsX = pageWidth - margin - 200;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text('Subtotal neto:', totalsX, totalsY);
+    doc.text(formatMoney(input.subtotal), pageWidth - margin, totalsY, {
+      align: 'right',
+    });
+    totalsY += 14;
+    doc.text('IVA:', totalsX, totalsY);
+    doc.text(formatMoney(input.taxAmount), pageWidth - margin, totalsY, {
+      align: 'right',
+    });
+    totalsY += 14;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.text('Total:', totalsX, totalsY);
+    doc.text(formatMoney(input.total), pageWidth - margin, totalsY, {
+      align: 'right',
+    });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+
+    let afterTableY = totalsY + 20;
 
     if (input.notes && input.notes.trim()) {
       doc.setFont('helvetica', 'bold');
@@ -895,21 +931,43 @@ export class PdfService {
 
     autoTable(doc, {
       startY: y + 4,
-      head: [['Cant', 'Producto']],
+      head: [['Cant', 'Producto', 'Subt.']],
       body: input.items.map((it) => [
         it.qty.toString(),
         `${it.code ? it.code + ' · ' : ''}${it.description}`,
+        formatMoney(it.subtotal),
       ]),
       styles: { fontSize: 6, cellPadding: 2 },
       headStyles: { fillColor: [40, 40, 40], fontSize: 6 },
-      columnStyles: { 0: { cellWidth: 20, halign: 'right' } },
+      columnStyles: {
+        0: { cellWidth: 18, halign: 'right' },
+        2: { cellWidth: 42, halign: 'right' },
+      },
       margin: { left: margin, right: margin },
       tableWidth: widthPt - margin * 2,
     });
 
     // @ts-expect-error lastAutoTable es agregado por jspdf-autotable
     let tableEnd = doc.lastAutoTable?.finalY ?? y;
-    tableEnd += 8;
+    tableEnd += 6;
+
+    // Totales (guía valorizada).
+    const rightX = widthPt - margin;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.text('Subtotal neto:', margin, tableEnd);
+    doc.text(formatMoney(input.subtotal), rightX, tableEnd, { align: 'right' });
+    tableEnd += 9;
+    doc.text('IVA:', margin, tableEnd);
+    doc.text(formatMoney(input.taxAmount), rightX, tableEnd, { align: 'right' });
+    tableEnd += 9;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.text('Total:', margin, tableEnd);
+    doc.text(formatMoney(input.total), rightX, tableEnd, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
+    tableEnd += 10;
 
     if (input.notes && input.notes.trim()) {
       doc.setFont('helvetica', 'bold');
@@ -1073,31 +1131,27 @@ export class PdfService {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
       doc.setTextColor(110);
+      // Cada línea se ENVUELVE al ancho del card (salto de línea normal) en
+      // vez de cortarse: se ve completa y nunca se sale del contenedor.
+      const drawWrapped = (text: string) => {
+        const wrapped = doc.splitTextToSize(text, textWidth);
+        for (const ln of wrapped) {
+          doc.text(ln, textX, textY);
+          textY += 10;
+        }
+      };
+
       const meta: string[] = [];
       if (p.sku) meta.push(`SKU: ${p.sku}`);
       if (p.partNumber) meta.push(`Parte: ${p.partNumber}`);
-      if (meta.length) {
-        doc.text(meta.join(' · '), textX, textY);
-        textY += 11;
-      }
+      if (meta.length) drawWrapped(meta.join(' · '));
       if (p.categoryPath ?? p.categoryName) {
-        doc.text(
-          `Categoría: ${p.categoryPath ?? p.categoryName!}`,
-          textX,
-          textY,
-        );
-        textY += 11;
+        drawWrapped(`Categoría: ${p.categoryPath ?? p.categoryName!}`);
       }
-      if (p.brandName) {
-        doc.text(`Marca: ${p.brandName}`, textX, textY);
-        textY += 11;
-      }
-      doc.text(
+      if (p.brandName) drawWrapped(`Marca: ${p.brandName}`);
+      drawWrapped(
         `Tipo: ${p.productKind === 'ORIGINAL' ? 'Original' : 'Alternativo'}`,
-        textX,
-        textY,
       );
-      textY += 11;
 
       if (p.description) {
         doc.setTextColor(80);
@@ -1107,12 +1161,15 @@ export class PdfService {
         textY += 9 * Math.min(wrap.length, 3) + 4;
       }
 
-      // Precio prominente abajo del card.
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(13);
-      doc.setTextColor(0);
-      const priceText = `$${formatMoney(p.price)}`;
-      doc.text(priceText, textX, y + cardHeightActual - 12);
+      // Precio prominente abajo del card. Se omite si el catálogo se generó
+      // "sin precio público".
+      if (input.showPrice) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(13);
+        doc.setTextColor(0);
+        const priceText = `$${formatMoney(p.price)}`;
+        doc.text(priceText, textX, y + cardHeightActual - 12);
+      }
     }
 
     const arrayBuffer = doc.output('arraybuffer');
@@ -1161,7 +1218,14 @@ export interface DispatchPdfInput {
     code: string;
     description: string;
     qty: number;
+    unitPrice: string;
+    discount: string;
+    subtotal: string;
   }>;
+  // Totales de la venta origen (guía valorizada).
+  subtotal: string;
+  taxAmount: string;
+  total: string;
   notes: string | null;
   voided: boolean;
   company: CompanyInfo;
@@ -1351,4 +1415,6 @@ export interface CatalogPdfInput {
   // qué muestra el documento.
   filterSummary: string;
   products: CatalogProductLine[];
+  // Si false, el catálogo se genera SIN mostrar el precio público.
+  showPrice: boolean;
 }

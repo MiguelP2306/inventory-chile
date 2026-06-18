@@ -59,6 +59,12 @@ export class Sale {
   @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
   taxAmount!: string;
 
+  // Venta NO afecta a IVA (sin documento). Default false → afecta 19%. Cuando
+  // es true, la venta se guarda con taxAmount=0 (todo el total es neto) y NO
+  // entra al Reporte de IVA ni suma al débito.
+  @Column({ type: 'boolean', default: false })
+  vatExempt!: boolean;
+
   // Comisión de tarjeta (solo se calcula cuando paymentMethod=CARD).
   // Egreso automático en la misma transacción de la venta.
   @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })

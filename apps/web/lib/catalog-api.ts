@@ -8,6 +8,7 @@ import type {
   ProductDto,
   ProductImageDto,
   ProductKindDto,
+  ProductPurchaseHistoryRowDto,
   ProductRelationsDto,
   ProductStockRowDto,
   VehicleMakeDto,
@@ -226,6 +227,15 @@ export const deleteProduct = (id: string) =>
 export const getProductRelations = (id: string) =>
   api
     .get<ProductRelationsDto>(`/products/${id}/relations`)
+    .then((r) => r.data);
+
+/**
+ * Historial de compras del producto (última compra + anteriores). Solo lo
+ * devuelve el backend a roles con permiso de ver costos.
+ */
+export const getProductPurchases = (id: string) =>
+  api
+    .get<ProductPurchaseHistoryRowDto[]>(`/products/${id}/purchases`)
     .then((r) => r.data);
 
 /**

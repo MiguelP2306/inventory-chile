@@ -151,6 +151,22 @@ export interface ProductRelationsDto {
   total: number;
 }
 
+/**
+ * Una línea del historial de compras de un producto: cada compra (PurchaseEntry)
+ * en la que participó, con su fecha, proveedor, cantidad y costo unitario. La
+ * primera (más reciente) es la "última compra". `entryId` permite linkear a
+ * `/compras/[entryId]` para revisar la compra completa. Solo accesible para
+ * roles con permiso de ver costos.
+ */
+export interface ProductPurchaseHistoryRowDto {
+  entryId: string;
+  date: string;
+  supplierName: string | null;
+  qty: number;
+  unitCost: string;
+  subtotal: string;
+}
+
 export interface PaginatedResult<T> {
   items: T[];
   total: number;
@@ -802,6 +818,9 @@ export interface ReportIvaSaleRowDto {
   subtotal: string;
   taxAmount: string;
   total: string;
+  // true si la fila es una devolución de cliente (nota de crédito): sus montos
+  // vienen en NEGATIVO y restan del IVA débito.
+  isReturn?: boolean;
 }
 
 export interface ReportIvaPurchaseRowDto {
@@ -812,6 +831,12 @@ export interface ReportIvaPurchaseRowDto {
   subtotal: string;
   taxAmount: string;
   total: string;
+  // Número del documento. Presente en devoluciones a proveedor (nota de
+  // crédito de compra). Las compras normales no lo traen.
+  number?: string;
+  // true si la fila es una devolución a proveedor: montos en NEGATIVO, restan
+  // del IVA crédito.
+  isReturn?: boolean;
 }
 
 export interface ReportIvaResponseDto {
@@ -1019,6 +1044,9 @@ export interface SaleDto {
   taxAmount: string | null;
   commissionAmount: string | null;
   total: string;
+  // Venta NO afecta a IVA (sin documento). Si es true, taxAmount es 0 y la
+  // venta no entra al Reporte de IVA. Default false (afecta 19%).
+  vatExempt: boolean;
   paymentMethod: PaymentMethodDto | null;
   status: SaleStatusDto;
   notes: string | null;
@@ -1050,6 +1078,8 @@ export interface CreateSaleInput {
   customerId: string;
   warehouseId?: string;
   paymentMethod: PaymentMethodDto;
+  // Venta NO afecta a IVA (sin documento). Default false → afecta 19%.
+  vatExempt?: boolean;
   date?: string;
   notes?: string | null;
   // Si se está convirtiendo desde una cotización, mandar su id para que el
@@ -1314,8 +1344,16 @@ export interface DispatchNoteDto {
       id: string;
       productId: string;
       qty: number;
+      // Valorización (tomada de la venta origen): la guía valorizada los muestra.
+      unitPrice: string;
+      discount: string;
+      subtotal: string;
       product?: { id: string; sku: string | null; name: string };
     }>;
+    // Totales de la venta origen, para la guía valorizada.
+    subtotal: string;
+    taxAmount: string;
+    total: string;
   };
   dispatchedAt: string;
   carrier: string | null;

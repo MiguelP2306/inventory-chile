@@ -172,6 +172,13 @@ export class ListProductsQueryDto {
   @Min(1)
   @Max(200)
   pageSize?: number;
+
+  // Solo aplica al catálogo PDF: '0' lo genera SIN precio público. Va acá
+  // (y no como @Query suelto) porque el ValidationPipe valida TODO el query
+  // contra este DTO con forbidNonWhitelisted.
+  @IsOptional()
+  @IsString()
+  withPrice?: string;
 }
 
 export class ByVehicleQueryDto {

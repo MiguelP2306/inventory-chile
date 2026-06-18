@@ -45,6 +45,12 @@ import Link from 'next/link';
 import { useMemo, useState, type ReactNode } from 'react';
 import { ProductThumbnail } from '@/components/product-thumbnail';
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -302,16 +308,45 @@ export default function ProductosPage() {
           >
             Exportar Excel
           </ActionButton>
-          {/* Catálogo PDF — link a tu API (conservado) */}
-          <ActionButton
-            as="a"
-            href={apiAbsoluteUrl(`products/catalog.pdf${catalogQuery}`)}
-            target="_blank"
-            rel="noopener noreferrer"
-            icon={FileText}
-          >
-            Catálogo PDF
-          </ActionButton>
+          {/* Catálogo PDF — con o sin precio público visible */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-4 py-2 text-[11.5px] font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                <FileText className="h-4 w-4 text-slate-500" />
+                Catálogo PDF
+                <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem asChild>
+                <a
+                  href={apiAbsoluteUrl(
+                    `products/catalog.pdf${catalogQuery}${catalogQuery ? '&' : '?'}withPrice=1`,
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <FileText className="h-4 w-4" />
+                  Con precio
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <a
+                  href={apiAbsoluteUrl(
+                    `products/catalog.pdf${catalogQuery}${catalogQuery ? '&' : '?'}withPrice=0`,
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <FileText className="h-4 w-4" />
+                  Sin precio
+                </a>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           {/* Importar Excel — Link conservado */}
           <ActionButton as="link" href="/productos/importar" icon={Upload}>
             Importar Excel
