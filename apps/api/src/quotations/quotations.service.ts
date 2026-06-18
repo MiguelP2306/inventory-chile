@@ -168,9 +168,13 @@ export class QuotationsService {
         discount: it.discount,
         discountPercent: it.discountPercent,
         subtotal: it.subtotal,
+        observation: it.observation ?? null,
       })),
       company: {
         name: settings.name,
+        legalName: settings.legalName,
+        businessActivity: settings.businessActivity,
+        bankDetails: settings.bankDetails,
         address: settings.address,
         phone: settings.phone,
         email: settings.email,
@@ -285,6 +289,7 @@ export class QuotationsService {
           discount: lineTotals.discountAmount,
           discountPercent: it.discountPercent ?? null,
           subtotal: lineTotals.lineGross,
+          observation: it.observation?.trim() || null,
         });
         await manager.getRepository(QuotationItem).save(item);
       }
@@ -404,6 +409,7 @@ export class QuotationsService {
             discount: lineTotals.discountAmount,
             discountPercent: it.discountPercent ?? null,
             subtotal: lineTotals.lineGross,
+            observation: it.observation?.trim() || null,
           });
           await manager.getRepository(QuotationItem).save(item);
         }
@@ -508,6 +514,7 @@ export class QuotationsService {
         unitPrice: string;
         discount: string;
         discountPercent: string | null;
+        observation: string | null;
       }>;
       subtotal: string;
       taxAmount: string;
@@ -558,6 +565,7 @@ export class QuotationsService {
           unitPrice: it.unitPrice,
           discount: it.discount,
           discountPercent: it.discountPercent,
+          observation: it.observation,
         })),
         subtotal: q.subtotal,
         taxAmount: q.taxAmount,
@@ -788,6 +796,7 @@ export class QuotationsService {
       discount: it.discount,
       discountPercent: it.discountPercent,
       subtotal: it.subtotal,
+      observation: it.observation,
       product: it.product
         ? {
             id: it.product.id,

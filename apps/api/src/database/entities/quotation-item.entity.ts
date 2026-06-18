@@ -64,4 +64,9 @@ export class QuotationItem {
 
   @Column({ type: 'decimal', precision: 15, scale: 2 })
   subtotal!: string;
+
+  // Observación libre POR ÍTEM (opcional). Se imprime debajo del producto en
+  // el PDF y la página pública, y se copia a la venta al convertir.
+  @Column({ type: 'text', nullable: true })
+  observation!: string | null;
 }

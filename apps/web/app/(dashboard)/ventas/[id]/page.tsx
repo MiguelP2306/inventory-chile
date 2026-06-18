@@ -280,8 +280,15 @@ export default function VentaDetailPage() {
                   <td className="py-4 pl-6 font-mono text-slate-500 dark:text-slate-400">
                     {it.product?.sku ?? '—'}
                   </td>
-                  <td className="max-w-[300px] truncate py-4 font-bold text-slate-950 dark:text-white">
-                    {it.product?.name ?? '—'}
+                  <td className="max-w-[300px] py-4 font-bold text-slate-950 dark:text-white">
+                    <span className="block truncate">
+                      {it.product?.name ?? '—'}
+                    </span>
+                    {it.observation && (
+                      <span className="mt-0.5 block whitespace-pre-wrap text-xs font-medium text-slate-500 dark:text-slate-400">
+                        {it.observation}
+                      </span>
+                    )}
                   </td>
                   <td className="py-4 text-right font-mono text-slate-700 dark:text-slate-300">{it.qty}</td>
                   <td className="py-4 text-right font-mono text-slate-500 dark:text-slate-400">

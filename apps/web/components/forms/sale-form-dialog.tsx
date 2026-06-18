@@ -29,6 +29,7 @@ interface Props {
       unitPrice: string;
       discount: string;
       discountPercent: string | null;
+      observation: string | null;
     }>;
     notes: string | null;
   };

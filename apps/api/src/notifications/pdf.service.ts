@@ -21,6 +21,10 @@ export type PdfFormat = 'letter' | 'thermal80';
 
 interface CompanyInfo {
   name: string;
+  // Encabezado/pie del documento (cliente lo pidió "tal cual").
+  legalName?: string | null;
+  businessActivity?: string | null;
+  bankDetails?: string | null;
   address: string | null;
   phone: string | null;
   email: string | null;
@@ -44,6 +48,8 @@ interface QuotationItemLine {
   discount: string;
   discountPercent: string | null;
   subtotal: string;
+  // Observación libre por ítem. Se imprime debajo de la descripción.
+  observation: string | null;
 }
 
 /**
@@ -125,9 +131,13 @@ export class PdfService {
         discount: it.discount,
         discountPercent: it.discountPercent,
         subtotal: it.subtotal,
+        observation: it.observation,
       })),
       company: {
         name: settings.name,
+        legalName: settings.legalName,
+        businessActivity: settings.businessActivity,
+        bankDetails: settings.bankDetails,
         address: settings.address,
         phone: settings.phone,
         email: settings.email,
@@ -192,9 +202,13 @@ export class PdfService {
         discount: it.discount,
         discountPercent: it.discountPercent,
         subtotal: it.subtotal,
+        observation: it.observation,
       })),
       company: {
         name: settings.name,
+        legalName: settings.legalName,
+        businessActivity: settings.businessActivity,
+        bankDetails: settings.bankDetails,
         address: settings.address,
         phone: settings.phone,
         email: settings.email,
@@ -211,52 +225,81 @@ export class PdfService {
     const margin = 40;
     let y = margin;
 
-    // Marca fija (logo + nombre). El logo se embebe desde el asset empaquetado;
-    // si falla, seguimos sin él (best-effort).
+    // ====== ENCABEZADO (diseño pedido por el cliente) ======
+    // Izquierda: logo + razón social + giro + "Casa Matriz" (dirección/fono/email).
+    // Derecha: recuadro rojo con RUT + tipo de documento + N°.
     const logoH = 50;
     const logoW = Math.round(logoH * BRAND_LOGO_RATIO);
     const brandLogo = await getBrandLogoDataUrl();
+    let textX = margin;
     if (brandLogo) {
       try {
         doc.addImage(brandLogo, 'PNG', margin, y, logoW, logoH);
+        textX = margin + logoW + 12;
       } catch (err) {
         this.logger.warn(`No se pudo cargar el logo: ${(err as Error).message}`);
       }
     }
 
+    // Recuadro rojo (derecha) — ancho fijo; el texto de la izquierda se ajusta
+    // para no pisarlo.
+    const redW = 150;
+    const redX = pageWidth - margin - redW;
+    const redH = 52;
+    const leftMaxW = redX - textX - 12;
+
+    const legal = input.company.legalName?.trim() || input.company.name;
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
-    doc.text(BRAND_NAME, pageWidth - margin, y + 14, { align: 'right' });
+    doc.setFontSize(12);
+    doc.setTextColor(20, 70, 140);
+    const legalLines = doc.splitTextToSize(legal, leftMaxW);
+    doc.text(legalLines, textX, y + 11);
+    let leftY = y + 11 + legalLines.length * 13;
+
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    let rightY = y + 28;
+    doc.setFontSize(8);
+    doc.setTextColor(70);
+    if (input.company.businessActivity?.trim()) {
+      const giroLines = doc.splitTextToSize(
+        input.company.businessActivity.trim(),
+        leftMaxW,
+      );
+      doc.text(giroLines, textX, leftY);
+      leftY += giroLines.length * 10;
+    }
+    const casaParts: string[] = [];
+    if (input.company.address) casaParts.push(`Casa Matriz: ${input.company.address}`);
+    if (input.company.phone) casaParts.push(`Fono: ${input.company.phone}`);
+    if (input.company.email) casaParts.push(`Email: ${input.company.email}`);
+    if (casaParts.length) {
+      const casaLines = doc.splitTextToSize(casaParts.join('  '), leftMaxW);
+      doc.text(casaLines, textX, leftY);
+      leftY += casaLines.length * 10;
+    }
+
+    // Recuadro rojo
+    doc.setDrawColor(200, 0, 0);
+    doc.setLineWidth(1.2);
+    doc.rect(redX, y, redW, redH);
+    doc.setLineWidth(0.5);
+    doc.setTextColor(200, 0, 0);
+    doc.setFont('helvetica', 'bold');
+    let redY = y + 16;
+    doc.setFontSize(10);
     if (input.company.taxId) {
-      doc.text(`RUT: ${input.company.taxId}`, pageWidth - margin, rightY, {
-        align: 'right',
+      doc.text(`RUT: ${input.company.taxId}`, redX + redW / 2, redY, {
+        align: 'center',
       });
-      rightY += 12;
+      redY += 14;
     }
-    if (input.company.address) {
-      doc.text(input.company.address, pageWidth - margin, rightY, {
-        align: 'right',
-      });
-      rightY += 12;
-    }
-    if (input.company.phone) {
-      doc.text(input.company.phone, pageWidth - margin, rightY, {
-        align: 'right',
-      });
-      rightY += 12;
-    }
-    if (input.company.email) {
-      doc.text(input.company.email, pageWidth - margin, rightY, {
-        align: 'right',
-      });
-      rightY += 12;
-    }
+    doc.setFontSize(11);
+    const docLabelUpper = input.kind === 'sale' ? 'NOTA DE VENTA' : 'COTIZACIÓN';
+    doc.text(docLabelUpper, redX + redW / 2, redY, { align: 'center' });
+    redY += 14;
+    doc.text(`N° ${input.number}`, redX + redW / 2, redY, { align: 'center' });
+    doc.setTextColor(0);
 
-    y = Math.max(y + 60, rightY) + 10;
-
+    y = Math.max(y + logoH, leftY, y + redH) + 12;
     doc.setDrawColor(200);
     doc.line(margin, y, pageWidth - margin, y);
     y += 18;
@@ -313,7 +356,9 @@ export class PdfService {
       head: [['Código', 'Descripción', 'Cant', 'P. Unit', 'Desc', 'Subtotal']],
       body: input.items.map((it) => [
         it.code,
-        it.description,
+        it.observation
+          ? `${it.description}\nObs.: ${it.observation}`
+          : it.description,
         it.qty.toString(),
         formatMoney(it.unitPrice),
         it.discountPercent
@@ -378,11 +423,46 @@ export class PdfService {
       doc.text(wrapped, margin, notesY);
     }
 
+    // ====== PIE: "Formas de pago" (diseño pedido por el cliente) ======
+    // Solo en COTIZACIÓN (en una nota de venta ya pagada no aplica).
+    let bottomY = doc.internal.pageSize.getHeight() - margin;
+    if (input.kind !== 'sale' && input.company.bankDetails?.trim()) {
+      const fpLines = doc.splitTextToSize(
+        input.company.bankDetails.trim(),
+        pageWidth - margin * 2 - 90,
+      );
+      const fpH = 16 + fpLines.length * 10 + 8;
+      const fpY = bottomY - fpH;
+      // Marco del recuadro + cabecera gris con el título.
+      doc.setDrawColor(120, 170, 220);
+      doc.setLineWidth(0.8);
+      doc.rect(margin, fpY, pageWidth - margin * 2, fpH);
+      doc.setLineWidth(0.5);
+      doc.setFillColor(238, 238, 238);
+      doc.rect(margin, fpY, pageWidth - margin * 2, 14, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(40);
+      doc.text('Formas de pago', pageWidth / 2, fpY + 10, { align: 'center' });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(60);
+      doc.text(fpLines, margin + 8, fpY + 24);
+      doc.text('Pago en línea', pageWidth - margin - 8, fpY + 24, {
+        align: 'right',
+      });
+      doc.setTextColor(0);
+      bottomY = fpY - 8;
+    }
+
     if (input.company.quotationFooter) {
-      const footerY = doc.internal.pageSize.getHeight() - margin;
-      doc.text(input.company.quotationFooter, margin, footerY, {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(120);
+      doc.text(input.company.quotationFooter, margin, bottomY, {
         maxWidth: pageWidth - margin * 2,
       });
+      doc.setTextColor(0);
     }
 
     const arrayBuffer = doc.output('arraybuffer');
@@ -484,7 +564,9 @@ export class PdfService {
       head: [['Cant', 'Descripción', 'Subtotal']],
       body: input.items.map((it) => [
         it.qty.toString(),
-        `${it.code ? it.code + ' · ' : ''}${it.description}`,
+        `${it.code ? it.code + ' · ' : ''}${it.description}${
+          it.observation ? `\nObs.: ${it.observation}` : ''
+        }`,
         formatMoney(it.subtotal),
       ]),
       styles: { fontSize: 6, cellPadding: 2 },

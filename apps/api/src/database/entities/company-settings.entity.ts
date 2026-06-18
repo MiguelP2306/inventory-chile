@@ -14,6 +14,21 @@ export class CompanySettings {
   @Column({ type: 'varchar', length: 180 })
   name!: string;
 
+  // Razón social formal (encabezado del documento). Ej. "COMERCIALIZADORA
+  // GRAN PACIFICO INVERSIONES SPA". Si está vacío, se usa `name`.
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  legalName!: string | null;
+
+  // Giro / rubro de la empresa (subtítulo del encabezado). Ej. "VENTA DE
+  // PARTES, PIEZAS Y ACCESORIOS PARA VEHICULOS AUTOMOTORES".
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  businessActivity!: string | null;
+
+  // Datos de pago para el bloque "Formas de pago" del pie (texto libre:
+  // banco, cuenta, titular, etc.).
+  @Column({ type: 'text', nullable: true })
+  bankDetails!: string | null;
+
   @Column({ type: 'varchar', length: 255, nullable: true })
   address!: string | null;
 

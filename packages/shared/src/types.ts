@@ -723,6 +723,12 @@ export interface ExpenseDto {
 export interface CompanySettingsDto {
   id: string;
   name: string;
+  // Razón social formal (encabezado del documento). Fallback a `name`.
+  legalName: string | null;
+  // Giro / rubro (subtítulo del encabezado).
+  businessActivity: string | null;
+  // Datos de pago para el bloque "Formas de pago" del pie.
+  bankDetails: string | null;
   address: string | null;
   phone: string | null;
   email: string | null;
@@ -907,6 +913,8 @@ export interface QuotationItemDto {
   // Si fue ingresado como porcentaje, queda persistido para imprimir en PDF.
   discountPercent: string | null;
   subtotal: string;
+  // Observación libre por ítem (se imprime debajo del producto).
+  observation: string | null;
   product?: {
     id: string;
     sku: string | null;
@@ -984,9 +992,15 @@ export interface PublicQuotationDto {
     discount: string;
     discountPercent: string | null;
     subtotal: string;
+    // Observación libre por ítem (se muestra debajo del producto).
+    observation: string | null;
   }>;
   company: {
     name: string;
+    // Encabezado/pie del documento (cliente lo pidió "tal cual").
+    legalName: string | null;
+    businessActivity: string | null;
+    bankDetails: string | null;
     address: string | null;
     phone: string | null;
     email: string | null;
@@ -1022,6 +1036,8 @@ export interface SaleItemDto {
   // Costo unitario CONGELADO al confirmar la venta (para reportes de
   // rentabilidad históricos cuando el costo del producto cambia luego).
   unitCost: string;
+  // Observación libre por ítem (copiada desde la cotización al convertir).
+  observation: string | null;
   product?: {
     id: string;
     sku: string | null;
@@ -1072,6 +1088,8 @@ export interface CreateSaleItemInput {
   // del % y se ignora este campo en el cómputo (pero se guarda igual).
   discount?: string;
   discountPercent?: string | null;
+  // Observación libre por ítem (opcional).
+  observation?: string | null;
 }
 
 export interface CreateSaleInput {

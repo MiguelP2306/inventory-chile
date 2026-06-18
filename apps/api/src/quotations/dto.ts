@@ -58,6 +58,11 @@ export class CreateQuotationItemDto {
   @IsOptional()
   @IsNumberString({ no_symbols: false })
   discountPercent?: string | null;
+
+  // Observación libre por ítem (opcional).
+  @IsOptional()
+  @IsString()
+  observation?: string | null;
 }
 
 export class CreateQuotationDto {

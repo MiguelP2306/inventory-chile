@@ -74,6 +74,8 @@ interface ItemRow {
   unitPrice: string;
   discountKind: DiscountKind;
   discountValue: string;
+  // Observación libre por ítem (opcional). Se copia desde la cotización.
+  observation?: string | null;
 }
 
 export interface SaleBagItem {
@@ -120,6 +122,7 @@ interface Props {
       unitPrice: string;
       discount: string;
       discountPercent: string | null;
+      observation: string | null;
     }>;
     notes: string | null;
   };
@@ -217,6 +220,7 @@ export function SaleForm({
       unitPrice: it.unitPrice,
       discountKind: it.discountPercent != null ? '%' : '$',
       discountValue: it.discountPercent ?? it.discount ?? '0',
+      observation: it.observation ?? null,
     }));
   });
   const [notes, setNotes] = useState<string>(prefillFromQuotation?.notes ?? '');
@@ -373,6 +377,7 @@ export function SaleForm({
             unitPrice: unit.toFixed(2),
             discount: '0',
             discountPercent: pct.toFixed(2),
+            observation: it.observation?.trim() || null,
           };
         }
         return {
@@ -381,6 +386,7 @@ export function SaleForm({
           unitPrice: unit.toFixed(2),
           discount: Math.max(0, dv).toFixed(2),
           discountPercent: null,
+          observation: it.observation?.trim() || null,
         };
       }),
     };
@@ -692,8 +698,45 @@ export function SaleForm({
                       className={cn('[&>td]:align-top', exceeds && 'bg-destructive/5')}
                     >
                       <TableCell className="font-mono text-xs">{it.sku}</TableCell>
-                      <TableCell className="max-w-[260px] truncate">
-                        {it.name}
+                      <TableCell className="max-w-[260px] align-top">
+                        <div className="flex flex-col gap-1">
+                          <span className="truncate">{it.name}</span>
+                          {/* Observación por ítem (desplegable). null = oculta. */}
+                          {it.observation == null ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateItem(idx, { observation: '' })
+                              }
+                              className="w-fit text-xs font-semibold text-[#2F6BFF] hover:underline"
+                            >
+                              + Observación
+                            </button>
+                          ) : (
+                            <div className="space-y-1">
+                              <Textarea
+                                value={it.observation}
+                                onChange={(e) =>
+                                  updateItem(idx, {
+                                    observation: e.target.value,
+                                  })
+                                }
+                                placeholder="Observación para este producto…"
+                                rows={2}
+                                className="text-xs"
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateItem(idx, { observation: null })
+                                }
+                                className="text-xs text-muted-foreground hover:underline"
+                              >
+                                Quitar observación
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="space-y-1">

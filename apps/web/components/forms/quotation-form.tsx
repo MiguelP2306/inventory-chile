@@ -89,6 +89,8 @@ interface ItemRow {
   // Ronda 9 — snapshot del producto temporal cuando productId es null.
   tempProductPartNumber?: string | null;
   isTemporary?: boolean;
+  // Observación libre por ítem (opcional). Se imprime debajo del producto.
+  observation?: string | null;
 }
 
 const schema = z
@@ -389,6 +391,7 @@ export function QuotationForm({
         unitPrice: unit.toFixed(2),
         discount: discount.toFixed(2),
         discountPercent,
+        observation: it.observation?.trim() || null,
       };
     });
 
@@ -469,6 +472,7 @@ export function QuotationForm({
           unitPrice: unit.toFixed(2),
           discount: discount.toFixed(2),
           discountPercent,
+          observation: it.observation?.trim() || null,
         };
       })
       .filter(
@@ -563,6 +567,9 @@ export function QuotationForm({
   const autoSaveDirtyRef = useRef(false);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveFirstRun = useRef(true);
+  // `pendingRef` = hay un cambio con autoguardado AGENDADO (debounce) que aún
+  // no se disparó. Sirve para FORZAR el guardado al cerrar/desmontar el modal.
+  const autoSavePendingRef = useRef(false);
 
   // Campos de cliente/meta que afectan el payload (reactivos). Los ítems entran
   // por `items` en la firma de abajo.
@@ -596,6 +603,7 @@ export function QuotationForm({
           u: it.unitPrice,
           dk: it.discountKind,
           dv: it.discountValue,
+          o: it.observation,
         })),
       }),
     [watchedAuto, items],
@@ -627,6 +635,9 @@ export function QuotationForm({
       }
       setAutoSaveState('saved');
       qc.invalidateQueries({ queryKey: ['quotations'] });
+      // Refrescar también el DETALLE de esta cotización: antes el autoguardado
+      // solo invalidaba la lista, así que el detalle quedaba viejo hasta recargar.
+      qc.invalidateQueries({ queryKey: ['quotation', saved.id] });
     } catch {
       // Silencioso: el autoguardado no debe molestar. El guardado manual
       // reportará el error si el operador intenta guardar/enviar.
@@ -649,7 +660,9 @@ export function QuotationForm({
       return;
     }
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSavePendingRef.current = true; // cambio agendado, aún sin guardar
     autoSaveTimer.current = setTimeout(() => {
+      autoSavePendingRef.current = false; // ya disparó el guardado
       void doAutoSaveRef.current();
     }, 800);
     return () => {
@@ -657,6 +670,20 @@ export function QuotationForm({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoSaveSig, autoSaveEnabled]);
+
+  // Flush al CERRAR/desmontar el modal: si quedó un cambio agendado por el
+  // debounce que todavía no se guardó, lo guardamos ahora para no perderlo.
+  // `qc` vive en el provider (sobrevive al desmontaje), así que la invalidación
+  // que hace el guardado refresca el detalle aunque el form ya no esté.
+  useEffect(() => {
+    return () => {
+      if (autoSavePendingRef.current) {
+        autoSavePendingRef.current = false;
+        void doAutoSaveRef.current();
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function onErrors(errors: FieldErrors<FormValues>) {
     if (
@@ -787,6 +814,9 @@ export function QuotationForm({
       return;
     }
 
+    // El guardado manual ya persistió todo → no dejar un flush pendiente que
+    // dispare un UPDATE redundante al cerrar el modal.
+    autoSavePendingRef.current = false;
     qc.invalidateQueries({ queryKey: ['quotations'] });
     qc.invalidateQueries({ queryKey: ['quotation', saved.id] });
     // Un cliente libre pudo haberse creado como borrador → refrescar Clientes.
@@ -1213,6 +1243,41 @@ export function QuotationForm({
                               Producto temporal · no descuenta stock
                             </span>
                           )}
+                          {/* Observación por ítem (desplegable). null = oculta. */}
+                          {it.observation == null ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateItem(idx, { observation: '' })
+                              }
+                              className="w-fit text-xs font-semibold text-[#2F6BFF] hover:underline"
+                            >
+                              + Observación
+                            </button>
+                          ) : (
+                            <div className="space-y-1">
+                              <Textarea
+                                value={it.observation}
+                                onChange={(e) =>
+                                  updateItem(idx, {
+                                    observation: e.target.value,
+                                  })
+                                }
+                                placeholder="Observación para este producto…"
+                                rows={2}
+                                className="text-xs"
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateItem(idx, { observation: null })
+                                }
+                                className="text-xs text-muted-foreground hover:underline"
+                              >
+                                Quitar observación
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell className="text-right">
@@ -1458,6 +1523,7 @@ function itemsFromQuotation(q?: QuotationDto): ItemRow[] {
         : String(it.discount),
       tempProductPartNumber: isTemp ? it.tempProductPartNumber : null,
       isTemporary: isTemp,
+      observation: it.observation ?? null,
     };
   });
 }

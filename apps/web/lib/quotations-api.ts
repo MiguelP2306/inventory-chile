@@ -20,6 +20,8 @@ export interface CreateQuotationItemInput {
   unitPrice: string;
   discount?: string;
   discountPercent?: string | null;
+  // Observación libre por ítem (opcional).
+  observation?: string | null;
 }
 
 export interface CreateQuotationInput {
@@ -66,6 +68,7 @@ export interface ConvertResultDto {
       unitPrice: string;
       discount: string;
       discountPercent: string | null;
+      observation: string | null;
     }>;
     subtotal: string;
     taxAmount: string;

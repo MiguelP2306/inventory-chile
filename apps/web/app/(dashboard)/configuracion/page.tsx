@@ -43,6 +43,15 @@ const schema = z.object({
   paymentLinkCommissionRatePct: z.coerce.number().min(0).max(100),
   // Días de lead time default usados por la proyección de stock (Fase 8).
   defaultLeadTimeDays: z.coerce.number().int().min(1).max(365),
+  // Datos de la empresa (encabezado/pie del documento de cotización).
+  name: z.string().max(180).optional().or(z.literal('')),
+  legalName: z.string().max(200).optional().or(z.literal('')),
+  businessActivity: z.string().max(255).optional().or(z.literal('')),
+  taxId: z.string().max(60).optional().or(z.literal('')),
+  address: z.string().max(255).optional().or(z.literal('')),
+  phone: z.string().max(30).optional().or(z.literal('')),
+  email: z.string().max(180).optional().or(z.literal('')),
+  bankDetails: z.string().optional().or(z.literal('')),
 });
 type FormValues = z.infer<typeof schema>;
 
@@ -72,6 +81,14 @@ export default function ConfiguracionPage() {
       cardCreditCommissionRatePct: 2.5,
       paymentLinkCommissionRatePct: 3.5,
       defaultLeadTimeDays: 75,
+      name: '',
+      legalName: '',
+      businessActivity: '',
+      taxId: '',
+      address: '',
+      phone: '',
+      email: '',
+      bankDetails: '',
     },
   });
 
@@ -83,6 +100,14 @@ export default function ConfiguracionPage() {
         cardCreditCommissionRatePct: rateToPct(settings.cardCreditCommissionRate),
         paymentLinkCommissionRatePct: rateToPct(settings.paymentLinkCommissionRate),
         defaultLeadTimeDays: settings.defaultLeadTimeDays,
+        name: settings.name ?? '',
+        legalName: settings.legalName ?? '',
+        businessActivity: settings.businessActivity ?? '',
+        taxId: settings.taxId ?? '',
+        address: settings.address ?? '',
+        phone: settings.phone ?? '',
+        email: settings.email ?? '',
+        bankDetails: settings.bankDetails ?? '',
       });
     }
   }, [settings, form]);
@@ -95,6 +120,14 @@ export default function ConfiguracionPage() {
         cardCreditCommissionRate: pctToRate(values.cardCreditCommissionRatePct),
         paymentLinkCommissionRate: pctToRate(values.paymentLinkCommissionRatePct),
         defaultLeadTimeDays: values.defaultLeadTimeDays,
+        ...(values.name?.trim() ? { name: values.name.trim() } : {}),
+        legalName: values.legalName?.trim() || null,
+        businessActivity: values.businessActivity?.trim() || null,
+        taxId: values.taxId?.trim() || null,
+        address: values.address?.trim() || null,
+        phone: values.phone?.trim() || null,
+        email: values.email?.trim() || null,
+        bankDetails: values.bankDetails?.trim() || null,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['settings', 'company'] });
@@ -248,6 +281,127 @@ export default function ConfiguracionPage() {
                     {form.formState.errors.defaultLeadTimeDays.message}
                   </p>
                 )}
+              </div>
+
+              {/* Datos de la empresa → encabezado y pie del documento de cotización */}
+              <div className="space-y-4 border-t border-slate-100 pt-5 dark:border-slate-850">
+                <div>
+                  <h2 className="text-sm font-black text-slate-900 dark:text-white">
+                    Datos de la empresa (encabezado y pie de la cotización)
+                  </h2>
+                  <p className="mt-0.5 text-xs font-medium text-slate-400">
+                    Aparecen en el encabezado y el pie de la cotización (PDF y
+                    link público). Completalos para que el documento se vea con
+                    los datos reales.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="name" className={LABEL}>
+                    Nombre comercial
+                  </label>
+                  <input
+                    id="name"
+                    {...form.register('name')}
+                    placeholder="Autopartes Gran Pacífico"
+                    className={cn(INPUT)}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="legalName" className={LABEL}>
+                    Razón social
+                  </label>
+                  <input
+                    id="legalName"
+                    {...form.register('legalName')}
+                    placeholder="COMERCIALIZADORA GRAN PACIFICO INVERSIONES SPA"
+                    className={cn(INPUT)}
+                  />
+                  <p className={HINT}>
+                    Nombre legal del encabezado. Si lo dejás vacío se usa el nombre
+                    comercial.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="businessActivity" className={LABEL}>
+                    Giro / rubro
+                  </label>
+                  <input
+                    id="businessActivity"
+                    {...form.register('businessActivity')}
+                    placeholder="VENTA DE PARTES, PIEZAS Y ACCESORIOS PARA VEHICULOS AUTOMOTORES"
+                    className={cn(INPUT)}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <label htmlFor="taxId" className={LABEL}>
+                      RUT
+                    </label>
+                    <input
+                      id="taxId"
+                      {...form.register('taxId')}
+                      placeholder="77.337.586-0"
+                      className={cn(INPUT, 'font-mono')}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label htmlFor="phone" className={LABEL}>
+                      Teléfono / Fono
+                    </label>
+                    <input
+                      id="phone"
+                      {...form.register('phone')}
+                      placeholder="56990860889"
+                      className={cn(INPUT)}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="address" className={LABEL}>
+                    Dirección (Casa Matriz)
+                  </label>
+                  <input
+                    id="address"
+                    {...form.register('address')}
+                    placeholder="TERCERA AVENIDA 1890 LC3, San Miguel SANTIAGO"
+                    className={cn(INPUT)}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="email" className={LABEL}>
+                    Email
+                  </label>
+                  <input
+                    id="email"
+                    {...form.register('email')}
+                    placeholder="comercial@autopartesgpi.com"
+                    className={cn(INPUT)}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="bankDetails" className={LABEL}>
+                    Formas de pago (datos bancarios)
+                  </label>
+                  <textarea
+                    id="bankDetails"
+                    rows={4}
+                    {...form.register('bankDetails')}
+                    placeholder={
+                      'Transferencia bancaria\nBanco Santander - Cuenta corriente 000092710041\nTitular ... - RUT 77.337.586-0\ncomercial@autopartesgpi.com'
+                    }
+                    className={cn(INPUT, 'resize-y leading-relaxed')}
+                  />
+                  <p className={HINT}>
+                    Bloque &quot;Formas de pago&quot; del pie. Texto libre.
+                  </p>
+                </div>
               </div>
 
               <div className="pt-1">

@@ -67,24 +67,38 @@ export default async function PublicQuotationPage({
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col items-start gap-4 rounded-md border bg-background p-6 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
+      <header className="flex flex-col gap-4 rounded-md border bg-background p-6 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-3">
           <BrandMark height={52} forceLight priority />
-          <div>
-            <div className="text-lg font-semibold">{BRAND_NAME}</div>
-            {q.company.taxId && (
-              <div className="text-xs text-muted-foreground">
-                RUT {q.company.taxId}
+          <div className="min-w-0">
+            <div className="text-base font-bold text-[#1f4f8c]">
+              {q.company.legalName || q.company.name || BRAND_NAME}
+            </div>
+            {q.company.businessActivity && (
+              <div className="text-xs font-medium text-muted-foreground">
+                {q.company.businessActivity}
               </div>
             )}
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              {[
+                q.company.address && `Casa Matriz: ${q.company.address}`,
+                q.company.phone && `Fono: ${q.company.phone}`,
+                q.company.email && `Email: ${q.company.email}`,
+              ]
+                .filter(Boolean)
+                .join('  ·  ')}
+            </div>
           </div>
         </div>
-        <div className="text-right">
-          <div className="text-xs text-muted-foreground">Cotización</div>
-          <div className="font-mono text-lg font-semibold">{q.number}</div>
+        <div className="shrink-0 rounded-md border-2 border-red-500 px-4 py-2 text-center text-red-600">
+          {q.company.taxId && (
+            <div className="text-sm font-bold">RUT: {q.company.taxId}</div>
+          )}
+          <div className="text-sm font-bold">COTIZACIÓN</div>
+          <div className="font-mono text-sm font-bold">N° {q.number}</div>
           {expired && (
             <Badge className="mt-1 bg-amber-500/15 text-amber-700 border-transparent">
-              Cotización vencida
+              Vencida
             </Badge>
           )}
         </div>
@@ -157,7 +171,14 @@ export default async function PublicQuotationPage({
                 <TableCell className="font-mono text-xs">
                   {it.code || '—'}
                 </TableCell>
-                <TableCell className="max-w-[280px]">{it.description}</TableCell>
+                <TableCell className="max-w-[280px]">
+                  {it.description}
+                  {it.observation && (
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      {it.observation}
+                    </span>
+                  )}
+                </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {it.qty}
                 </TableCell>
@@ -215,13 +236,29 @@ export default async function PublicQuotationPage({
         </Button>
       </div>
 
+      {/* Pie: bloque "Formas de pago" (diseño pedido por el cliente) */}
+      {q.company.bankDetails && q.company.bankDetails.trim() && (
+        <div className="overflow-hidden rounded-md border bg-background">
+          <div className="border-b bg-muted/50 px-4 py-2 text-center text-sm font-semibold">
+            Formas de pago
+          </div>
+          <div className="flex items-start justify-between gap-4 p-4 text-xs">
+            <div className="whitespace-pre-wrap text-muted-foreground">
+              {q.company.bankDetails}
+            </div>
+            <div className="shrink-0 font-medium text-muted-foreground">
+              Pago en línea
+            </div>
+          </div>
+        </div>
+      )}
+
       <footer className="rounded-md border bg-background p-4 text-xs text-muted-foreground space-y-1">
-        <div className="font-medium text-foreground">{BRAND_NAME}</div>
-        {q.company.address && <div>{q.company.address}</div>}
-        {q.company.phone && <div>Tel: {q.company.phone}</div>}
-        {q.company.email && <div>Email: {q.company.email}</div>}
+        <div className="font-medium text-foreground">
+          {q.company.legalName || q.company.name || BRAND_NAME}
+        </div>
         {q.company.quotationFooter && (
-          <div className="whitespace-pre-wrap pt-2 border-t">
+          <div className="whitespace-pre-wrap pt-2">
             {q.company.quotationFooter}
           </div>
         )}

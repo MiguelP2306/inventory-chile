@@ -117,6 +117,7 @@ export default function NuevaVentaPage() {
           unitPrice: it.unitPrice,
           discount: it.discount,
           discountPercent: it.discountPercent,
+          observation: it.observation,
         })),
       notes: q.notes,
     };

@@ -259,6 +259,7 @@ export class SalesService {
           discountPercent: it.discountPercent ?? null,
           subtotal: line.lineGross,
           unitCost: product.cost,
+          observation: it.observation?.trim() || null,
         });
         await manager.getRepository(SaleItem).save(item);
 
@@ -750,6 +751,7 @@ export class SalesService {
           discountPercent: it.discountPercent,
           subtotal: it.subtotal,
           unitCost: it.unitCost,
+          observation: it.observation,
           product: it.product
             ? {
                 id: it.product.id,

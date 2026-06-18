@@ -177,6 +177,10 @@ export const getCompanySettings = () =>
 
 export interface UpdateCompanySettingsInput {
   name?: string;
+  // Encabezado/pie del documento de cotización.
+  legalName?: string | null;
+  businessActivity?: string | null;
+  bankDetails?: string | null;
   address?: string | null;
   phone?: string | null;
   email?: string | null;

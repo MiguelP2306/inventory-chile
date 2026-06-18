@@ -515,11 +515,18 @@ export default function QuotationDetailPage() {
                   <td className="py-4 pl-6 font-mono text-slate-500 dark:text-slate-400">
                     {it.product?.sku ?? it.tempProductSku ?? '—'}
                   </td>
-                  <td className="max-w-[280px] truncate py-4 font-bold text-slate-950 dark:text-white">
-                    {it.product?.name ?? it.tempProductName ?? '—'}
-                    {it.isTemporary && (
-                      <span className="ml-2 rounded bg-amber-50 px-1.5 py-0.5 text-[9.5px] font-extrabold uppercase tracking-wide text-amber-600 dark:bg-amber-950/30 dark:text-amber-400">
-                        Temporal
+                  <td className="max-w-[280px] py-4 font-bold text-slate-950 dark:text-white">
+                    <span className="block truncate">
+                      {it.product?.name ?? it.tempProductName ?? '—'}
+                      {it.isTemporary && (
+                        <span className="ml-2 rounded bg-amber-50 px-1.5 py-0.5 text-[9.5px] font-extrabold uppercase tracking-wide text-amber-600 dark:bg-amber-950/30 dark:text-amber-400">
+                          Temporal
+                        </span>
+                      )}
+                    </span>
+                    {it.observation && (
+                      <span className="mt-0.5 block whitespace-pre-wrap text-xs font-medium text-slate-500 dark:text-slate-400">
+                        {it.observation}
                       </span>
                     )}
                   </td>

@@ -36,6 +36,11 @@ export class CreateSaleItemDto {
   @IsOptional()
   @IsNumberString({ no_symbols: false })
   discountPercent?: string | null;
+
+  // Observación libre por ítem (opcional). Se copia desde la cotización.
+  @IsOptional()
+  @IsString()
+  observation?: string | null;
 }
 
 export class CreateSaleDto {

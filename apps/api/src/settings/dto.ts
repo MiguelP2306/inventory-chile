@@ -19,6 +19,21 @@ export class UpdateCompanySettingsDto {
   @MaxLength(180)
   name?: string;
 
+  // Encabezado/pie del documento de cotización.
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  legalName?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  businessActivity?: string | null;
+
+  @IsOptional()
+  @IsString()
+  bankDetails?: string | null;
+
   @IsOptional()
   @IsString()
   @MaxLength(255)

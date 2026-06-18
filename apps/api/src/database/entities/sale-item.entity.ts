@@ -55,4 +55,9 @@ export class SaleItem {
   // de rentabilidad históricos cuando el costo del producto cambia luego.
   @Column({ type: 'decimal', precision: 15, scale: 2 })
   unitCost!: string;
+
+  // Observación libre POR ÍTEM (opcional). Se copia desde la cotización al
+  // convertir y se imprime debajo del producto en la nota de venta.
+  @Column({ type: 'text', nullable: true })
+  observation!: string | null;
 }
