@@ -9,7 +9,7 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { Permission } from '@inventory/shared';
+import { Permission, UserRole } from '@inventory/shared';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/types';
 import {
@@ -201,7 +201,7 @@ export class SalesController {
 
   @Post()
   create(@Body() dto: CreateSaleDto, @CurrentUser() user: JwtPayload) {
-    return this.svc.create(dto, user.sub);
+    return this.svc.create(dto, user.sub, user.role === UserRole.ADMIN);
   }
 
   @Post(':id/cancel')

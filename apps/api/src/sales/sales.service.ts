@@ -31,10 +31,9 @@ import { CashboxService } from '../cashbox/cashbox.service';
 import { CountersService } from '../common/counters.service';
 import { dayRange } from '../common/date-range';
 import {
-  businessNoonToday,
   businessTodayStr,
   endOfBusinessDay,
-  parseBusinessDate,
+  resolveCreationDate,
   startOfBusinessDay,
   startOfBusinessMonth,
 } from '../common/timezone';
@@ -150,7 +149,11 @@ export class SalesService {
 
   // ---------------- create ----------------
 
-  async create(dto: CreateSaleDto, userId: string): Promise<SaleDto> {
+  async create(
+    dto: CreateSaleDto,
+    userId: string,
+    isAdmin: boolean,
+  ): Promise<SaleDto> {
     // Validación liviana fuera de la transacción (evita locks innecesarios).
     if (dto.items.length === 0) {
       throw new BadRequestException('La venta debe tener al menos un item');
@@ -195,7 +198,9 @@ export class SalesService {
     // link de pago. Cada uno tiene su propia tasa en CompanySettings.
     const commissionRate = commissionRateFor(dto.paymentMethod, settings);
 
-    const date = dto.date ? parseBusinessDate(dto.date) : businessNoonToday();
+    // Solo el admin puede registrar con otra fecha; el resto, siempre hoy.
+    // Rechaza fechas futuras (ver resolveCreationDate).
+    const date = resolveCreationDate(dto.date, isAdmin);
     const year = date.getFullYear();
 
     const chargesCommission = commissionRate > 0;

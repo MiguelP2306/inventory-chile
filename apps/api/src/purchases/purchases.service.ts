@@ -16,10 +16,9 @@ import { Between, DataSource, In, Repository } from 'typeorm';
 import { CashboxService } from '../cashbox/cashbox.service';
 import { dayRange } from '../common/date-range';
 import {
-  businessNoonToday,
   businessTodayStr,
   endOfBusinessDay,
-  parseBusinessDate,
+  resolveCreationDate,
   startOfBusinessMonth,
 } from '../common/timezone';
 import { InventoryService } from '../inventory/inventory.service';
@@ -147,7 +146,10 @@ export class PurchasesService {
    *
    * Si falla cualquier paso, rollbackea todo.
    */
-  async create(dto: CreatePurchaseEntryDto, userId: string) {
+  async create(dto: CreatePurchaseEntryDto, userId: string, isAdmin: boolean) {
+    // Solo el admin puede registrar con otra fecha; el resto, siempre hoy.
+    // Rechaza fechas futuras. Se resuelve antes de la transacción (fail-fast).
+    const entryDate = resolveCreationDate(dto.date, isAdmin);
     const supplier = await this.suppliers.findOne({ where: { id: dto.supplierId } });
     if (!supplier) throw new NotFoundException('Proveedor no encontrado');
 
@@ -175,7 +177,7 @@ export class PurchasesService {
       const entry = manager.create(PurchaseEntry, {
         supplierId: dto.supplierId,
         warehouseId,
-        date: dto.date ? parseBusinessDate(dto.date) : businessNoonToday(),
+        date: entryDate,
         total,
         subtotal,
         taxAmount,
