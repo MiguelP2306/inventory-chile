@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Banknote, CreditCard, Receipt, Search, Send, Trash2, Warehouse as WarehouseIcon } from 'lucide-react';
+import { AlertTriangle, Banknote, Calendar as CalendarIcon, CreditCard, Receipt, Search, Send, Trash2, Warehouse as WarehouseIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { ProductPicker } from '@/components/product-picker';
@@ -45,8 +45,8 @@ import { getCompanySettings } from '@/lib/cashbox-api';
 import { apiErrorMessage } from '@/lib/catalog-api';
 import { invalidateProductCaches } from '@/lib/invalidate-product-caches';
 import { listCustomers } from '@/lib/customers-api';
-import { Permission, useCan } from '@/lib/current-user-context';
-import { formatCurrency } from '@/lib/format';
+import { Permission, useCan, useIsAdmin } from '@/lib/current-user-context';
+import { formatCurrency, todayIso } from '@/lib/format';
 import {
   createSale,
   getAvailableStock,
@@ -225,6 +225,11 @@ export function SaleForm({
   });
   const [notes, setNotes] = useState<string>(prefillFromQuotation?.notes ?? '');
 
+  // Fecha de la venta. Solo el admin puede cambiarla (backdating); el resto
+  // registra siempre con hoy. El backend reaplica esta regla por seguridad.
+  const isAdmin = useIsAdmin();
+  const [saleDate, setSaleDate] = useState<string>(todayIso());
+
   const settings = useQuery({
     queryKey: ['settings', 'company'],
     queryFn: getCompanySettings,
@@ -363,6 +368,8 @@ export function SaleForm({
       warehouseId: warehouseId || undefined,
       paymentMethod,
       vatExempt,
+      // Solo mandamos fecha si es admin; el backend la ignora para no-admins.
+      ...(isAdmin ? { date: saleDate } : {}),
       notes: notes.trim() || null,
       quotationId: prefillFromQuotation?.quotationId ?? null,
       items: items.map((it) => {
@@ -444,6 +451,31 @@ export function SaleForm({
           Cambiá la bodega si la elegida no tiene stock para todos los items.
         </p>
       </div>
+
+      {/* Fecha de la venta — solo admin puede registrar con otra fecha
+          (backdating). Sin fechas futuras. Para no-admins el campo no se
+          muestra y la venta queda con la fecha de hoy. */}
+      {isAdmin && (
+        <div className="rounded-2xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C] p-4">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-4">
+            <span className="flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 md:w-44 md:shrink-0 dark:text-slate-500">
+              <CalendarIcon className="h-4 w-4 text-slate-400" />
+              Fecha de la venta
+            </span>
+            <Input
+              type="date"
+              value={saleDate}
+              max={todayIso()}
+              onChange={(e) => setSaleDate(e.target.value)}
+              className="md:max-w-xs"
+            />
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Por defecto es hoy. Como administrador podés registrar la venta con
+            una fecha anterior. No se permiten fechas futuras.
+          </p>
+        </div>
+      )}
 
       {stockShortages.length > 0 && (
         <div className="flex items-start gap-3 rounded-2xl border border-amber-100 bg-amber-50/60 p-4 dark:border-amber-950/30 dark:bg-amber-950/10">

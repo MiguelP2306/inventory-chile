@@ -10,6 +10,7 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { UserRole } from '@inventory/shared';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/types';
 import {
@@ -109,7 +110,7 @@ export class PurchasesController {
 
   @Post()
   create(@Body() dto: CreatePurchaseEntryDto, @CurrentUser() user: JwtPayload) {
-    return this.svc.create(dto, user.sub);
+    return this.svc.create(dto, user.sub, user.role === UserRole.ADMIN);
   }
 
   /**

@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { ProductPicker } from '@/components/product-picker';
 import { getCompanySettings, publicDocumentUrl, uploadPurchaseInvoice } from '@/lib/cashbox-api';
 import { apiErrorMessage } from '@/lib/catalog-api';
+import { useIsAdmin } from '@/lib/current-user-context';
 import { formatCurrency, todayIso } from '@/lib/format';
 import { createPurchase, listSuppliers, type PurchaseInput } from '@/lib/inventory-api';
 import { invalidateProductCaches } from '@/lib/invalidate-product-caches';
@@ -48,6 +49,7 @@ const MAX_DOC_BYTES = 10 * 1024 * 1024;
 export default function NuevaCompraPage() {
   const router = useRouter();
   const qc = useQueryClient();
+  const isAdmin = useIsAdmin();
   const [supplierId, setSupplierId] = useState('');
   const [warehouseId, setWarehouseId] = useState('');
   const [date, setDate] = useState(todayIso());
@@ -269,13 +271,23 @@ export default function NuevaCompraPage() {
             <p className="text-[10px] text-slate-400">La mercadería ingresa al stock de esta bodega.</p>
           </div>
 
-          {/* Fecha */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-              Fecha
-            </label>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} />
-          </div>
+          {/* Fecha — solo el admin puede registrar la compra con otra fecha
+              (backdating). Para no-admins no se muestra y queda con hoy. Sin
+              fechas futuras. El backend reaplica esta regla por seguridad. */}
+          {isAdmin && (
+            <div className="space-y-1">
+              <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                Fecha
+              </label>
+              <input
+                type="date"
+                value={date}
+                max={todayIso()}
+                onChange={(e) => setDate(e.target.value)}
+                className={inputCls}
+              />
+            </div>
+          )}
         </div>
 
         {/* Facturas + notas */}

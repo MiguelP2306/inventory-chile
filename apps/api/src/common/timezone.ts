@@ -16,6 +16,8 @@
  * variable de entorno `APP_TZ` por si se reusa el sistema en otra región.
  */
 
+import { BadRequestException } from '@nestjs/common';
+
 export const BUSINESS_TZ = process.env.APP_TZ ?? 'America/Santiago';
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -95,6 +97,30 @@ export function businessNoonToday(): Date {
   const today = businessTodayStr();
   const [y, m, d] = parseYmd(today);
   return zonedWallTimeToUtc(y, m, d, 12, 0, 0, 0);
+}
+
+/**
+ * Resuelve la fecha de negocio para CREAR una venta o compra, aplicando las
+ * reglas de permisos:
+ *  - Sin fecha explícita → hoy.
+ *  - Con fecha pero el usuario NO es admin → se ignora y se usa hoy. Solo el
+ *    admin puede registrar con otra fecha (backdating).
+ *  - Con fecha y admin → se respeta, salvo que sea FUTURA (rechazada): una
+ *    venta/compra no puede ocurrir en un día posterior a hoy.
+ */
+export function resolveCreationDate(
+  rawDate: string | undefined | null,
+  isAdmin: boolean,
+): Date {
+  if (!rawDate || !isAdmin) return businessNoonToday();
+  const parsed = parseBusinessDate(rawDate);
+  // Comparamos por día calendario de negocio (YYYY-MM-DD, ordenable como string).
+  if (businessTodayStr(parsed) > businessTodayStr()) {
+    throw new BadRequestException(
+      'No se puede registrar con una fecha futura.',
+    );
+  }
+  return parsed;
 }
 
 /** Fecha de hoy en la zona del negocio como `YYYY-MM-DD`. */
