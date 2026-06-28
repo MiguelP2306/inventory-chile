@@ -272,8 +272,8 @@ export default function NuevaCompraPage() {
           </div>
 
           {/* Fecha — solo el admin puede registrar la compra con otra fecha
-              (backdating). Para no-admins no se muestra y queda con hoy. Sin
-              fechas futuras. El backend reaplica esta regla por seguridad. */}
+              (backdating o futura). Para no-admins no se muestra y queda con
+              hoy. El backend reaplica esta regla por seguridad. */}
           {isAdmin && (
             <div className="space-y-1">
               <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">
@@ -282,7 +282,6 @@ export default function NuevaCompraPage() {
               <input
                 type="date"
                 value={date}
-                max={todayIso()}
                 onChange={(e) => setDate(e.target.value)}
                 className={inputCls}
               />

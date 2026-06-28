@@ -453,8 +453,8 @@ export function SaleForm({
       </div>
 
       {/* Fecha de la venta — solo admin puede registrar con otra fecha
-          (backdating). Sin fechas futuras. Para no-admins el campo no se
-          muestra y la venta queda con la fecha de hoy. */}
+          (backdating o futura). Para no-admins el campo no se muestra y la
+          venta queda con la fecha de hoy. */}
       {isAdmin && (
         <div className="rounded-2xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C] p-4">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-4">
@@ -465,14 +465,13 @@ export function SaleForm({
             <Input
               type="date"
               value={saleDate}
-              max={todayIso()}
               onChange={(e) => setSaleDate(e.target.value)}
               className="md:max-w-xs"
             />
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
             Por defecto es hoy. Como administrador podés registrar la venta con
-            una fecha anterior. No se permiten fechas futuras.
+            cualquier fecha (anterior o posterior).
           </p>
         </div>
       )}
