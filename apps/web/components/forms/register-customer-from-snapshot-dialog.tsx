@@ -210,7 +210,17 @@ export function RegisterCustomerFromSnapshotDialog({
           </div>
         )}
 
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
+        {/* stopPropagation: este form vive dentro de un Dialog (Radix Portal)
+            renderizado adentro del <form> de la venta. En React los eventos
+            burbujean por el árbol de componentes (no el DOM), así que sin esto
+            el submit cruzaría el portal y dispararía el guardado de la venta. */}
+        <form
+          onSubmit={(e) => {
+            e.stopPropagation();
+            void form.handleSubmit(onSubmit)(e);
+          }}
+          className="space-y-3"
+        >
           <Field label="Nombre o razón social" error={form.formState.errors.name?.message}>
             <Input {...form.register('name')} autoFocus />
           </Field>

@@ -60,6 +60,13 @@ export function TemporaryProductButton({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // IMPORTANTE: este <form> vive dentro de un Dialog (Radix Portal). En React
+    // los eventos sintéticos burbujean por el ÁRBOL DE COMPONENTES (no el DOM),
+    // así que sin este stopPropagation el `submit` cruzaría el portal y
+    // dispararía el onSubmit del <form> padre (QuotationForm/SaleForm) →
+    // guardaba/cerraba la cotización ("Cotización actualizada") sin agregar el
+    // producto temporal. Ver reporte del cliente (jul-2026).
+    e.stopPropagation();
     if (!valid) return;
     onAdd({
       name: name.trim(),
