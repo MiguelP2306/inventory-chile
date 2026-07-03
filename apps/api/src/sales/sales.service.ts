@@ -216,6 +216,45 @@ export class SalesService {
     }
 
     const id = await this.ds.transaction(async (manager) => {
+      // Conversión desde una guía de despacho INDEPENDIENTE: esa guía YA
+      // descontó el stock al emitirse, así que esta venta NO vuelve a
+      // descontar (solo registra caja). Validamos la guía y usamos SU bodega
+      // para que el registro de la venta sea consistente. Raw SQL para no
+      // acoplar SalesModule ↔ DispatchModule.
+      const fromDispatch = !!dto.dispatchNoteId;
+      let effectiveWarehouseId = warehouseId;
+      if (fromDispatch) {
+        const rows: Array<{
+          origin: string;
+          status: string;
+          saleId: string | null;
+          warehouseId: string | null;
+        }> = await manager.query(
+          `SELECT \`origin\`, \`status\`, \`saleId\`, \`warehouseId\` FROM \`dispatch_notes\` WHERE \`id\` = ? LIMIT 1`,
+          [dto.dispatchNoteId],
+        );
+        const note = rows[0];
+        if (!note) {
+          throw new NotFoundException('Guía de despacho origen no encontrada');
+        }
+        if (note.origin !== 'INDEPENDENT') {
+          throw new ConflictException(
+            'Solo las guías independientes se pueden convertir en venta.',
+          );
+        }
+        if (note.status === 'VOIDED') {
+          throw new ConflictException(
+            'La guía origen está anulada — no se puede convertir en venta.',
+          );
+        }
+        if (note.saleId) {
+          throw new ConflictException(
+            'La guía origen ya fue convertida en venta.',
+          );
+        }
+        if (note.warehouseId) effectiveWarehouseId = note.warehouseId;
+      }
+
       // Calculo de totales y comisión. Si la venta es NO afecta a IVA
       // (sin documento), usamos tasa 0 → todo el total queda como neto y el
       // IVA descompuesto es 0.
@@ -233,7 +272,7 @@ export class SalesService {
       const sale = manager.getRepository(Sale).create({
         number,
         customerId: dto.customerId,
-        warehouseId,
+        warehouseId: effectiveWarehouseId,
         date,
         subtotal: totals.subtotal,
         taxAmount: totals.taxAmount,
@@ -269,17 +308,21 @@ export class SalesService {
         await manager.getRepository(SaleItem).save(item);
 
         // Aplicar el movimiento de stock. applyMovement valida que no quede
-        // negativo y tira ConflictException si pasa.
-        await this.inventory.applyMovement(manager, {
-          productId: it.productId,
-          warehouseId,
-          type: InventoryMovementType.SALE_OUT,
-          qty: -it.qty, // signado: salida
-          unitCost: product.cost,
-          reference: number,
-          refId: savedSale.id,
-          userId,
-        });
+        // negativo y tira ConflictException si pasa. EXCEPCIÓN: si la venta
+        // convierte una guía independiente, el stock ya bajó al emitir la guía
+        // (DISPATCH_OUT) → NO descontamos de nuevo para no duplicar.
+        if (!fromDispatch) {
+          await this.inventory.applyMovement(manager, {
+            productId: it.productId,
+            warehouseId: effectiveWarehouseId,
+            type: InventoryMovementType.SALE_OUT,
+            qty: -it.qty, // signado: salida
+            unitCost: product.cost,
+            reference: number,
+            refId: savedSale.id,
+            userId,
+          });
+        }
       }
 
       // Caja: ingreso por el total bruto.
@@ -346,6 +389,22 @@ export class SalesService {
           q.customerId = dto.customerId;
         }
         await qRepo.save(q);
+      }
+
+      // Linkeamos la guía independiente a la venta (marca de "convertida"). Ya
+      // validamos su estado al inicio de la transacción; acá solo actualizamos.
+      // El AND saleId IS NULL protege ante una carrera (dos ventas del mismo
+      // dispatch en paralelo): la segunda no matchea filas y cae en el 409.
+      if (fromDispatch) {
+        const res = await manager.query(
+          `UPDATE \`dispatch_notes\` SET \`saleId\` = ? WHERE \`id\` = ? AND \`saleId\` IS NULL`,
+          [savedSale.id, dto.dispatchNoteId],
+        );
+        if ((res?.affectedRows ?? 0) === 0) {
+          throw new ConflictException(
+            'La guía origen ya fue convertida en venta.',
+          );
+        }
       }
 
       // Fase 8.5 — mover el lifecycle del cliente a WON dentro de la

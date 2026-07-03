@@ -1,5 +1,6 @@
 import {
   DispatchNoteDto,
+  DispatchOrigin,
   DispatchStatus,
   InventoryMovementType,
   SaleStatus,
@@ -12,7 +13,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { Brackets, DataSource, EntityManager, Repository } from 'typeorm';
+import { Brackets, DataSource, EntityManager, In, Repository } from 'typeorm';
 import { CountersService } from '../common/counters.service';
 import { dayRange } from '../common/date-range';
 import { businessNoonToday, parseBusinessDate } from '../common/timezone';
@@ -20,12 +21,15 @@ import {
   Commune,
   Customer,
   DispatchNote,
+  DispatchNoteItem,
+  Product,
   Sale,
   SaleItem,
 } from '../database/entities';
 import { InventoryService } from '../inventory/inventory.service';
 import {
   CreateDispatchNoteDto,
+  CreateIndependentDispatchNoteDto,
   ListDispatchNotesQueryDto,
   VoidDispatchNoteDto,
 } from './dto';
@@ -45,6 +49,8 @@ export class DispatchService {
     private readonly saleRepo: Repository<Sale>,
     @InjectRepository(Customer)
     private readonly customerRepo: Repository<Customer>,
+    @InjectRepository(Product)
+    private readonly productRepo: Repository<Product>,
     @InjectRepository(Commune)
     private readonly communeRepo: Repository<Commune>,
     @InjectDataSource() private readonly ds: DataSource,
@@ -62,12 +68,14 @@ export class DispatchService {
       .createQueryBuilder('d')
       .leftJoinAndSelect('d.sale', 'sale')
       .leftJoinAndSelect('sale.customer', 'customer')
+      .leftJoinAndSelect('d.customer', 'indepCustomer')
       .leftJoinAndSelect('d.commune', 'commune')
       .leftJoinAndSelect('d.user', 'user')
       .leftJoinAndSelect('d.voidedBy', 'voidedBy');
 
     if (query.status) qb.andWhere('d.status = :st', { st: query.status });
     if (query.saleId) qb.andWhere('d.saleId = :sid', { sid: query.saleId });
+    if (query.origin) qb.andWhere('d.origin = :og', { og: query.origin });
     if (query.carrier)
       qb.andWhere('d.carrier = :c', { c: query.carrier });
     if (query.dateFrom || query.dateTo) {
@@ -81,7 +89,8 @@ export class DispatchService {
             .orWhere('sale.number LIKE :q')
             .orWhere('d.carrier LIKE :q')
             .orWhere('d.trackingNumber LIKE :q')
-            .orWhere('customer.name LIKE :q');
+            .orWhere('customer.name LIKE :q')
+            .orWhere('indepCustomer.name LIKE :q');
         }),
       );
     }
@@ -102,6 +111,9 @@ export class DispatchService {
       where: { id },
       relations: {
         sale: { customer: true, items: { product: true } },
+        customer: true,
+        warehouse: true,
+        items: { product: true },
         commune: true,
         user: true,
         voidedBy: true,
@@ -224,6 +236,202 @@ export class DispatchService {
   }
 
   /**
+   * Crea una guía de despacho INDEPENDIENTE (sin venta previa). Lleva su propio
+   * cliente y sus propios items (producto + cantidad). NO mueve stock ni
+   * registra movimientos de inventario — eso ocurre recién al convertir la
+   * guía en venta.
+   */
+  async createIndependent(
+    dto: CreateIndependentDispatchNoteDto,
+    userId: string,
+  ): Promise<DispatchNoteDto> {
+    const customer = await this.customerRepo.findOne({
+      where: { id: dto.customerId },
+    });
+    if (!customer) throw new NotFoundException('Cliente no encontrado');
+
+    // Detección de items duplicados (mismo producto dos veces): sumar en una
+    // sola línea evita ambigüedad al convertir a venta (la venta rechaza
+    // duplicados).
+    const productIds = dto.items.map((it) => it.productId);
+    if (productIds.length !== new Set(productIds).size) {
+      throw new BadRequestException(
+        'Hay productos duplicados. Sumá las cantidades en una sola línea.',
+      );
+    }
+    const products = await this.productRepo.find({
+      where: { id: In(productIds) },
+    });
+    if (products.length !== new Set(productIds).size) {
+      throw new NotFoundException('Algún producto no existe');
+    }
+    const productById = new Map(products.map((p) => [p.id, p]));
+
+    if (dto.communeId) {
+      const c = await this.communeRepo.findOne({
+        where: { id: dto.communeId },
+      });
+      if (!c) throw new NotFoundException('Comuna no encontrada');
+    }
+
+    const dispatchedAt = dto.dispatchedAt
+      ? parseBusinessDate(dto.dispatchedAt)
+      : businessNoonToday();
+    const year = dispatchedAt.getFullYear();
+
+    const id = await this.ds.transaction(async (manager) => {
+      const seq = await this.counters.nextNumber(COUNTER_KIND, year, manager);
+      const number = CountersService.format(NUMBER_PREFIX, year, seq);
+
+      const note = manager.getRepository(DispatchNote).create({
+        number,
+        origin: DispatchOrigin.INDEPENDENT,
+        saleId: null,
+        customerId: dto.customerId,
+        warehouseId: dto.warehouseId,
+        dispatchedAt,
+        carrier: dto.carrier?.trim() || null,
+        trackingNumber: dto.trackingNumber?.trim() || null,
+        addressStreet: dto.addressStreet?.trim() || null,
+        addressNumber: dto.addressNumber?.trim() || null,
+        communeId: dto.communeId ?? null,
+        addressNotes: dto.addressNotes?.trim() || null,
+        notes: dto.notes?.trim() || null,
+        status: DispatchStatus.ACTIVE,
+        userId,
+      });
+      const saved = await manager.getRepository(DispatchNote).save(note);
+
+      const itemRepo = manager.getRepository(DispatchNoteItem);
+      for (const it of dto.items) {
+        await itemRepo.save(
+          itemRepo.create({
+            dispatchNoteId: saved.id,
+            productId: it.productId,
+            qty: it.qty,
+          }),
+        );
+
+        // Descontar stock al emitir la guía (la mercadería sale físicamente).
+        // applyMovement valida que no quede negativo → tira ConflictException
+        // y aborta la transacción si falta stock. NO toca caja. El costo
+        // congelado usa el costo actual del producto. La venta que convierta
+        // esta guía NO vuelve a descontar (ver SalesService.create).
+        await this.inventory.applyMovement(manager, {
+          productId: it.productId,
+          warehouseId: dto.warehouseId,
+          type: InventoryMovementType.DISPATCH_OUT,
+          qty: -it.qty,
+          unitCost: productById.get(it.productId)?.cost ?? null,
+          reference: number,
+          refId: saved.id,
+          userId,
+        });
+      }
+
+      return saved.id;
+    });
+
+    return this.getOne(id);
+  }
+
+  /**
+   * Prepara la conversión de una guía INDEPENDIENTE en venta. NO crea la venta
+   * — devuelve un prefill (cliente + items con el precio actual del producto)
+   * que el frontend usa para abrir "Nueva venta" precargada. La venta, al
+   * confirmarse, linkea la guía (setea `saleId`) marcándola como convertida.
+   */
+  async convert(id: string): Promise<{
+    prefill: {
+      dispatchNoteId: string;
+      customerId: string;
+      warehouseId: string | null;
+      items: Array<{
+        productId: string;
+        sku: string | null;
+        name: string;
+        qty: number;
+        unitPrice: string;
+      }>;
+    };
+  }> {
+    const note = await this.repo.findOne({
+      where: { id },
+      relations: { items: { product: true } },
+    });
+    if (!note) throw new NotFoundException('Guía de despacho no encontrada');
+    if (note.origin !== DispatchOrigin.INDEPENDENT) {
+      throw new ConflictException(
+        'Solo las guías independientes se pueden convertir en venta.',
+      );
+    }
+    if (note.status === DispatchStatus.VOIDED) {
+      throw new ConflictException(
+        'La guía está anulada — no se puede convertir en venta.',
+      );
+    }
+    if (note.saleId) {
+      throw new ConflictException(
+        'Esta guía ya fue convertida en venta.',
+      );
+    }
+    const items = note.items ?? [];
+    if (items.length === 0) {
+      throw new ConflictException('La guía no tiene items para convertir.');
+    }
+
+    return {
+      prefill: {
+        dispatchNoteId: note.id,
+        customerId: note.customerId!,
+        warehouseId: note.warehouseId,
+        items: items.map((it) => ({
+          productId: it.productId,
+          sku: it.product?.sku ?? null,
+          name: it.product?.name ?? '',
+          qty: it.qty,
+          // Precio de venta ACTUAL del producto. El operador puede ajustarlo
+          // en el form de venta antes de confirmar.
+          unitPrice: it.product?.price ?? '0',
+        })),
+      },
+    };
+  }
+
+  /**
+   * Linkea una guía INDEPENDIENTE a la venta recién creada (la marca como
+   * convertida). Lo llama SalesService dentro de la transacción del create,
+   * usando el manager del caller para mantener atomicidad. Valida que la guía
+   * sea convertible; si no, tira 409/404 y aborta la venta.
+   */
+  async linkToSale(
+    dispatchNoteId: string,
+    saleId: string,
+    manager: EntityManager,
+  ): Promise<void> {
+    const repo = manager.getRepository(DispatchNote);
+    const note = await repo.findOne({ where: { id: dispatchNoteId } });
+    if (!note) {
+      throw new NotFoundException('Guía de despacho origen no encontrada');
+    }
+    if (note.origin !== DispatchOrigin.INDEPENDENT) {
+      throw new ConflictException(
+        'Solo las guías independientes se pueden convertir en venta.',
+      );
+    }
+    if (note.status === DispatchStatus.VOIDED) {
+      throw new ConflictException(
+        'La guía origen está anulada — no se puede convertir en venta.',
+      );
+    }
+    if (note.saleId) {
+      throw new ConflictException('La guía origen ya fue convertida en venta.');
+    }
+    note.saleId = saleId;
+    await repo.save(note);
+  }
+
+  /**
    * Recorre los items de la venta y registra un movimiento audit-only por
    * cada uno. Se usa al generar y al anular guías (mismo formato, distinto
    * `type` y signo). NO modifica `stocks`.
@@ -277,22 +485,50 @@ export class DispatchService {
       existing.voidedById = userId;
       await manager.getRepository(DispatchNote).save(existing);
 
-      // Audit-only: dejamos rastro del cambio de estado en el historial
-      // de movimientos. No revertimos stock (el SALE_OUT sigue vigente
-      // mientras la venta no se cancele).
-      const sale = await manager.getRepository(Sale).findOne({
-        where: { id: existing.saleId },
-      });
-      if (sale) {
-        await this.recordSaleItemAudit(
-          manager,
-          sale.id,
-          sale.warehouseId,
-          InventoryMovementType.DISPATCH_VOIDED,
-          existing.number,
-          existing.id,
-          userId,
-        );
+      // Guía INDEPENDIENTE sin convertir (saleId null): al emitirla descontó
+      // stock, así que al anularla lo DEVOLVEMOS (la mercadería no se despachó
+      // finalmente). DISPATCH_VOIDED con qty positiva restituye los consumos
+      // originales (matchea por refId = guía.id).
+      if (
+        existing.origin === DispatchOrigin.INDEPENDENT &&
+        !existing.saleId &&
+        existing.warehouseId
+      ) {
+        const ownItems = await manager.getRepository(DispatchNoteItem).find({
+          where: { dispatchNoteId: existing.id },
+        });
+        for (const it of ownItems) {
+          await this.inventory.applyMovement(manager, {
+            productId: it.productId,
+            warehouseId: existing.warehouseId,
+            type: InventoryMovementType.DISPATCH_VOIDED,
+            qty: +it.qty,
+            unitCost: null,
+            reference: existing.number,
+            refId: existing.id,
+            userId,
+          });
+        }
+      } else {
+        // Guía SALE (o independiente ya convertida): audit-only. No revertimos
+        // stock — el SALE_OUT de la venta sigue vigente mientras la venta no
+        // se cancele (esa cascada la maneja SalesService.cancel).
+        const sale = existing.saleId
+          ? await manager.getRepository(Sale).findOne({
+              where: { id: existing.saleId },
+            })
+          : null;
+        if (sale) {
+          await this.recordSaleItemAudit(
+            manager,
+            sale.id,
+            sale.warehouseId,
+            InventoryMovementType.DISPATCH_VOIDED,
+            existing.number,
+            existing.id,
+            userId,
+          );
+        }
       }
     });
 
@@ -345,7 +581,30 @@ export class DispatchService {
     return {
       id: d.id,
       number: d.number,
+      origin: d.origin,
       saleId: d.saleId,
+      customerId: d.customerId,
+      customer: d.customer
+        ? {
+            id: d.customer.id,
+            name: d.customer.name,
+            taxId: d.customer.taxId,
+          }
+        : null,
+      warehouseId: d.warehouseId,
+      warehouse: d.warehouse
+        ? { id: d.warehouse.id, name: d.warehouse.name }
+        : null,
+      // Items propios de la guía independiente (producto + cantidad). En guías
+      // SALE queda vacío — los items se leen de `sale.items`.
+      items: (d.items ?? []).map((it) => ({
+        id: it.id,
+        productId: it.productId,
+        qty: it.qty,
+        product: it.product
+          ? { id: it.product.id, sku: it.product.sku, name: it.product.name }
+          : undefined,
+      })),
       sale: sale
         ? {
             id: sale.id,

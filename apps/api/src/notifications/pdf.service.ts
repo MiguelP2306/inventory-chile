@@ -657,13 +657,24 @@ export class PdfService {
       d.addressNumber,
       d.commune ? `${d.commune.name}` : null,
     ].filter(Boolean) as string[];
+    // Guía independiente (origin INDEPENDENT sin convertir): no tiene venta,
+    // así que cliente e items se leen de la propia guía. Sus items no llevan
+    // precio (documento logístico), por eso los montos van en 0.
+    const independentItems = (d.items ?? []).map((it) => ({
+      code: it.product?.sku ?? '',
+      description: it.product?.name ?? '',
+      qty: it.qty,
+      unitPrice: '0',
+      discount: '0',
+      subtotal: '0',
+    }));
     return {
       number: d.number,
       dispatchedAt: d.dispatchedAt,
       saleNumber: d.sale?.number ?? '',
       customer: {
-        name: d.sale?.customer?.name ?? 'Sin especificar',
-        taxId: d.sale?.customer?.taxId ?? null,
+        name: d.sale?.customer?.name ?? d.customer?.name ?? 'Sin especificar',
+        taxId: d.sale?.customer?.taxId ?? d.customer?.taxId ?? null,
       },
       delivery: {
         addressLine: addressParts.join(' ').trim() || null,
@@ -671,14 +682,16 @@ export class PdfService {
         carrier: d.carrier,
         trackingNumber: d.trackingNumber,
       },
-      items: (d.sale?.items ?? []).map((it) => ({
-        code: it.product?.sku ?? '',
-        description: it.product?.name ?? '',
-        qty: it.qty,
-        unitPrice: it.unitPrice,
-        discount: it.discount,
-        subtotal: it.subtotal,
-      })),
+      items: d.sale
+        ? (d.sale.items ?? []).map((it) => ({
+            code: it.product?.sku ?? '',
+            description: it.product?.name ?? '',
+            qty: it.qty,
+            unitPrice: it.unitPrice,
+            discount: it.discount,
+            subtotal: it.subtotal,
+          }))
+        : independentItems,
       subtotal: d.sale?.subtotal ?? '0',
       taxAmount: d.sale?.taxAmount ?? '0',
       total: d.sale?.total ?? '0',

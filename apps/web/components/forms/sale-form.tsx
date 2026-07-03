@@ -131,6 +131,24 @@ interface Props {
    * No traen cliente — el operador lo elige acá.
    */
   initialBagItems?: SaleBagItem[];
+  /**
+   * Prefill al convertir una guía de despacho INDEPENDIENTE en venta. Trae el
+   * cliente y los items (con el precio actual del producto). El
+   * `dispatchNoteId` viaja al backend en el create para linkear la guía
+   * (marcarla como convertida) en la misma transacción.
+   */
+  prefillFromDispatch?: {
+    dispatchNoteId: string;
+    customer: CustomerDto | null;
+    warehouseId: string | null;
+    items: Array<{
+      productId: string;
+      sku: string | null;
+      name: string;
+      qty: number;
+      unitPrice: string;
+    }>;
+  };
   onSuccess?: (sale: SaleDto) => void;
   onCancel?: () => void;
 }
@@ -138,11 +156,16 @@ interface Props {
 export function SaleForm({
   prefillFromQuotation,
   initialBagItems,
+  prefillFromDispatch,
   onSuccess,
   onCancel,
 }: Props) {
   const qc = useQueryClient();
   const canSeeBreakdown = useCan(Permission.SALE_VIEW_FINANCIAL_BREAKDOWN);
+  // Conversión de guía de despacho: el stock YA se descontó al emitir la guía,
+  // así que acá no validamos ni bloqueamos por stock, y la bodega queda fijada
+  // a la de la guía (el backend la fuerza igual). El selector se oculta.
+  const isDispatchConversion = !!prefillFromDispatch;
   // Ronda 10 — tabs simplificadas: cliente + items en una sola vista
   // ('principal'); notas aparte. Las referencias a 'cliente' o 'items' en
   // validaciones se mapean a 'principal' + abrir/cerrar la card del cliente.
@@ -152,7 +175,7 @@ export function SaleForm({
   const [clientOpen, setClientOpen] = useState(true);
 
   const [customer, setCustomer] = useState<CustomerDto | null>(
-    prefillFromQuotation?.customer ?? null,
+    prefillFromQuotation?.customer ?? prefillFromDispatch?.customer ?? null,
   );
 
   // Si la cotización venía con cliente libre, mostramos un banner con el
@@ -174,7 +197,9 @@ export function SaleForm({
 
   // Bodega de la venta. Default = "Tienda" si existe, sino la primera
   // activa. El selector solo se muestra cuando hay 2+ bodegas activas.
-  const [warehouseId, setWarehouseId] = useState<string>('');
+  const [warehouseId, setWarehouseId] = useState<string>(
+    prefillFromDispatch?.warehouseId ?? '',
+  );
   const warehouses = useQuery({
     queryKey: ['warehouses', 'active'],
     queryFn: () => listWarehouses({ active: 'true' }),
@@ -203,6 +228,17 @@ export function SaleForm({
   const [items, setItems] = useState<ItemRow[]>(() => {
     if (initialBagItems && initialBagItems.length > 0) {
       return initialBagItems.map((it) => ({
+        productId: it.productId,
+        sku: it.sku ?? '',
+        name: it.name,
+        qty: it.qty,
+        unitPrice: it.unitPrice,
+        discountKind: '$',
+        discountValue: '0',
+      }));
+    }
+    if (prefillFromDispatch && prefillFromDispatch.items.length > 0) {
+      return prefillFromDispatch.items.map((it) => ({
         productId: it.productId,
         sku: it.sku ?? '',
         name: it.name,
@@ -262,7 +298,8 @@ export function SaleForm({
   const stockQuery = useQuery({
     queryKey: ['sales-available-stock', warehouseId, productIds.join(',')],
     queryFn: () => getAvailableStock(productIds, warehouseId),
-    enabled: !!warehouseId && productIds.length > 0,
+    // En conversión de guía el stock ya salió; no lo consultamos ni validamos.
+    enabled: !isDispatchConversion && !!warehouseId && productIds.length > 0,
   });
   const stockMap = useMemo(() => {
     const m = new Map<string, number>();
@@ -298,14 +335,19 @@ export function SaleForm({
   const commissionAmount = chargesCommission ? totalBruto * commissionRate : 0;
   const netAfterCommission = totalBruto - commissionAmount;
 
-  const stockShortages = items
-    .map((it, idx) => {
-      const available = stockMap.get(it.productId);
-      if (available == null) return null;
-      if (it.qty > available) return { idx, available, requested: it.qty };
-      return null;
-    })
-    .filter((x): x is { idx: number; available: number; requested: number } => x !== null);
+  const stockShortages = isDispatchConversion
+    ? []
+    : items
+        .map((it, idx) => {
+          const available = stockMap.get(it.productId);
+          if (available == null) return null;
+          if (it.qty > available) return { idx, available, requested: it.qty };
+          return null;
+        })
+        .filter(
+          (x): x is { idx: number; available: number; requested: number } =>
+            x !== null,
+        );
 
   const itemsHaveErrors =
     items.length === 0 ||
@@ -372,6 +414,7 @@ export function SaleForm({
       ...(isAdmin ? { date: saleDate } : {}),
       notes: notes.trim() || null,
       quotationId: prefillFromQuotation?.quotationId ?? null,
+      dispatchNoteId: prefillFromDispatch?.dispatchNoteId ?? null,
       items: items.map((it) => {
         const qty = Number(it.qty);
         const unit = Number(it.unitPrice);
@@ -422,8 +465,14 @@ export function SaleForm({
     >
       {/* Selector de bodega visible siempre, fuera de los tabs. La bodega
           define contra qué stock se valida la venta y de dónde se descuentan
-          los items al confirmar. */}
-      <div className="rounded-2xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C] p-4">
+          los items al confirmar. En conversión de guía se oculta: el stock ya
+          salió de la bodega de la guía y esa bodega queda fija. */}
+      <div
+        className={cn(
+          'rounded-2xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C] p-4',
+          isDispatchConversion && 'hidden',
+        )}
+      >
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-4">
           <span className="flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 md:w-44 md:shrink-0 dark:text-slate-500">
             <WarehouseIcon className="h-4 w-4 text-slate-400" />

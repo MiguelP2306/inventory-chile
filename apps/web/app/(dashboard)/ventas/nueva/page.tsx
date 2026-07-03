@@ -9,7 +9,11 @@ import { toast } from 'sonner';
 import { SaleForm, type SaleBagItem } from '@/components/forms/sale-form';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { createDispatchNote } from '@/lib/dispatch-api';
+import { getCustomer } from '@/lib/customers-api';
+import {
+  createDispatchNote,
+  getDispatchConvertPrefill,
+} from '@/lib/dispatch-api';
 import { getQuotation } from '@/lib/quotations-api';
 import {
   bagLineKey,
@@ -31,6 +35,8 @@ export default function NuevaVentaPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const fromQuotationId = searchParams.get('fromQuotation');
+  // Conversión de una guía de despacho independiente en venta.
+  const fromDispatchId = searchParams.get('fromDispatch');
   const fromBag = searchParams.get('fromBag') === '1';
   // Ronda 9 — si llega `generateDispatch=1`, después de crear la venta se
   // dispara la creación automática de una guía con datos mínimos (sin
@@ -123,7 +129,36 @@ export default function NuevaVentaPage() {
     };
   }, [fromQuotationId, quotation.data]);
 
+  // --- Prefill desde guía de despacho independiente ---
+  const dispatchPrefillQuery = useQuery({
+    queryKey: ['dispatch-convert', fromDispatchId],
+    queryFn: () => getDispatchConvertPrefill(fromDispatchId!),
+    enabled: !!fromDispatchId,
+  });
+  const dispatchCustomerId = dispatchPrefillQuery.data?.prefill.customerId;
+  const dispatchCustomerQuery = useQuery({
+    queryKey: ['customer', dispatchCustomerId],
+    queryFn: () => getCustomer(dispatchCustomerId!),
+    enabled: !!dispatchCustomerId,
+  });
+  const dispatchPrefill = useMemo(() => {
+    const p = dispatchPrefillQuery.data?.prefill;
+    if (!p || !dispatchCustomerQuery.data) return undefined;
+    return {
+      dispatchNoteId: p.dispatchNoteId,
+      customer: dispatchCustomerQuery.data,
+      warehouseId: p.warehouseId,
+      items: p.items,
+    };
+  }, [dispatchPrefillQuery.data, dispatchCustomerQuery.data]);
+
   if (fromQuotationId && quotation.isLoading) {
+    return <Skeleton className="h-40 w-full" />;
+  }
+  if (
+    fromDispatchId &&
+    (dispatchPrefillQuery.isLoading || dispatchCustomerQuery.isLoading)
+  ) {
     return <Skeleton className="h-40 w-full" />;
   }
 
@@ -132,7 +167,15 @@ export default function NuevaVentaPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Button asChild variant="ghost" size="icon">
-            <Link href={fromQuotationId ? `/cotizaciones/${fromQuotationId}` : '/ventas'}>
+            <Link
+              href={
+                fromQuotationId
+                  ? `/cotizaciones/${fromQuotationId}`
+                  : fromDispatchId
+                    ? `/guias/${fromDispatchId}`
+                    : '/ventas'
+              }
+            >
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
@@ -140,12 +183,20 @@ export default function NuevaVentaPage() {
             <h1 className="text-2xl font-semibold">
               {fromQuotationId && quotation.data
                 ? `Nueva venta desde ${quotation.data.number}`
-                : 'Nueva venta'}
+                : fromDispatchId
+                  ? 'Nueva venta desde guía de despacho'
+                  : 'Nueva venta'}
             </h1>
             {fromQuotationId && quotation.data && (
               <p className="text-sm text-muted-foreground">
                 Al confirmar, la cotización pasará a estado{' '}
                 <strong>CONVERTIDA</strong> automáticamente.
+              </p>
+            )}
+            {fromDispatchId && dispatchPrefill && (
+              <p className="text-sm text-muted-foreground">
+                Al confirmar, la guía quedará marcada como{' '}
+                <strong>convertida</strong> y el stock se descontará ahora.
               </p>
             )}
           </div>
@@ -154,6 +205,7 @@ export default function NuevaVentaPage() {
 
       <SaleForm
         prefillFromQuotation={prefill}
+        prefillFromDispatch={dispatchPrefill}
         initialBagItems={bagPrefill}
         onSuccess={(sale) => {
           // Si la venta arrancó desde el bolso, quitamos del bolso SOLO los

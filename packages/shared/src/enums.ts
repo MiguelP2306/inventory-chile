@@ -163,6 +163,19 @@ export const DispatchStatus = {
 export type DispatchStatus =
   (typeof DispatchStatus)[keyof typeof DispatchStatus];
 
+// Origen de la guía de despacho:
+//  - SALE: nace desde una venta ya existente (flujo histórico). Los items y
+//    el cliente se leen prestados de la venta origen.
+//  - INDEPENDENT: se crea de cero, sin venta previa (guía primero, venta
+//    después). Lleva su propio cliente y sus propios items (producto + cantidad,
+//    sin precios). El stock NO se mueve hasta que la guía se convierte en venta.
+export const DispatchOrigin = {
+  SALE: 'SALE',
+  INDEPENDENT: 'INDEPENDENT',
+} as const;
+export type DispatchOrigin =
+  (typeof DispatchOrigin)[keyof typeof DispatchOrigin];
+
 export const UserRole = {
   ADMIN: 'ADMIN',
   // USER = vendedor/cliente. Mismo acceso de navegación que ADMIN pero con

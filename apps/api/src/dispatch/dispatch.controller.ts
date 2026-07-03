@@ -16,6 +16,7 @@ import { SettingsService } from '../settings/settings.service';
 import { DispatchService } from './dispatch.service';
 import {
   CreateDispatchNoteDto,
+  CreateIndependentDispatchNoteDto,
   ListDispatchNotesQueryDto,
   VoidDispatchNoteDto,
 } from './dto';
@@ -52,12 +53,31 @@ export class DispatchController {
     return this.svc.getOne(id);
   }
 
+  /**
+   * Prefill para convertir una guía INDEPENDIENTE en venta. Devuelve cliente +
+   * items con el precio actual del producto. No crea nada — el frontend abre
+   * "Nueva venta" precargada y la venta linkea la guía al confirmarse.
+   */
+  @Get(':id/convert')
+  convert(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.svc.convert(id);
+  }
+
   @Post()
   create(
     @Body() dto: CreateDispatchNoteDto,
     @CurrentUser() user: JwtPayload,
   ) {
     return this.svc.create(dto, user.sub);
+  }
+
+  /** Crea una guía de despacho independiente (sin venta previa). */
+  @Post('independent')
+  createIndependent(
+    @Body() dto: CreateIndependentDispatchNoteDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.svc.createIndependent(dto, user.sub);
   }
 
   @Post(':id/void')

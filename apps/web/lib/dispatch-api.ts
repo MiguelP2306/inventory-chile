@@ -1,8 +1,11 @@
 // Wrappers tipados sobre axios para Guías de despacho (Fase 7.7).
 
 import type {
+  ConvertDispatchToSaleResult,
   CreateDispatchNoteInput,
+  CreateIndependentDispatchNoteInput,
   DispatchNoteDto,
+  DispatchOriginDto,
   DispatchStatusDto,
   PaginatedResult,
   VoidDispatchNoteInput,
@@ -11,6 +14,7 @@ import { api } from './api';
 
 export interface ListDispatchNotesParams {
   status?: DispatchStatusDto;
+  origin?: DispatchOriginDto;
   saleId?: string;
   carrier?: string;
   dateFrom?: string;
@@ -30,6 +34,23 @@ export const getDispatchNote = (id: string) =>
 
 export const createDispatchNote = (input: CreateDispatchNoteInput) =>
   api.post<DispatchNoteDto>('/dispatch', input).then((r) => r.data);
+
+/** Crea una guía de despacho independiente (sin venta previa). */
+export const createIndependentDispatchNote = (
+  input: CreateIndependentDispatchNoteInput,
+) =>
+  api
+    .post<DispatchNoteDto>('/dispatch/independent', input)
+    .then((r) => r.data);
+
+/**
+ * Prefill para convertir una guía independiente en venta (cliente + items con
+ * precio actual). No crea la venta — la crea el form de Nueva venta.
+ */
+export const getDispatchConvertPrefill = (id: string) =>
+  api
+    .get<ConvertDispatchToSaleResult>(`/dispatch/${id}/convert`)
+    .then((r) => r.data);
 
 export const voidDispatchNote = (id: string, input: VoidDispatchNoteInput) =>
   api.post<DispatchNoteDto>(`/dispatch/${id}/void`, input).then((r) => r.data);

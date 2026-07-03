@@ -503,6 +503,7 @@ export class InventoryService {
             where: { id: In(dispatchIds) },
             relations: {
               sale: { customer: true },
+              customer: true,
               commune: true,
             },
           })
@@ -758,7 +759,9 @@ export class InventoryService {
           id: d.id,
           number: d.number,
           sale: {
-            id: d.saleId,
+            // Los movimientos DISPATCH_* solo los emiten guías con venta
+            // origen; saleId nunca es null acá. El ?? '' es solo para el tipo.
+            id: d.saleId ?? '',
             number: d.sale?.number ?? '—',
           },
           customer: d.sale?.customer
@@ -767,7 +770,13 @@ export class InventoryService {
                 name: d.sale.customer.name,
                 taxId: d.sale.customer.taxId,
               }
-            : null,
+            : d.customer
+              ? {
+                  id: d.customer.id,
+                  name: d.customer.name,
+                  taxId: d.customer.taxId,
+                }
+              : null,
           dispatchedAt: d.dispatchedAt.toISOString(),
           carrier: d.carrier,
           trackingNumber: d.trackingNumber,

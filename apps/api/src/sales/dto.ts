@@ -75,6 +75,13 @@ export class CreateSaleDto {
   @IsUUID()
   quotationId?: string | null;
 
+  // Si la venta proviene de una guía de despacho INDEPENDIENTE, el backend
+  // linkea la guía (setea su saleId) dentro de la misma transacción,
+  // marcándola como convertida.
+  @IsOptional()
+  @IsUUID()
+  dispatchNoteId?: string | null;
+
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })

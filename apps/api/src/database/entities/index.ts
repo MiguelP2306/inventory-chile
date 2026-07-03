@@ -6,6 +6,7 @@ export { CompanySettings } from './company-settings.entity';
 export { Counter } from './counter.entity';
 export { Customer } from './customer.entity';
 export { DispatchNote } from './dispatch-note.entity';
+export { DispatchNoteItem } from './dispatch-note-item.entity';
 export { Expense } from './expense.entity';
 export { ExpenseCategory } from './expense-category.entity';
 export { HubspotSyncJob } from './hubspot-sync-job.entity';

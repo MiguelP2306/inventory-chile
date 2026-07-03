@@ -1103,6 +1103,9 @@ export interface CreateSaleInput {
   // Si se está convirtiendo desde una cotización, mandar su id para que el
   // backend marque la cotización como CONVERTED en la misma transacción.
   quotationId?: string | null;
+  // Si la venta se crea convirtiendo una guía de despacho independiente, su id
+  // viaja acá para que el backend linkee la guía en la misma transacción.
+  dispatchNoteId?: string | null;
   items: CreateSaleItemInput[];
 }
 
@@ -1349,10 +1352,30 @@ export interface UpdateWarrantyClaimStatusInput {
 
 export type DispatchStatusDto = 'ACTIVE' | 'VOIDED';
 
+export type DispatchOriginDto = 'SALE' | 'INDEPENDENT';
+
 export interface DispatchNoteDto {
   id: string;
   number: string;
-  saleId: string;
+  // SALE = generada desde una venta. INDEPENDENT = creada de cero.
+  origin: DispatchOriginDto;
+  // En guías INDEPENDENT arranca en null y se setea al convertir en venta.
+  saleId: string | null;
+  // Cliente de la guía INDEPENDENT (null en guías SALE — ahí el cliente vive
+  // en `sale.customer`).
+  customerId: string | null;
+  customer?: { id: string; name: string; taxId: string | null } | null;
+  // Bodega desde la que la guía INDEPENDENT descontó stock (null en guías SALE).
+  warehouseId: string | null;
+  warehouse?: { id: string; name: string } | null;
+  // Items propios de la guía INDEPENDENT (producto + cantidad, sin precios).
+  // Vacío en guías SALE (esas usan `sale.items`).
+  items?: Array<{
+    id: string;
+    productId: string;
+    qty: number;
+    product?: { id: string; sku: string | null; name: string };
+  }>;
   sale?: {
     id: string;
     number: string;
@@ -1404,6 +1427,47 @@ export interface CreateDispatchNoteInput {
   communeId?: string | null;
   addressNotes?: string | null;
   notes?: string | null;
+}
+
+export interface CreateIndependentDispatchNoteItemInput {
+  productId: string;
+  qty: number;
+}
+
+export interface CreateIndependentDispatchNoteInput {
+  customerId: string;
+  // Bodega desde la que se descuenta el stock al emitir la guía.
+  warehouseId: string;
+  items: CreateIndependentDispatchNoteItemInput[];
+  dispatchedAt?: string;
+  carrier?: string | null;
+  trackingNumber?: string | null;
+  addressStreet?: string | null;
+  addressNumber?: string | null;
+  communeId?: string | null;
+  addressNotes?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * Prefill devuelto por GET /dispatch/:id/convert. El frontend lo usa para
+ * abrir "Nueva venta" precargada. El precio unitario es el precio actual del
+ * producto (editable en el form).
+ */
+export interface ConvertDispatchToSaleResult {
+  prefill: {
+    dispatchNoteId: string;
+    customerId: string;
+    // Bodega de la guía — la venta que la convierte queda fijada a ésta.
+    warehouseId: string | null;
+    items: Array<{
+      productId: string;
+      sku: string | null;
+      name: string;
+      qty: number;
+      unitPrice: string;
+    }>;
+  };
 }
 
 export interface VoidDispatchNoteInput {

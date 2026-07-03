@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Ban, ChevronDown, ExternalLink, FileText, Printer } from 'lucide-react';
+import { ArrowLeft, Ban, ChevronDown, ExternalLink, FileText, Printer, Receipt } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
@@ -42,6 +42,13 @@ export default function GuiaDetailPage() {
 
   const d = dq.data;
   const canVoid = d.status === 'ACTIVE';
+  const isIndependent = d.origin === 'INDEPENDENT';
+  // Una guía independiente convertida ya tiene saleId. Solo se puede convertir
+  // si es independiente, sigue activa y todavía no tiene venta.
+  const canConvert = isIndependent && !d.saleId && d.status === 'ACTIVE';
+  // Items a mostrar: guía independiente usa sus propios items (sin precio);
+  // guía desde venta usa los items de la venta origen (valorizados).
+  const saleItems = d.sale?.items ?? [];
   const addressLine = [d.addressStreet, d.addressNumber, d.commune?.name].filter(Boolean).join(' ');
 
   return (
@@ -71,6 +78,15 @@ export default function GuiaDetailPage() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {canConvert && (
+            <Link
+              href={`/ventas/nueva?fromDispatch=${d.id}`}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50/60 px-4 py-2.5 text-xs font-bold text-emerald-600 transition-colors hover:bg-emerald-50 dark:border-emerald-950/30 dark:bg-emerald-950/15 dark:text-emerald-400"
+            >
+              <Receipt className="h-4 w-4" />
+              Convertir a venta
+            </Link>
+          )}
           {canVoid && (
             <button
               type="button"
@@ -132,21 +148,42 @@ export default function GuiaDetailPage() {
       {/* VENTA / DIRECCIÓN / TRANSPORTE */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className={`space-y-1 ${CARD}`}>
-          <h2 className={LABEL}>Venta origen</h2>
+          <h2 className={LABEL}>{isIndependent ? 'Cliente' : 'Venta origen'}</h2>
           {d.sale ? (
-            <Link
-              href={`/ventas/${d.sale.id}`}
-              className="inline-flex items-center gap-1 font-mono text-sm font-bold text-[#2F6BFF] hover:underline"
-            >
-              {d.sale.number} <ExternalLink className="h-3 w-3" />
-            </Link>
+            <>
+              <Link
+                href={`/ventas/${d.sale.id}`}
+                className="inline-flex items-center gap-1 font-mono text-sm font-bold text-[#2F6BFF] hover:underline"
+              >
+                {d.sale.number} <ExternalLink className="h-3 w-3" />
+              </Link>
+              {isIndependent && (
+                <div className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                  Convertida a venta
+                </div>
+              )}
+              {d.sale.customer && (
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  {d.sale.customer.name} · RUT {d.sale.customer.taxId}
+                </div>
+              )}
+            </>
+          ) : d.customer ? (
+            <>
+              <div className="text-sm font-bold text-slate-900 dark:text-white">
+                {d.customer.name}
+              </div>
+              {d.customer.taxId && (
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  RUT {d.customer.taxId}
+                </div>
+              )}
+              <div className="text-[11px] font-semibold text-slate-400">
+                Guía independiente · sin convertir
+              </div>
+            </>
           ) : (
             <span className="text-xs text-slate-400">—</span>
-          )}
-          {d.sale?.customer && (
-            <div className="text-xs text-slate-500 dark:text-slate-400">
-              {d.sale.customer.name} · RUT {d.sale.customer.taxId}
-            </div>
           )}
         </div>
         <div className={`space-y-1 ${CARD}`}>
@@ -174,6 +211,14 @@ export default function GuiaDetailPage() {
               N° seguimiento: <span className="font-mono text-slate-700 dark:text-slate-300">{d.trackingNumber}</span>
             </div>
           )}
+          {isIndependent && d.warehouse && (
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              Bodega:{' '}
+              <span className="font-bold text-slate-700 dark:text-slate-200">
+                {d.warehouse.name}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -183,38 +228,67 @@ export default function GuiaDetailPage() {
           <h2 className={LABEL}>Items despachados</h2>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[500px] border-collapse text-left text-[12px]">
-            <thead>
-              <tr className="border-b border-slate-100 bg-slate-50/20 font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-850 dark:text-slate-500">
-                <th className="w-[18%] py-3 pl-6">SKU</th>
-                <th className="py-3">Producto</th>
-                <th className="py-3 text-right">Cant.</th>
-                <th className="py-3 text-right">P. Unit</th>
-                <th className="py-3 pr-6 text-right">Subtotal</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 font-medium dark:divide-slate-850">
-              {(d.sale?.items ?? []).map((it) => (
-                <tr key={it.id} className="transition-colors hover:bg-slate-50/40 dark:hover:bg-slate-900/10">
-                  <td className="py-4 pl-6 font-mono text-slate-500 dark:text-slate-400">
-                    {it.product?.sku ?? '—'}
-                  </td>
-                  <td className="max-w-[300px] truncate py-4 font-bold text-slate-950 dark:text-white">
-                    {it.product?.name ?? '—'}
-                  </td>
-                  <td className="py-4 text-right font-mono text-[13px] font-black text-slate-900 dark:text-white">
-                    {it.qty}
-                  </td>
-                  <td className="py-4 text-right font-mono text-slate-600 dark:text-slate-300">
-                    {formatCurrency(it.unitPrice)}
-                  </td>
-                  <td className="py-4 pr-6 text-right font-mono text-[13px] font-black text-slate-900 dark:text-white">
-                    {formatCurrency(it.subtotal)}
-                  </td>
+          {isIndependent ? (
+            // Guía independiente: solo producto + cantidad (sin precios). Los
+            // precios se definen al convertir a venta.
+            <table className="w-full min-w-[400px] border-collapse text-left text-[12px]">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50/20 font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-850 dark:text-slate-500">
+                  <th className="w-[22%] py-3 pl-6">SKU</th>
+                  <th className="py-3">Producto</th>
+                  <th className="py-3 pr-6 text-right">Cant.</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-medium dark:divide-slate-850">
+                {(d.items ?? []).map((it) => (
+                  <tr key={it.id} className="transition-colors hover:bg-slate-50/40 dark:hover:bg-slate-900/10">
+                    <td className="py-4 pl-6 font-mono text-slate-500 dark:text-slate-400">
+                      {it.product?.sku ?? '—'}
+                    </td>
+                    <td className="max-w-[300px] truncate py-4 font-bold text-slate-950 dark:text-white">
+                      {it.product?.name ?? '—'}
+                    </td>
+                    <td className="py-4 pr-6 text-right font-mono text-[13px] font-black text-slate-900 dark:text-white">
+                      {it.qty}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <table className="w-full min-w-[500px] border-collapse text-left text-[12px]">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50/20 font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-850 dark:text-slate-500">
+                  <th className="w-[18%] py-3 pl-6">SKU</th>
+                  <th className="py-3">Producto</th>
+                  <th className="py-3 text-right">Cant.</th>
+                  <th className="py-3 text-right">P. Unit</th>
+                  <th className="py-3 pr-6 text-right">Subtotal</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-medium dark:divide-slate-850">
+                {saleItems.map((it) => (
+                  <tr key={it.id} className="transition-colors hover:bg-slate-50/40 dark:hover:bg-slate-900/10">
+                    <td className="py-4 pl-6 font-mono text-slate-500 dark:text-slate-400">
+                      {it.product?.sku ?? '—'}
+                    </td>
+                    <td className="max-w-[300px] truncate py-4 font-bold text-slate-950 dark:text-white">
+                      {it.product?.name ?? '—'}
+                    </td>
+                    <td className="py-4 text-right font-mono text-[13px] font-black text-slate-900 dark:text-white">
+                      {it.qty}
+                    </td>
+                    <td className="py-4 text-right font-mono text-slate-600 dark:text-slate-300">
+                      {formatCurrency(it.unitPrice)}
+                    </td>
+                    <td className="py-4 pr-6 text-right font-mono text-[13px] font-black text-slate-900 dark:text-white">
+                      {formatCurrency(it.subtotal)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
         {/* Totales de la guía valorizada (tomados de la venta origen). */}
         {d.sale && (

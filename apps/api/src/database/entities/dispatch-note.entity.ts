@@ -1,4 +1,4 @@
-import { DispatchStatus } from '@inventory/shared';
+import { DispatchOrigin, DispatchStatus } from '@inventory/shared';
 import {
   Column,
   CreateDateColumn,
@@ -6,12 +6,16 @@ import {
   Index,
   JoinColumn,
   ManyToOne,
+  OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { Commune } from './commune.entity';
+import { Customer } from './customer.entity';
+import { DispatchNoteItem } from './dispatch-note-item.entity';
 import { Sale } from './sale.entity';
 import { User } from './user.entity';
+import { Warehouse } from './warehouse.entity';
 
 /**
  * Guía de despacho — documento operativo para el envío físico de los items
@@ -33,13 +37,54 @@ export class DispatchNote {
   @Column({ type: 'varchar', length: 40 })
   number!: string;
 
-  @ManyToOne(() => Sale, { onDelete: 'RESTRICT', nullable: false })
+  // Origen de la guía. SALE = generada desde una venta (histórico).
+  // INDEPENDENT = creada de cero, sin venta previa.
+  @Index('idx_dispatch_notes_origin')
+  @Column({
+    type: 'enum',
+    enum: DispatchOrigin,
+    default: DispatchOrigin.SALE,
+  })
+  origin!: DispatchOrigin;
+
+  // Venta asociada. En guías SALE está desde el inicio. En guías INDEPENDENT
+  // arranca en null y se setea cuando la guía se convierte en venta (queda
+  // como marca de "convertida").
+  @ManyToOne(() => Sale, { onDelete: 'RESTRICT', nullable: true })
   @JoinColumn({ name: 'saleId' })
-  sale?: Sale;
+  sale?: Sale | null;
 
   @Index('idx_dispatch_notes_sale')
-  @Column({ type: 'char', length: 36 })
-  saleId!: string;
+  @Column({ type: 'char', length: 36, nullable: true })
+  saleId!: string | null;
+
+  // Cliente de la guía INDEPENDENT (en guías SALE se lee de la venta origen y
+  // este campo queda null).
+  @ManyToOne(() => Customer, { onDelete: 'RESTRICT', nullable: true })
+  @JoinColumn({ name: 'customerId' })
+  customer?: Customer | null;
+
+  @Index('idx_dispatch_notes_customer')
+  @Column({ type: 'char', length: 36, nullable: true })
+  customerId!: string | null;
+
+  // Bodega desde la que se descuenta el stock al crear una guía INDEPENDENT
+  // (el stock baja al emitir la guía). Null en guías SALE (esas no mueven
+  // stock; el SALE_OUT lo hizo la venta). La venta que convierte la guía
+  // queda fijada a esta misma bodega.
+  @ManyToOne(() => Warehouse, { onDelete: 'RESTRICT', nullable: true })
+  @JoinColumn({ name: 'warehouseId' })
+  warehouse?: Warehouse | null;
+
+  @Column({ type: 'char', length: 36, nullable: true })
+  warehouseId!: string | null;
+
+  // Líneas propias de la guía INDEPENDENT (producto + cantidad). Vacío en
+  // guías SALE.
+  @OneToMany(() => DispatchNoteItem, (item) => item.dispatchNote, {
+    cascade: true,
+  })
+  items?: DispatchNoteItem[];
 
   @Index('idx_dispatch_notes_dispatched_at')
   @Column({ type: 'datetime', precision: 6 })

@@ -1,11 +1,18 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Eye, Plus, Search } from 'lucide-react';
+import { ChevronDown, Eye, FileText, Plus, Search, Truck } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { DispatchStatusBadge } from '@/components/dispatch-status-badge';
 import { QuickOpFromSaleDialog } from '@/components/quick-op-from-sale-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { listDispatchNotes } from '@/lib/dispatch-api';
 import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
@@ -22,6 +29,7 @@ const FIELD =
  * filtros URL + debounce, listDispatchNotes paginado, QuickOpFromSaleDialog.
  */
 export default function GuiasPage() {
+  const router = useRouter();
   const filters = useUrlFilters({ status: '', q: '', dateFrom: '', dateTo: '', page: '' });
   const { values, setFilter, clear } = filters;
   const search = useDebouncedUrlFilter(filters, 'q', { resetKeys: ['page'] });
@@ -74,13 +82,25 @@ export default function GuiasPage() {
               Limpiar filtros
             </button>
           )}
-          <button
-            onClick={() => setQuickOpen(true)}
-            className="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-2xl bg-[#2F6BFF] px-5 py-3 text-xs font-bold text-white shadow-md transition-colors hover:bg-[#2F6BFF]/90"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Nueva guía</span>
-          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-2xl bg-[#2F6BFF] px-5 py-3 text-xs font-bold text-white shadow-md transition-colors hover:bg-[#2F6BFF]/90">
+                <Plus className="h-4 w-4" />
+                <span>Nueva guía</span>
+                <ChevronDown className="h-4 w-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => router.push('/guias/nueva')}>
+                <Truck className="h-4 w-4" />
+                Guía independiente
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setQuickOpen(true)}>
+                <FileText className="h-4 w-4" />
+                Desde una venta
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -173,10 +193,18 @@ export default function GuiasPage() {
                     {new Date(d.dispatchedAt).toLocaleDateString('es-CL', { dateStyle: 'short' })}
                   </td>
                   <td className="py-5 font-mono text-[11.5px] text-slate-500 dark:text-slate-400">
-                    {d.sale?.number ?? '—'}
+                    {d.sale?.number ?? (
+                      d.origin === 'INDEPENDENT' ? (
+                        <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                          Independiente
+                        </span>
+                      ) : (
+                        '—'
+                      )
+                    )}
                   </td>
                   <td className="max-w-[180px] truncate py-5 font-bold text-slate-950 dark:text-white">
-                    {d.sale?.customer?.name ?? '—'}
+                    {d.sale?.customer?.name ?? d.customer?.name ?? '—'}
                   </td>
                   <td className="py-5 font-medium text-slate-600 dark:text-slate-400">
                     {d.carrier ?? <span className="text-slate-300 dark:text-slate-600">—</span>}
