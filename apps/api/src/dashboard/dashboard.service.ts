@@ -132,16 +132,15 @@ export class DashboardService {
       this.urgentFollowUps(10),
     ]);
 
-    // Utilidad del período seleccionado (sin IVA): subtotal_ventas − COGS − gastos.
-    // (Decisión documentada en CHANGELOG-FASE-9: la fórmula deja afuera el IVA
-    // débito porque no es ganancia del negocio; el IVA se balancea contra el
-    // IVA crédito de compras en el reporte de IVA separado.)
+    // Utilidad del período seleccionado: total_ventas (CON IVA) − COGS − gastos.
+    // Se usa el total bruto de ventas para emparejar con el COGS, que también
+    // está en bruto (unitCost incluye IVA, ver purchases.service.ts).
     const currentProfitNum =
-      Number(currentSalesAgg.subtotal) -
+      Number(currentSalesAgg.total) -
       Number(currentCogs) -
       Number(currentExpensesAgg);
     const prevProfitNum =
-      Number(prevSalesAgg.subtotal) - Number(prevCogs) - Number(prevExpensesAgg);
+      Number(prevSalesAgg.total) - Number(prevCogs) - Number(prevExpensesAgg);
     const profit = currentProfitNum.toFixed(2);
 
     // Rotación de inventario: COGS_del_rango / inventario_actual.

@@ -569,7 +569,7 @@ function KpiUtilidad({
   return (
     <KpiCard
       href={`/reportes/ventas?dateFrom=${dates.from}&dateTo=${dates.to}`}
-      label={`Utilidad ${txt.kpiSub}`}
+      label={`Ganancia ${txt.kpiSub} bruta`}
       value={formatCurrency(s.month.profit)}
       icon={TrendingUp}
       iconClass="bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400"
