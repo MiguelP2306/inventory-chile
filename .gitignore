@@ -46,3 +46,5 @@ Thumbs.db
 # El directorio existe en runtime; su contenido NO se commitea.
 apps/api/uploads
 !apps/api/uploads/.gitkeep
+
+*.txt
