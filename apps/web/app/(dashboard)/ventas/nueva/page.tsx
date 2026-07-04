@@ -196,7 +196,8 @@ export default function NuevaVentaPage() {
             {fromDispatchId && dispatchPrefill && (
               <p className="text-sm text-muted-foreground">
                 Al confirmar, la guía quedará marcada como{' '}
-                <strong>convertida</strong> y el stock se descontará ahora.
+                <strong>convertida</strong>. El stock ya fue descontado al
+                emitir la guía, no se descuenta de nuevo.
               </p>
             )}
           </div>
