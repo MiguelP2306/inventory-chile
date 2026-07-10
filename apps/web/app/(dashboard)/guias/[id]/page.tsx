@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Ban, ChevronDown, ExternalLink, FileText, Printer, Receipt } from 'lucide-react';
+import { ArrowLeft, Ban, ChevronDown, ExternalLink, Eye, FileText, Printer, Receipt } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
@@ -13,6 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { SoftModal } from '@/components/ui/soft-modal';
 import { getDispatchNote, getDispatchPdfUrl } from '@/lib/dispatch-api';
 import { formatCurrency } from '@/lib/format';
 
@@ -24,6 +25,7 @@ export default function GuiaDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const [voidOpen, setVoidOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const dq = useQuery({
     queryKey: ['dispatch-note', id],
@@ -46,9 +48,17 @@ export default function GuiaDetailPage() {
   // Una guía independiente convertida ya tiene saleId. Solo se puede convertir
   // si es independiente, sigue activa y todavía no tiene venta.
   const canConvert = isIndependent && !d.saleId && d.status === 'ACTIVE';
-  // Items a mostrar: guía independiente usa sus propios items (sin precio);
-  // guía desde venta usa los items de la venta origen (valorizados).
-  const saleItems = d.sale?.items ?? [];
+  // Ambos tipos de guía se muestran valorizados. La independiente lleva sus
+  // propios items y totales, congelados al emitirla; la generada desde una
+  // venta los toma prestados de esa venta.
+  const lineItems = isIndependent ? d.items ?? [] : d.sale?.items ?? [];
+  const totals = isIndependent
+    ? { subtotal: d.subtotal, taxAmount: d.taxAmount, total: d.total }
+    : {
+        subtotal: d.sale?.subtotal ?? '0',
+        taxAmount: d.sale?.taxAmount ?? '0',
+        total: d.sale?.total ?? '0',
+      };
   const addressLine = [d.addressStreet, d.addressNumber, d.commune?.name].filter(Boolean).join(' ');
 
   return (
@@ -97,6 +107,14 @@ export default function GuiaDetailPage() {
               Anular guía
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setPreviewOpen(true)}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-850 dark:bg-[#11151C] dark:text-slate-300 dark:hover:bg-slate-900"
+          >
+            <Eye className="h-4 w-4" />
+            Vista previa
+          </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -228,87 +246,57 @@ export default function GuiaDetailPage() {
           <h2 className={LABEL}>Items despachados</h2>
         </div>
         <div className="overflow-x-auto">
-          {isIndependent ? (
-            // Guía independiente: solo producto + cantidad (sin precios). Los
-            // precios se definen al convertir a venta.
-            <table className="w-full min-w-[400px] border-collapse text-left text-[12px]">
-              <thead>
-                <tr className="border-b border-slate-100 bg-slate-50/20 font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-850 dark:text-slate-500">
-                  <th className="w-[22%] py-3 pl-6">SKU</th>
-                  <th className="py-3">Producto</th>
-                  <th className="py-3 pr-6 text-right">Cant.</th>
+          <table className="w-full min-w-[500px] border-collapse text-left text-[12px]">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/20 font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-850 dark:text-slate-500">
+                <th className="w-[18%] py-3 pl-6">SKU</th>
+                <th className="py-3">Producto</th>
+                <th className="py-3 text-right">Cant.</th>
+                <th className="py-3 text-right">P. Unit</th>
+                <th className="py-3 pr-6 text-right">Subtotal</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 font-medium dark:divide-slate-850">
+              {lineItems.map((it) => (
+                <tr key={it.id} className="transition-colors hover:bg-slate-50/40 dark:hover:bg-slate-900/10">
+                  <td className="py-4 pl-6 font-mono text-slate-500 dark:text-slate-400">
+                    {it.product?.sku ?? '—'}
+                  </td>
+                  <td className="max-w-[300px] truncate py-4 font-bold text-slate-950 dark:text-white">
+                    {it.product?.name ?? '—'}
+                  </td>
+                  <td className="py-4 text-right font-mono text-[13px] font-black text-slate-900 dark:text-white">
+                    {it.qty}
+                  </td>
+                  <td className="py-4 text-right font-mono text-slate-600 dark:text-slate-300">
+                    {formatCurrency(it.unitPrice)}
+                  </td>
+                  <td className="py-4 pr-6 text-right font-mono text-[13px] font-black text-slate-900 dark:text-white">
+                    {formatCurrency(it.subtotal)}
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-medium dark:divide-slate-850">
-                {(d.items ?? []).map((it) => (
-                  <tr key={it.id} className="transition-colors hover:bg-slate-50/40 dark:hover:bg-slate-900/10">
-                    <td className="py-4 pl-6 font-mono text-slate-500 dark:text-slate-400">
-                      {it.product?.sku ?? '—'}
-                    </td>
-                    <td className="max-w-[300px] truncate py-4 font-bold text-slate-950 dark:text-white">
-                      {it.product?.name ?? '—'}
-                    </td>
-                    <td className="py-4 pr-6 text-right font-mono text-[13px] font-black text-slate-900 dark:text-white">
-                      {it.qty}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <table className="w-full min-w-[500px] border-collapse text-left text-[12px]">
-              <thead>
-                <tr className="border-b border-slate-100 bg-slate-50/20 font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-850 dark:text-slate-500">
-                  <th className="w-[18%] py-3 pl-6">SKU</th>
-                  <th className="py-3">Producto</th>
-                  <th className="py-3 text-right">Cant.</th>
-                  <th className="py-3 text-right">P. Unit</th>
-                  <th className="py-3 pr-6 text-right">Subtotal</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-medium dark:divide-slate-850">
-                {saleItems.map((it) => (
-                  <tr key={it.id} className="transition-colors hover:bg-slate-50/40 dark:hover:bg-slate-900/10">
-                    <td className="py-4 pl-6 font-mono text-slate-500 dark:text-slate-400">
-                      {it.product?.sku ?? '—'}
-                    </td>
-                    <td className="max-w-[300px] truncate py-4 font-bold text-slate-950 dark:text-white">
-                      {it.product?.name ?? '—'}
-                    </td>
-                    <td className="py-4 text-right font-mono text-[13px] font-black text-slate-900 dark:text-white">
-                      {it.qty}
-                    </td>
-                    <td className="py-4 text-right font-mono text-slate-600 dark:text-slate-300">
-                      {formatCurrency(it.unitPrice)}
-                    </td>
-                    <td className="py-4 pr-6 text-right font-mono text-[13px] font-black text-slate-900 dark:text-white">
-                      {formatCurrency(it.subtotal)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+              ))}
+            </tbody>
+          </table>
         </div>
-        {/* Totales de la guía valorizada (tomados de la venta origen). */}
-        {d.sale && (
-          <div className="flex justify-end border-t border-slate-100 p-5 dark:border-slate-850">
-            <div className="w-full max-w-[260px] space-y-1.5 text-[12px]">
-              <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-                <span>Subtotal neto</span>
-                <span className="font-mono">{formatCurrency(d.sale.subtotal)}</span>
-              </div>
-              <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-                <span>IVA</span>
-                <span className="font-mono">{formatCurrency(d.sale.taxAmount)}</span>
-              </div>
-              <div className="flex items-center justify-between border-t border-slate-100 pt-1.5 text-sm font-black text-slate-900 dark:border-slate-850 dark:text-white">
-                <span>Total</span>
-                <span className="font-mono">{formatCurrency(d.sale.total)}</span>
-              </div>
+        {/* Totales: la guía independiente lleva los suyos congelados; la guía
+            generada desde una venta los toma de la venta origen. */}
+        <div className="flex justify-end border-t border-slate-100 p-5 dark:border-slate-850">
+          <div className="w-full max-w-[260px] space-y-1.5 text-[12px]">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+              <span>Subtotal neto</span>
+              <span className="font-mono">{formatCurrency(totals.subtotal)}</span>
+            </div>
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+              <span>IVA</span>
+              <span className="font-mono">{formatCurrency(totals.taxAmount)}</span>
+            </div>
+            <div className="flex items-center justify-between border-t border-slate-100 pt-1.5 text-sm font-black text-slate-900 dark:border-slate-850 dark:text-white">
+              <span>Total</span>
+              <span className="font-mono">{formatCurrency(totals.total)}</span>
             </div>
           </div>
-        )}
+        </div>
       </div>
 
       {/* OBSERVACIONES */}
@@ -320,6 +308,26 @@ export default function GuiaDetailPage() {
           </p>
         </div>
       )}
+
+      {/* Vista previa: visor inline de la guía (mismo PDF que "Imprimir",
+          sin abrir el dropdown ni una pestaña nueva). Carta A4. */}
+      <SoftModal
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        title={`Vista previa · ${d.number}`}
+        subtitle="Así queda la guía de despacho. Podés imprimirla o descargarla desde el visor."
+        icon={<Eye className="h-5 w-5" />}
+        size="4xl"
+      >
+        <div className="p-3">
+          {/* `#navpanes=0` oculta el panel de miniaturas del visor PDF nativo. */}
+          <iframe
+            title={`Guía de despacho ${d.number}`}
+            src={`${getDispatchPdfUrl(d.id, 'letter')}#navpanes=0`}
+            className="h-[70vh] w-full rounded-xl border border-slate-200 bg-white dark:border-slate-800"
+          />
+        </div>
+      </SoftModal>
 
       <VoidDispatchDialog note={d} open={voidOpen} onOpenChange={setVoidOpen} />
     </div>

@@ -46,6 +46,7 @@ import { apiErrorMessage } from '@/lib/catalog-api';
 import { invalidateProductCaches } from '@/lib/invalidate-product-caches';
 import { listCustomers } from '@/lib/customers-api';
 import { Permission, useCan, useIsAdmin } from '@/lib/current-user-context';
+import { pickDefaultWarehouse } from '@/lib/default-warehouse';
 import { formatCurrency, todayIso } from '@/lib/format';
 import {
   createSale,
@@ -141,12 +142,16 @@ interface Props {
     dispatchNoteId: string;
     customer: CustomerDto | null;
     warehouseId: string | null;
+    // Espejo de la guía: la venta arranca con los mismos precios, descuentos y
+    // régimen de IVA que el documento que ya recibió el cliente.
+    vatExempt?: boolean;
     items: Array<{
       productId: string;
       sku: string | null;
       name: string;
       qty: number;
       unitPrice: string;
+      discount: string;
     }>;
   };
   onSuccess?: (sale: SaleDto) => void;
@@ -193,7 +198,9 @@ export function SaleForm({
 
   // Venta afecta a IVA por default (19%). Si se desactiva → venta NO afecta
   // (sin documento): el backend la guarda con IVA 0 y no entra al Reporte de IVA.
-  const [vatExempt, setVatExempt] = useState(false);
+  const [vatExempt, setVatExempt] = useState(
+    prefillFromDispatch?.vatExempt ?? false,
+  );
 
   // Bodega de la venta. Default = "Tienda" si existe, sino la primera
   // activa. El selector solo se muestra cuando hay 2+ bodegas activas.
@@ -213,16 +220,14 @@ export function SaleForm({
     if (warehouseId || activeWarehouses.length === 0) return;
     // Si la venta viene del bolso y TODOS los items comparten una misma bodega
     // (activa), la predefinimos. Si hay items de bodegas distintas, caemos al
-    // default normal (Principal / primera activa) y el operador elige.
+    // default normal ("Tienda") y el operador elige.
     const bagWhId = unanimousBagWarehouse(initialBagItems);
     if (bagWhId && activeWarehouses.some((w) => w.id === bagWhId)) {
       setWarehouseId(bagWhId);
       return;
     }
-    // Default pedido por el cliente: "Tienda". Si no existe, cae a la primera
-    // bodega activa.
-    const preferred = activeWarehouses.find((w) => w.name === 'Tienda');
-    setWarehouseId((preferred ?? activeWarehouses[0]!).id);
+    const preferred = pickDefaultWarehouse(activeWarehouses);
+    if (preferred) setWarehouseId(preferred.id);
   }, [warehouseId, activeWarehouses, initialBagItems]);
 
   const [items, setItems] = useState<ItemRow[]>(() => {
@@ -245,7 +250,7 @@ export function SaleForm({
         qty: it.qty,
         unitPrice: it.unitPrice,
         discountKind: '$',
-        discountValue: '0',
+        discountValue: it.discount,
       }));
     }
     return (prefillFromQuotation?.items ?? []).map((it) => ({

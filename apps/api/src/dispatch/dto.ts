@@ -3,9 +3,11 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsInt,
+  IsNumberString,
   IsOptional,
   IsString,
   IsUUID,
@@ -66,12 +68,21 @@ export class DispatchNoteItemDto {
   @IsInt()
   @Min(1)
   qty!: number;
+
+  // Precio unitario BRUTO (IVA incluido). Prellenado con el precio actual del
+  // producto pero editable: el operador valoriza el envío al cotizarlo.
+  @IsNumberString({ no_symbols: false })
+  unitPrice!: string;
+
+  @IsOptional()
+  @IsNumberString({ no_symbols: false })
+  discount?: string;
 }
 
 /**
  * Crea una guía de despacho INDEPENDIENTE (sin venta previa). Lleva su propio
- * cliente y sus propios items (producto + cantidad, sin precios). No mueve
- * stock — eso ocurre al convertir la guía en venta.
+ * cliente y sus propios items valorizados (producto + cantidad + precio).
+ * Descuenta stock al emitirse; la venta que la convierta no vuelve a descontar.
  */
 export class CreateIndependentDispatchNoteDto {
   @IsUUID()
@@ -86,6 +97,11 @@ export class CreateIndependentDispatchNoteDto {
   @ValidateNested({ each: true })
   @Type(() => DispatchNoteItemDto)
   items!: DispatchNoteItemDto[];
+
+  // Guía sin IVA: el total queda íntegro como neto.
+  @IsOptional()
+  @IsBoolean()
+  vatExempt?: boolean;
 
   @IsOptional()
   @IsDateString()

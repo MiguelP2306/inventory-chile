@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm --filter @inventory/shared run build)",
+      "Bash(pnpm --filter api run typecheck)",
+      "Bash(perl -0pi -e 's/colSpan=\\\\{8\\\\}/colSpan={9}/g; s/min-w-\\\\[820px\\\\]/min-w-[960px]/' page.tsx)",
+      "Bash(pnpm --filter web run typecheck)",
+      "Bash(perl -pi -e 's/\\\\bcomputeTotals\\\\\\(dto\\\\.items, taxRate\\\\\\)/computeDocumentTotals\\(dto.items, taxRate\\)/g' apps/api/src/quotations/quotations.service.ts)",
+      "Bash(perl -pi -e 's/computeSaleTotals\\\\\\(dto\\\\.items, effectiveTaxRate\\\\\\)/computeDocumentTotals\\(dto.items, effectiveTaxRate\\)/' apps/api/src/sales/sales.service.ts)",
+      "Bash(perl -0pi -e \"s{import \\\\{ CountersService \\\\} from '../common/counters.service';\\\\nimport \\\\{ dayRange \\\\} from '../common/date-range';}{import { CountersService } from '../common/counters.service';\\\\nimport { dayRange } from '../common/date-range';\\\\nimport \\\\{\\\\n  computeDocumentTotals,\\\\n  roundHalfUp,\\\\n\\\\} from '../common/document-totals';}\" apps/api/src/sales/sales.service.ts)",
+      "Bash(pnpm run *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3001/health)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/health)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:4000/health)",
+      "Bash(curl -s -X POST http://localhost:4000/api/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"admin@inventory.local\",\"password\":\"admin123\"}')",
+      "Bash(curl -s -c jar.txt -X POST http://localhost:4000/api/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"admin@inventory.local\",\"password\":\"admin123\"}')",
+      "Bash(curl -s -b jar.txt \"http://localhost:4000/api/sales?pageSize=1\")",
+      "Bash(curl -s -b jar.txt \"http://localhost:4000/api/dispatch?pageSize=1\")",
+      "Bash(python3 /tmp/claude-501/-Users-eduardoperez-works-inventory-chile-inventory-chile/b9eaf7f4-831c-41cd-bf49-6889342d48d7/scratchpad/e2e.py)",
+      "Bash(python3 -c ' *)",
+      "Bash(perl -pi -e 's/76111111-1/76111111-4/; s/76222222-2/76222222-K/' e2e.py)",
+      "Bash(python3 e2e.py)",
+      "Bash(perl -pi -e 's/76111111-4/76111111-6/; s/76222222-K/76222222-1/' e2e.py)",
+      "Bash(python3 -c \"import pypdf\")",
+      "Bash(python3 /tmp/claude-501/-Users-eduardoperez-works-inventory-chile-inventory-chile/b9eaf7f4-831c-41cd-bf49-6889342d48d7/scratchpad/edge.py)",
+      "Skill(run)",
+      "Skill(run:*)",
+      "Read(//Applications/**)",
+      "Read(//Users/eduardoperez/Library/Caches/**)",
+      "Bash(npm ls *)",
+      "Bash(npm i *)",
+      "Bash(npx playwright *)",
+      "Bash(echo \"exit=$?\")"
+    ]
+  }
+}

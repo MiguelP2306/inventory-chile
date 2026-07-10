@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { SaleFormDialog } from '@/components/forms/sale-form-dialog';
+import { SaleIncidentsBadges } from '@/components/sale-incidents-badges';
 import { SaleStatusBadge } from '@/components/sale-status-badge';
 import { apiAbsoluteUrl } from '@/lib/api';
 import { Permission, useCan } from '@/lib/current-user-context';
@@ -13,7 +14,11 @@ import { formatCurrency } from '@/lib/format';
 import { getSalesKpis, listSales } from '@/lib/sales-api';
 import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
 import { useUrlFilters } from '@/lib/use-url-filters';
-import type { PaymentMethodDto, SaleStatusDto } from '@inventory/shared';
+import type {
+  PaymentMethodDto,
+  SaleIncidentFilterDto,
+  SaleStatusDto,
+} from '@inventory/shared';
 
 const ALL = '__all__';
 const PAGE_SIZE = 20;
@@ -30,6 +35,13 @@ const METHOD_OPTIONS: { value: PaymentMethodDto; label: string }[] = [
   { value: 'CARD_DEBIT', label: 'Débito' },
   { value: 'CARD_CREDIT', label: 'Crédito' },
   { value: 'PAYMENT_LINK', label: 'Link de pago' },
+];
+
+const INCIDENT_OPTIONS: { value: SaleIncidentFilterDto; label: string }[] = [
+  { value: 'RETURN', label: 'Con devolución' },
+  { value: 'EXCHANGE', label: 'Con cambio' },
+  { value: 'WARRANTY', label: 'Con garantía' },
+  { value: 'NONE', label: 'Sin incidencias' },
 ];
 
 const FIELD =
@@ -55,6 +67,7 @@ export default function VentasPage() {
   const filters = useUrlFilters({
     status: '',
     method: '',
+    incident: '',
     q: '',
     dateFrom: '',
     dateTo: '',
@@ -64,6 +77,7 @@ export default function VentasPage() {
   const search = useDebouncedUrlFilter(filters, 'q', { resetKeys: ['page'] });
   const status = values.status || ALL;
   const method = values.method || ALL;
+  const incident = values.incident || ALL;
   const dateFrom = values.dateFrom ?? '';
   const dateTo = values.dateTo ?? '';
   const page = Number(values.page || '1');
@@ -72,6 +86,7 @@ export default function VentasPage() {
   const filtersActive =
     status !== ALL ||
     method !== ALL ||
+    incident !== ALL ||
     dateFrom !== '' ||
     dateTo !== '' ||
     search.value !== '';
@@ -79,11 +94,16 @@ export default function VentasPage() {
   const kpis = useQuery({ queryKey: ['sales', 'kpis'], queryFn: () => getSalesKpis() });
 
   const list = useQuery({
-    queryKey: ['sales', { status, method, q: debouncedQ, dateFrom, dateTo, page }],
+    queryKey: [
+      'sales',
+      { status, method, incident, q: debouncedQ, dateFrom, dateTo, page },
+    ],
     queryFn: () =>
       listSales({
         status: status === ALL ? undefined : (status as SaleStatusDto),
         paymentMethod: method === ALL ? undefined : (method as PaymentMethodDto),
+        incident:
+          incident === ALL ? undefined : (incident as SaleIncidentFilterDto),
         q: debouncedQ || undefined,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
@@ -131,6 +151,7 @@ export default function VentasPage() {
               `sales/export.xlsx${buildSalesExportQuery({
                 status: status === ALL ? undefined : status,
                 paymentMethod: method === ALL ? undefined : method,
+                incident: incident === ALL ? undefined : incident,
                 q: debouncedQ || undefined,
                 dateFrom: dateFrom || undefined,
                 dateTo: dateTo || undefined,
@@ -271,7 +292,7 @@ export default function VentasPage() {
         )}
 
       {/* FILTROS */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-7">
         <div className="relative lg:col-span-2">
           <Search className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400" />
           <input
@@ -314,6 +335,21 @@ export default function VentasPage() {
             ))}
           </select>
         )}
+        <select
+          value={incident}
+          onChange={(e) => {
+            setFilter('incident', e.target.value === ALL ? null : e.target.value);
+            setFilter('page', null);
+          }}
+          className={FIELD}
+        >
+          <option value={ALL}>Todas las incidencias</option>
+          {INCIDENT_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
         <input
           type="date"
           value={dateFrom}
@@ -337,7 +373,7 @@ export default function VentasPage() {
       {/* TABLA */}
       <div className={SHEET}>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] border-collapse text-left text-[12px]">
+          <table className="w-full min-w-[960px] border-collapse text-left text-[12px]">
             <thead>
               <tr className={THEAD}>
                 <th className="py-4 pl-6">Número</th>
@@ -347,6 +383,7 @@ export default function VentasPage() {
                 <th className="py-4 text-right">Total</th>
                 {canSeeBreakdown && <th className="py-4 pl-8">Método</th>}
                 <th className="py-4 pl-8">Estado</th>
+                <th className="py-4 pl-8">Incidencias</th>
                 <th className="w-[60px] py-4 pr-6 text-right" />
               </tr>
             </thead>
@@ -354,7 +391,7 @@ export default function VentasPage() {
               {list.isLoading &&
                 Array.from({ length: 6 }).map((_, i) => (
                   <tr key={i}>
-                    <td colSpan={8} className="px-6 py-5">
+                    <td colSpan={9} className="px-6 py-5">
                       <div className="h-4 w-full animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
                     </td>
                   </tr>
@@ -362,7 +399,7 @@ export default function VentasPage() {
 
               {!list.isLoading && items.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center font-bold text-slate-400">
+                  <td colSpan={9} className="py-12 text-center font-bold text-slate-400">
                     Ninguna venta coincide con la búsqueda o filtros.
                   </td>
                 </tr>
@@ -402,6 +439,9 @@ export default function VentasPage() {
                   )}
                   <td className="py-5 pl-8">
                     <SaleStatusBadge status={s.status} />
+                  </td>
+                  <td className="py-5 pl-8">
+                    <SaleIncidentsBadges incidents={s.incidents} />
                   </td>
                   <td className="py-5 pr-6 text-right">
                     <Link

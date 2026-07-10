@@ -1046,6 +1046,31 @@ export interface SaleItemDto {
   };
 }
 
+/**
+ * Marcas de "algo pasó después de la venta", calculadas por el backend para
+ * que el listado de ventas las muestre sin abrir cada venta.
+ *
+ * `returnKind` describe la devolución con reembolso de dinero: FULL cuando se
+ * devolvieron todas las unidades de la venta, PARTIAL cuando fue una parte.
+ * Los cambios (refundMode=EXCHANGE) se reportan aparte en `hasExchange` y no
+ * afectan `returnKind`.
+ *
+ * Las devoluciones anuladas (status=CANCELLED) no cuentan para ningún campo.
+ */
+export interface SaleIncidentsDto {
+  hasReturn: boolean;
+  returnKind: 'PARTIAL' | 'FULL' | null;
+  hasExchange: boolean;
+  hasWarranty: boolean;
+}
+
+/** Filtro del listado de ventas por incidencia posterior. */
+export type SaleIncidentFilterDto =
+  | 'RETURN'
+  | 'EXCHANGE'
+  | 'WARRANTY'
+  | 'NONE';
+
 export interface SaleDto {
   id: string;
   number: string;
@@ -1076,6 +1101,8 @@ export interface SaleDto {
   cancelledBy?: { id: string; name: string; email: string } | null;
   user?: { id: string; name: string; email: string };
   items?: SaleItemDto[];
+  // Devoluciones / cambios / garantías asociadas. Siempre presente.
+  incidents: SaleIncidentsDto;
   createdAt: string;
   updatedAt: string;
 }
@@ -1368,14 +1395,23 @@ export interface DispatchNoteDto {
   // Bodega desde la que la guía INDEPENDENT descontó stock (null en guías SALE).
   warehouseId: string | null;
   warehouse?: { id: string; name: string } | null;
-  // Items propios de la guía INDEPENDENT (producto + cantidad, sin precios).
-  // Vacío en guías SALE (esas usan `sale.items`).
+  // Items propios y valorizados de la guía INDEPENDENT. Vacío en guías SALE
+  // (esas usan `sale.items`). Los precios quedan congelados al emitir la guía.
   items?: Array<{
     id: string;
     productId: string;
     qty: number;
+    unitPrice: string;
+    discount: string;
+    subtotal: string;
     product?: { id: string; sku: string | null; name: string };
   }>;
+  // Totales propios de la guía INDEPENDENT. En guías SALE quedan en '0' y no
+  // se usan: esas leen los montos de `sale`.
+  subtotal: string;
+  taxAmount: string;
+  total: string;
+  vatExempt: boolean;
   sale?: {
     id: string;
     number: string;
@@ -1432,6 +1468,9 @@ export interface CreateDispatchNoteInput {
 export interface CreateIndependentDispatchNoteItemInput {
   productId: string;
   qty: number;
+  // Precio unitario BRUTO (IVA incluido), editable por el operador.
+  unitPrice: string;
+  discount?: string;
 }
 
 export interface CreateIndependentDispatchNoteInput {
@@ -1439,6 +1478,7 @@ export interface CreateIndependentDispatchNoteInput {
   // Bodega desde la que se descuenta el stock al emitir la guía.
   warehouseId: string;
   items: CreateIndependentDispatchNoteItemInput[];
+  vatExempt?: boolean;
   dispatchedAt?: string;
   carrier?: string | null;
   trackingNumber?: string | null;
@@ -1451,8 +1491,9 @@ export interface CreateIndependentDispatchNoteInput {
 
 /**
  * Prefill devuelto por GET /dispatch/:id/convert. El frontend lo usa para
- * abrir "Nueva venta" precargada. El precio unitario es el precio actual del
- * producto (editable en el form).
+ * abrir "Nueva venta" precargada. El precio unitario y el descuento son los
+ * que se congelaron en la guía, para que la venta coincida con el documento
+ * que ya se le mandó al cliente. Siguen siendo editables en el form.
  */
 export interface ConvertDispatchToSaleResult {
   prefill: {
@@ -1460,12 +1501,14 @@ export interface ConvertDispatchToSaleResult {
     customerId: string;
     // Bodega de la guía — la venta que la convierte queda fijada a ésta.
     warehouseId: string | null;
+    vatExempt: boolean;
     items: Array<{
       productId: string;
       sku: string | null;
       name: string;
       qty: number;
       unitPrice: string;
+      discount: string;
     }>;
   };
 }

@@ -19,6 +19,7 @@ import { randomBytes } from 'crypto';
 import { Brackets, DataSource, EntityManager, Repository } from 'typeorm';
 import { CountersService } from '../common/counters.service';
 import { dayRange } from '../common/date-range';
+import { computeDocumentTotals } from '../common/document-totals';
 import { businessNoonToday, parseBusinessDate } from '../common/timezone';
 import { rethrowFkAsConflict } from '../common/fk-error';
 import { normalizePhone } from '../common/validators/phone';
@@ -239,7 +240,7 @@ export class QuotationsService {
       const number = CountersService.format(NUMBER_PREFIX, year, seq);
       const publicToken = randomBytes(24).toString('hex');
 
-      const totals = computeTotals(dto.items, taxRate);
+      const totals = computeDocumentTotals(dto.items, taxRate);
 
       // Cliente libre → se persiste como cliente BORRADOR y se vincula (queda en
       // Clientes > Borradores y se puede completar/reusar). Si ya hay customerId
@@ -384,7 +385,7 @@ export class QuotationsService {
           .getRepository(QuotationItem)
           .delete({ quotationId: id });
 
-        const totals = computeTotals(dto.items, taxRate);
+        const totals = computeDocumentTotals(dto.items, taxRate);
         existing.subtotal = totals.subtotal;
         existing.taxAmount = totals.taxAmount;
         existing.total = totals.total;
@@ -873,71 +874,3 @@ function startOfToday(): Date {
   return d;
 }
 
-interface LineTotals {
-  lineGross: string;
-  discountAmount: string;
-  subtotalNeto: string;
-  tax: string;
-}
-
-interface AggregateTotals {
-  subtotal: string;
-  taxAmount: string;
-  total: string;
-  lines: LineTotals[];
-}
-
-function roundHalfUp(n: number, decimals = 2): number {
-  const factor = Math.pow(10, decimals);
-  return Math.sign(n) * Math.round(Math.abs(n) * factor) / factor;
-}
-
-function fmt2(n: number): string {
-  return roundHalfUp(n).toFixed(2);
-}
-
-export function computeTotals(
-  items: CreateQuotationItemDto[],
-  taxRate: number,
-): AggregateTotals {
-  const lines: LineTotals[] = [];
-  let totalGross = 0;
-  let totalNeto = 0;
-  let totalTax = 0;
-
-  for (const it of items) {
-    const qty = it.qty;
-    const unitPrice = parseFloat(it.unitPrice);
-    let discountAmount: number;
-    if (it.discountPercent != null && it.discountPercent !== '') {
-      const pct = parseFloat(it.discountPercent);
-      discountAmount = (qty * unitPrice * pct) / 100;
-    } else if (it.discount != null && it.discount !== '') {
-      discountAmount = parseFloat(it.discount);
-    } else {
-      discountAmount = 0;
-    }
-    discountAmount = roundHalfUp(discountAmount);
-
-    const lineGrossNum = roundHalfUp(qty * unitPrice - discountAmount);
-    const subtotalNetoNum = roundHalfUp(lineGrossNum / (1 + taxRate));
-    const taxNum = roundHalfUp(lineGrossNum - subtotalNetoNum);
-
-    lines.push({
-      lineGross: fmt2(lineGrossNum),
-      discountAmount: fmt2(discountAmount),
-      subtotalNeto: fmt2(subtotalNetoNum),
-      tax: fmt2(taxNum),
-    });
-    totalGross += lineGrossNum;
-    totalNeto += subtotalNetoNum;
-    totalTax += taxNum;
-  }
-
-  return {
-    subtotal: fmt2(totalNeto),
-    taxAmount: fmt2(totalTax),
-    total: fmt2(totalGross),
-    lines,
-  };
-}

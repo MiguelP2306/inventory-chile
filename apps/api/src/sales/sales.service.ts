@@ -4,7 +4,11 @@ import {
   InventoryMovementType,
   PaymentMethod,
   QuotationStatus,
+  RefundMode,
+  ReturnStatus,
   SaleDto,
+  SaleIncidentFilterDto,
+  SaleIncidentsDto,
   SaleItemDto,
   SaleStatus,
   SalesKpisDto,
@@ -26,10 +30,15 @@ import {
   EntityManager,
   In,
   Repository,
+  SelectQueryBuilder,
 } from 'typeorm';
 import { CashboxService } from '../cashbox/cashbox.service';
 import { CountersService } from '../common/counters.service';
 import { dayRange } from '../common/date-range';
+import {
+  computeDocumentTotals,
+  roundHalfUp,
+} from '../common/document-totals';
 import {
   businessTodayStr,
   endOfBusinessDay,
@@ -44,10 +53,13 @@ import {
   ExpenseCategory,
   Product,
   Quotation,
+  Return,
+  ReturnItem,
   Sale,
   SaleItem,
   Stock,
   Warehouse,
+  WarrantyClaim,
 } from '../database/entities';
 import { InventoryService } from '../inventory/inventory.service';
 import { LifecycleService } from '../lifecycle/lifecycle.service';
@@ -111,6 +123,7 @@ export class SalesService {
         }),
       );
     }
+    if (query.incident) applyIncidentFilter(qb, query.incident);
 
     qb.orderBy('s.date', 'DESC').addOrderBy('s.createdAt', 'DESC');
     qb.take(pageSize).skip((page - 1) * pageSize);
@@ -119,16 +132,112 @@ export class SalesService {
     // Cargar items en batch para que el listado pueda mostrar la cantidad sin
     // un N+1.
     const ids = items.map((s) => s.id);
-    const itemsBySale = await this.fetchItemsForSales(ids);
+    const [itemsBySale, incidentsBySale] = await Promise.all([
+      this.fetchItemsForSales(ids),
+      this.fetchIncidentsForSales(ids),
+    ]);
 
     return {
       items: items.map((s) =>
-        this.toDto(s, itemsBySale.get(s.id) ?? []),
+        this.toDto(s, itemsBySale.get(s.id) ?? [], incidentsBySale.get(s.id)),
       ),
       total,
       page,
       pageSize,
     };
+  }
+
+  /**
+   * Devoluciones / cambios / garantías de un lote de ventas, en 3 queries
+   * agregadas (no N+1). Solo cuentan las devoluciones COMPLETED — una anulada
+   * es como si nunca hubiera existido.
+   *
+   * `returnKind` compara las unidades devueltas con reembolso de dinero contra
+   * las unidades totales de la venta: si coinciden es FULL, si son menos es
+   * PARTIAL. Los cambios (EXCHANGE) no entran en esa comparación; se reportan
+   * por separado en `hasExchange`.
+   */
+  private async fetchIncidentsForSales(
+    saleIds: string[],
+  ): Promise<Map<string, SaleIncidentsDto>> {
+    const result = new Map<string, SaleIncidentsDto>();
+    if (saleIds.length === 0) return result;
+
+    const [returnRows, saleQtyRows, warrantyRows] = await Promise.all([
+      // Unidades devueltas por venta y por modo de reembolso.
+      this.ds
+        .createQueryBuilder(Return, 'r')
+        .innerJoin(ReturnItem, 'ri', 'ri.returnId = r.id')
+        .select('r.saleId', 'saleId')
+        .addSelect('r.refundMode', 'refundMode')
+        .addSelect('SUM(ri.qty)', 'qty')
+        .where('r.saleId IN (:...saleIds)', { saleIds })
+        .andWhere('r.status = :completed', {
+          completed: ReturnStatus.COMPLETED,
+        })
+        .groupBy('r.saleId')
+        .addGroupBy('r.refundMode')
+        .getRawMany<{ saleId: string; refundMode: RefundMode; qty: string }>(),
+
+      // Unidades totales de cada venta, para decidir parcial vs total.
+      this.ds
+        .createQueryBuilder(SaleItem, 'si')
+        .select('si.saleId', 'saleId')
+        .addSelect('SUM(si.qty)', 'qty')
+        .where('si.saleId IN (:...saleIds)', { saleIds })
+        .groupBy('si.saleId')
+        .getRawMany<{ saleId: string; qty: string }>(),
+
+      // Las garantías cuelgan del sale_item, no de la venta.
+      this.ds
+        .createQueryBuilder(WarrantyClaim, 'w')
+        .innerJoin(SaleItem, 'si', 'si.id = w.saleItemId')
+        .select('DISTINCT si.saleId', 'saleId')
+        .where('si.saleId IN (:...saleIds)', { saleIds })
+        .getRawMany<{ saleId: string }>(),
+    ]);
+
+    const soldQtyBySale = new Map(
+      saleQtyRows.map((r) => [r.saleId, Number(r.qty)]),
+    );
+    const warrantySales = new Set(warrantyRows.map((r) => r.saleId));
+
+    for (const id of saleIds) {
+      result.set(id, {
+        hasReturn: false,
+        returnKind: null,
+        hasExchange: false,
+        hasWarranty: warrantySales.has(id),
+      });
+    }
+
+    // Acumular unidades devueltas con reembolso de dinero. RefundMode.CREDIT
+    // es exclusivo de devoluciones a proveedor, así que sobre una venta solo
+    // vemos MONEY o EXCHANGE.
+    const refundedQtyBySale = new Map<string, number>();
+    for (const row of returnRows) {
+      const incidents = result.get(row.saleId);
+      if (!incidents) continue;
+      if (row.refundMode === RefundMode.EXCHANGE) {
+        incidents.hasExchange = true;
+      } else {
+        incidents.hasReturn = true;
+        refundedQtyBySale.set(
+          row.saleId,
+          (refundedQtyBySale.get(row.saleId) ?? 0) + Number(row.qty),
+        );
+      }
+    }
+
+    for (const [saleId, refundedQty] of refundedQtyBySale) {
+      const incidents = result.get(saleId);
+      if (!incidents) continue;
+      const soldQty = soldQtyBySale.get(saleId) ?? 0;
+      incidents.returnKind =
+        soldQty > 0 && refundedQty >= soldQty ? 'FULL' : 'PARTIAL';
+    }
+
+    return result;
   }
 
   async getOne(id: string): Promise<SaleDto> {
@@ -143,8 +252,11 @@ export class SalesService {
       },
     });
     if (!s) throw new NotFoundException('Venta no encontrada');
-    const items = (await this.fetchItemsForSales([s.id])).get(s.id) ?? [];
-    return this.toDto(s, items);
+    const [itemsBySale, incidentsBySale] = await Promise.all([
+      this.fetchItemsForSales([s.id]),
+      this.fetchIncidentsForSales([s.id]),
+    ]);
+    return this.toDto(s, itemsBySale.get(s.id) ?? [], incidentsBySale.get(s.id));
   }
 
   // ---------------- create ----------------
@@ -260,7 +372,7 @@ export class SalesService {
       // IVA descompuesto es 0.
       const vatExempt = dto.vatExempt ?? false;
       const effectiveTaxRate = vatExempt ? 0 : taxRate;
-      const totals = computeSaleTotals(dto.items, effectiveTaxRate);
+      const totals = computeDocumentTotals(dto.items, effectiveTaxRate);
 
       const commissionAmount = chargesCommission
         ? roundHalfUp(parseFloat(totals.total) * commissionRate)
@@ -746,7 +858,11 @@ export class SalesService {
     }));
   }
 
-  private toDto(s: Sale, items: SaleItem[]): SaleDto {
+  private toDto(
+    s: Sale,
+    items: SaleItem[],
+    incidents?: SaleIncidentsDto,
+  ): SaleDto {
     return {
       id: s.id,
       number: s.number,
@@ -826,6 +942,14 @@ export class SalesService {
             : undefined,
         }),
       ),
+      // Una venta recién creada nunca tiene incidencias; el default evita
+      // consultarlas en los caminos de escritura.
+      incidents: incidents ?? {
+        hasReturn: false,
+        returnKind: null,
+        hasExchange: false,
+        hasWarranty: false,
+      },
       createdAt: s.createdAt.toISOString(),
       updatedAt: s.updatedAt.toISOString(),
     };
@@ -833,6 +957,42 @@ export class SalesService {
 }
 
 // ---------------- pure helpers ----------------
+
+// Devoluciones COMPLETED de la venta `s`, opcionalmente acotadas por modo de
+// reembolso. `returns` es palabra reservada en MySQL — va con backticks.
+const COMPLETED_RETURN_EXISTS =
+  "SELECT 1 FROM `returns` r WHERE r.saleId = s.id AND r.status = 'COMPLETED'";
+const WARRANTY_EXISTS =
+  'SELECT 1 FROM warranty_claims w' +
+  ' INNER JOIN sale_items si ON si.id = w.saleItemId' +
+  ' WHERE si.saleId = s.id';
+
+/** Acota el listado de ventas a las que tuvieron (o no) una incidencia. */
+function applyIncidentFilter(
+  qb: SelectQueryBuilder<Sale>,
+  incident: SaleIncidentFilterDto,
+): void {
+  switch (incident) {
+    case 'RETURN':
+      qb.andWhere(
+        `EXISTS (${COMPLETED_RETURN_EXISTS} AND r.refundMode <> 'EXCHANGE')`,
+      );
+      break;
+    case 'EXCHANGE':
+      qb.andWhere(
+        `EXISTS (${COMPLETED_RETURN_EXISTS} AND r.refundMode = 'EXCHANGE')`,
+      );
+      break;
+    case 'WARRANTY':
+      qb.andWhere(`EXISTS (${WARRANTY_EXISTS})`);
+      break;
+    case 'NONE':
+      qb.andWhere(`NOT EXISTS (${COMPLETED_RETURN_EXISTS})`).andWhere(
+        `NOT EXISTS (${WARRANTY_EXISTS})`,
+      );
+      break;
+  }
+}
 
 /** Etiqueta legible para descripciones de transacciones de caja. */
 export function labelForPaymentMethod(method: PaymentMethod): string {
@@ -877,72 +1037,3 @@ export function commissionRateFor(
   }
 }
 
-function roundHalfUp(n: number, decimals = 2): number {
-  const factor = Math.pow(10, decimals);
-  return (Math.sign(n) * Math.round(Math.abs(n) * factor)) / factor;
-}
-
-function fmt2(n: number): string {
-  return roundHalfUp(n).toFixed(2);
-}
-
-interface LineTotals {
-  lineGross: string;
-  discountAmount: string;
-}
-
-interface SaleTotals {
-  subtotal: string;
-  taxAmount: string;
-  total: string;
-  lines: LineTotals[];
-}
-
-/**
- * Misma lógica que `computeTotals` de quotations: descompone bruto → neto + IVA.
- * Replicado acá para evitar acoplamiento entre módulos. Si se duplica más,
- * extraer a un helper compartido.
- */
-function computeSaleTotals(
-  items: { qty: number; unitPrice: string; discount?: string; discountPercent?: string | null }[],
-  taxRate: number,
-): SaleTotals {
-  const lines: LineTotals[] = [];
-  let totalGross = 0;
-  let totalNeto = 0;
-  let totalTax = 0;
-
-  for (const it of items) {
-    const qty = it.qty;
-    const unitPrice = parseFloat(it.unitPrice);
-    let discountAmount: number;
-    if (it.discountPercent != null && it.discountPercent !== '') {
-      const pct = parseFloat(it.discountPercent);
-      discountAmount = (qty * unitPrice * pct) / 100;
-    } else if (it.discount != null && it.discount !== '') {
-      discountAmount = parseFloat(it.discount);
-    } else {
-      discountAmount = 0;
-    }
-    discountAmount = roundHalfUp(discountAmount);
-
-    const lineGrossNum = roundHalfUp(qty * unitPrice - discountAmount);
-    const subtotalNetoNum = roundHalfUp(lineGrossNum / (1 + taxRate));
-    const taxNum = roundHalfUp(lineGrossNum - subtotalNetoNum);
-
-    lines.push({
-      lineGross: fmt2(lineGrossNum),
-      discountAmount: fmt2(discountAmount),
-    });
-    totalGross += lineGrossNum;
-    totalNeto += subtotalNetoNum;
-    totalTax += taxNum;
-  }
-
-  return {
-    subtotal: fmt2(totalNeto),
-    taxAmount: fmt2(totalTax),
-    total: fmt2(totalGross),
-    lines,
-  };
-}

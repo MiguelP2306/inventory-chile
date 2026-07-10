@@ -148,6 +148,7 @@ export default function NuevaVentaPage() {
       dispatchNoteId: p.dispatchNoteId,
       customer: dispatchCustomerQuery.data,
       warehouseId: p.warehouseId,
+      vatExempt: p.vatExempt,
       items: p.items,
     };
   }, [dispatchPrefillQuery.data, dispatchCustomerQuery.data]);

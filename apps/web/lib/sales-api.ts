@@ -6,6 +6,7 @@ import type {
   PaginatedResult,
   PaymentMethodDto,
   SaleDto,
+  SaleIncidentFilterDto,
   SalesKpisDto,
   SaleStatusDto,
 } from '@inventory/shared';
@@ -18,6 +19,7 @@ export interface ListSalesParams {
   dateFrom?: string;
   dateTo?: string;
   q?: string;
+  incident?: SaleIncidentFilterDto;
   page?: number;
   pageSize?: number;
 }

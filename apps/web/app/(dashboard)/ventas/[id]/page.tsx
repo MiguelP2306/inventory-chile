@@ -21,6 +21,7 @@ import { CustomerReturnDialog } from '@/components/forms/customer-return-dialog'
 import { GenerateDispatchDialog } from '@/components/forms/generate-dispatch-dialog';
 import { MultiWarrantyDialog } from '@/components/forms/multi-warranty-dialog';
 import { OpenWarrantyDialog } from '@/components/forms/open-warranty-dialog';
+import { SaleIncidentsBadges } from '@/components/sale-incidents-badges';
 import { SaleStatusBadge } from '@/components/sale-status-badge';
 import { SoftModal } from '@/components/ui/soft-modal';
 import {
@@ -118,6 +119,7 @@ export default function VentaDetailPage() {
                 {s.number}
               </h1>
               <SaleStatusBadge status={s.status} />
+              <SaleIncidentsBadges incidents={s.incidents} />
             </div>
             <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
               Registrada el{' '}
