@@ -658,15 +658,15 @@ export class PdfService {
       d.commune ? `${d.commune.name}` : null,
     ].filter(Boolean) as string[];
     // Guía independiente (origin INDEPENDENT sin convertir): no tiene venta,
-    // así que cliente e items se leen de la propia guía. Sus items no llevan
-    // precio (documento logístico), por eso los montos van en 0.
+    // así que cliente, items y montos se leen de la propia guía, que se emite
+    // valorizada con los precios congelados al crearla.
     const independentItems = (d.items ?? []).map((it) => ({
       code: it.product?.sku ?? '',
       description: it.product?.name ?? '',
       qty: it.qty,
-      unitPrice: '0',
-      discount: '0',
-      subtotal: '0',
+      unitPrice: it.unitPrice,
+      discount: it.discount,
+      subtotal: it.subtotal,
     }));
     return {
       number: d.number,
@@ -692,9 +692,9 @@ export class PdfService {
             subtotal: it.subtotal,
           }))
         : independentItems,
-      subtotal: d.sale?.subtotal ?? '0',
-      taxAmount: d.sale?.taxAmount ?? '0',
-      total: d.sale?.total ?? '0',
+      subtotal: d.sale?.subtotal ?? d.subtotal,
+      taxAmount: d.sale?.taxAmount ?? d.taxAmount,
+      total: d.sale?.total ?? d.total,
       notes: d.notes,
       voided: d.status === 'VOIDED',
       company: {

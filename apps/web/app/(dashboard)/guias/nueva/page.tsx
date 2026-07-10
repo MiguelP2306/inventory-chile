@@ -19,12 +19,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { getCompanySettings } from '@/lib/cashbox-api';
 import { apiErrorMessage } from '@/lib/catalog-api';
+import { pickDefaultWarehouse } from '@/lib/default-warehouse';
 import {
   createIndependentDispatchNote,
   listRecentCarriers,
 } from '@/lib/dispatch-api';
-import { todayIso } from '@/lib/format';
+import { formatCurrency, todayIso } from '@/lib/format';
 import { getAvailableStock, type AvailableStockRow } from '@/lib/sales-api';
 import { listWarehouses } from '@/lib/warehouses-api';
 import type { CustomerDto, WarehouseDto } from '@inventory/shared';
@@ -39,13 +41,20 @@ interface ItemRow {
   sku: string | null;
   name: string;
   qty: number;
+  // Precio unitario BRUTO (IVA incluido). Se prellena con el precio del
+  // producto y el operador puede ajustarlo antes de emitir la guía.
+  unitPrice: number;
+  discount: number;
 }
 
 /**
  * /guias/nueva — Crear una guía de despacho INDEPENDIENTE (sin venta previa).
- * Lleva su propio cliente y sus propios items (producto + cantidad, sin
- * precios). Desde el detalle de la guía se puede después "Convertir a venta".
- * El stock NO se mueve acá; baja al convertir.
+ * Lleva su propio cliente y sus propios items valorizados: el cliente la usa
+ * para cotizarle el envío a empresas, así que la guía sale con precios y
+ * totales. Desde el detalle se puede después "Convertir a venta", y la venta
+ * hereda estos precios.
+ *
+ * El stock se descuenta al emitir la guía, no al convertirla.
  */
 export default function NuevaGuiaPage() {
   const router = useRouter();
@@ -55,6 +64,7 @@ export default function NuevaGuiaPage() {
   const [items, setItems] = useState<ItemRow[]>([]);
   const [warehouseId, setWarehouseId] = useState<string>('');
   const [dispatchedAt, setDispatchedAt] = useState<string>(todayIso());
+  const [vatExempt, setVatExempt] = useState(false);
   const [carrier, setCarrier] = useState('');
   const [trackingNumber, setTrackingNumber] = useState('');
   const [addressStreet, setAddressStreet] = useState('');
@@ -87,9 +97,9 @@ export default function NuevaGuiaPage() {
     Array.isArray(warehouses.data) ? warehouses.data : warehouses.data?.items ?? []
   ) as WarehouseDto[];
   useEffect(() => {
-    if (warehouseId || activeWarehouses.length === 0) return;
-    const preferred = activeWarehouses.find((w) => w.name === 'Tienda');
-    setWarehouseId((preferred ?? activeWarehouses[0]!).id);
+    if (warehouseId) return;
+    const preferred = pickDefaultWarehouse(activeWarehouses);
+    if (preferred) setWarehouseId(preferred.id);
   }, [warehouseId, activeWarehouses]);
 
   // Stock disponible en la bodega elegida para los productos cargados.
@@ -108,12 +118,33 @@ export default function NuevaGuiaPage() {
     return available != null && it.qty > available;
   });
 
+  // Valorización — espejo del backend: los precios son brutos y de ahí se
+  // descompone el neto y el IVA.
+  const settings = useQuery({
+    queryKey: ['settings', 'company'],
+    queryFn: getCompanySettings,
+  });
+  const taxRate = Number(settings.data?.taxRate ?? '0.19');
+  const effectiveTaxRate = vatExempt ? 0 : taxRate;
+
+  const lineSubtotal = (it: ItemRow) =>
+    Math.max(0, it.qty * it.unitPrice - it.discount);
+  const totalBruto = items.reduce((acc, it) => acc + lineSubtotal(it), 0);
+  const subtotalNeto = totalBruto / (1 + effectiveTaxRate);
+  const taxAmount = totalBruto - subtotalNeto;
+
   const mut = useMutation({
     mutationFn: () =>
       createIndependentDispatchNote({
         customerId: customer!.id,
         warehouseId,
-        items: items.map((it) => ({ productId: it.productId, qty: it.qty })),
+        items: items.map((it) => ({
+          productId: it.productId,
+          qty: it.qty,
+          unitPrice: it.unitPrice.toFixed(2),
+          discount: it.discount.toFixed(2),
+        })),
+        vatExempt,
         dispatchedAt: dispatchedAt || undefined,
         carrier: carrier.trim() || null,
         trackingNumber: trackingNumber.trim() || null,
@@ -140,10 +171,8 @@ export default function NuevaGuiaPage() {
     shortages.length === 0 &&
     !mut.isPending;
 
-  function updateQty(idx: number, qty: number) {
-    setItems((prev) =>
-      prev.map((it, i) => (i === idx ? { ...it, qty: Math.max(1, qty) } : it)),
-    );
+  function updateItem(idx: number, patch: Partial<ItemRow>) {
+    setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
   }
 
   return (
@@ -162,8 +191,9 @@ export default function NuevaGuiaPage() {
             Nueva guía de despacho
           </h1>
           <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
-            Guía independiente (sin venta previa). Podés convertirla en venta
-            más tarde desde su detalle. El stock se descuenta al convertir.
+            Guía independiente (sin venta previa), valorizada. Podés convertirla
+            en venta más tarde desde su detalle. El stock se descuenta al emitir
+            la guía.
           </p>
         </div>
       </div>
@@ -252,18 +282,28 @@ export default function NuevaGuiaPage() {
                 }
                 setItems((prev) => [
                   ...prev,
-                  { productId: p.id, sku: p.sku, name: p.name, qty: 1 },
+                  {
+                    productId: p.id,
+                    sku: p.sku,
+                    name: p.name,
+                    qty: 1,
+                    unitPrice: Number(p.price),
+                    discount: 0,
+                  },
                 ]);
               }}
             />
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[480px] border-collapse text-left text-[12px]">
+            <table className="w-full min-w-[720px] border-collapse text-left text-[12px]">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50/30 font-extrabold uppercase tracking-widest text-slate-400 dark:border-slate-850 dark:text-slate-500">
-                  <th className="w-[20%] py-3 pl-6">SKU</th>
+                  <th className="w-[15%] py-3 pl-6">SKU</th>
                   <th className="py-3">Producto</th>
-                  <th className="w-[120px] py-3 text-right">Cantidad</th>
+                  <th className="w-[110px] py-3 text-right">Cantidad</th>
+                  <th className="w-[130px] py-3 text-right">P. Unit</th>
+                  <th className="w-[120px] py-3 text-right">Descuento</th>
+                  <th className="w-[120px] py-3 text-right">Subtotal</th>
                   <th className="w-[60px] py-3 pr-6" />
                 </tr>
               </thead>
@@ -271,7 +311,7 @@ export default function NuevaGuiaPage() {
                 {items.length === 0 && (
                   <tr>
                     <td
-                      colSpan={4}
+                      colSpan={7}
                       className="py-10 text-center font-bold text-slate-400"
                     >
                       Agregá al menos un producto.
@@ -295,9 +335,11 @@ export default function NuevaGuiaPage() {
                         min={1}
                         value={it.qty}
                         onChange={(e) =>
-                          updateQty(idx, Number(e.target.value) || 1)
+                          updateItem(idx, {
+                            qty: Math.max(1, Number(e.target.value) || 1),
+                          })
                         }
-                        className={`ml-auto w-24 text-right ${exceeds ? 'border-rose-400' : ''}`}
+                        className={`ml-auto w-20 text-right ${exceeds ? 'border-rose-400' : ''}`}
                       />
                       {available != null && (
                         <div
@@ -308,6 +350,37 @@ export default function NuevaGuiaPage() {
                           Stock: {available}
                         </div>
                       )}
+                    </td>
+                    <td className="py-3 text-right">
+                      <Input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={it.unitPrice}
+                        onChange={(e) =>
+                          updateItem(idx, {
+                            unitPrice: Math.max(0, Number(e.target.value) || 0),
+                          })
+                        }
+                        className="ml-auto w-28 text-right"
+                      />
+                    </td>
+                    <td className="py-3 text-right">
+                      <Input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={it.discount}
+                        onChange={(e) =>
+                          updateItem(idx, {
+                            discount: Math.max(0, Number(e.target.value) || 0),
+                          })
+                        }
+                        className="ml-auto w-24 text-right"
+                      />
+                    </td>
+                    <td className="py-3 text-right font-mono font-bold text-slate-900 dark:text-white">
+                      {formatCurrency(lineSubtotal(it).toFixed(2))}
                     </td>
                     <td className="py-3 pr-6 text-right">
                       <button
@@ -327,6 +400,51 @@ export default function NuevaGuiaPage() {
               </tbody>
             </table>
           </div>
+
+          {/* VALORIZACIÓN */}
+          {items.length > 0 && (
+            <div className="flex flex-col gap-4 border-t border-slate-100 pt-4 dark:border-slate-850 md:flex-row md:items-start md:justify-between">
+              <label className="flex cursor-pointer items-start gap-2.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={!vatExempt}
+                  onChange={(e) => setVatExempt(!e.target.checked)}
+                  className="mt-0.5 h-4 w-4 cursor-pointer accent-[#2F6BFF]"
+                />
+                <span>
+                  <span className="font-bold text-slate-700 dark:text-slate-200">
+                    Afecta a IVA ({(taxRate * 100).toFixed(0)}%)
+                  </span>
+                  <span className="mt-0.5 block text-slate-400">
+                    {vatExempt
+                      ? 'Guía exenta: el total va íntegro como neto.'
+                      : 'Los precios que cargás incluyen IVA.'}
+                  </span>
+                </span>
+              </label>
+
+              <div className="ml-auto w-full max-w-xs space-y-2 text-xs">
+                <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                  <span>Subtotal neto</span>
+                  <span className="font-mono font-semibold">
+                    {formatCurrency(subtotalNeto.toFixed(2))}
+                  </span>
+                </div>
+                <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                  <span>IVA ({(effectiveTaxRate * 100).toFixed(0)}%)</span>
+                  <span className="font-mono font-semibold">
+                    {formatCurrency(taxAmount.toFixed(2))}
+                  </span>
+                </div>
+                <div className="flex justify-between border-t border-slate-100 pt-2 text-sm font-bold text-slate-950 dark:border-slate-850 dark:text-white">
+                  <span>Total</span>
+                  <span className="font-mono text-base font-black text-[#2F6BFF]">
+                    {formatCurrency(totalBruto.toFixed(2))}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* DIRECCIÓN DE ENTREGA */}

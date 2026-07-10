@@ -79,12 +79,30 @@ export class DispatchNote {
   @Column({ type: 'char', length: 36, nullable: true })
   warehouseId!: string | null;
 
-  // Líneas propias de la guía INDEPENDENT (producto + cantidad). Vacío en
-  // guías SALE.
+  // Líneas propias de la guía INDEPENDENT (producto + cantidad + precio).
+  // Vacío en guías SALE.
   @OneToMany(() => DispatchNoteItem, (item) => item.dispatchNote, {
     cascade: true,
   })
   items?: DispatchNoteItem[];
+
+  // Totales de la guía INDEPENDENT, congelados al emitirla. En guías SALE
+  // quedan en 0 y no se usan: esas leen los montos de la venta origen.
+  //
+  // `total` es bruto (IVA incluido) = suma de los subtotales de las líneas.
+  // `subtotal` es el neto y `taxAmount` el IVA descompuesto, igual que la venta.
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  subtotal!: string;
+
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  taxAmount!: string;
+
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  total!: string;
+
+  // Guía sin IVA: taxAmount queda en 0 y todo el total es neto.
+  @Column({ type: 'boolean', default: false })
+  vatExempt!: boolean;
 
   @Index('idx_dispatch_notes_dispatched_at')
   @Column({ type: 'datetime', precision: 6 })

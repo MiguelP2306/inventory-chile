@@ -16,9 +16,11 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { Brackets, DataSource, EntityManager, In, Repository } from 'typeorm';
 import { CountersService } from '../common/counters.service';
 import { dayRange } from '../common/date-range';
+import { computeDocumentTotals } from '../common/document-totals';
 import { businessNoonToday, parseBusinessDate } from '../common/timezone';
 import {
   Commune,
+  CompanySettings,
   Customer,
   DispatchNote,
   DispatchNoteItem,
@@ -53,6 +55,8 @@ export class DispatchService {
     private readonly productRepo: Repository<Product>,
     @InjectRepository(Commune)
     private readonly communeRepo: Repository<Commune>,
+    @InjectRepository(CompanySettings)
+    private readonly settingsRepo: Repository<CompanySettings>,
     @InjectDataSource() private readonly ds: DataSource,
     private readonly counters: CountersService,
     private readonly inventory: InventoryService,
@@ -235,11 +239,28 @@ export class DispatchService {
     return this.getOne(id);
   }
 
+  private async getSettings(): Promise<CompanySettings> {
+    const s = await this.settingsRepo.findOne({
+      where: {},
+      order: { id: 'ASC' },
+    });
+    if (!s) {
+      throw new NotFoundException(
+        'CompanySettings no inicializado. Ejecutá db:seed.',
+      );
+    }
+    return s;
+  }
+
   /**
    * Crea una guía de despacho INDEPENDIENTE (sin venta previa). Lleva su propio
-   * cliente y sus propios items (producto + cantidad). NO mueve stock ni
-   * registra movimientos de inventario — eso ocurre recién al convertir la
-   * guía en venta.
+   * cliente y sus propios items valorizados (producto + cantidad + precio).
+   *
+   * Descuenta stock al emitirla (la mercadería sale físicamente); la venta que
+   * después la convierta NO vuelve a descontar.
+   *
+   * Los precios se congelan acá: el documento que se le manda al cliente no
+   * debe cambiar de monto si más tarde cambia la lista de precios.
    */
   async createIndependent(
     dto: CreateIndependentDispatchNoteDto,
@@ -279,6 +300,13 @@ export class DispatchService {
       : businessNoonToday();
     const year = dispatchedAt.getFullYear();
 
+    // Valorización: mismo cálculo bruto → neto + IVA que usa la venta, para que
+    // la guía y la venta que la convierta muestren los mismos montos.
+    const settings = await this.getSettings();
+    const vatExempt = dto.vatExempt ?? false;
+    const effectiveTaxRate = vatExempt ? 0 : parseFloat(settings.taxRate);
+    const totals = computeDocumentTotals(dto.items, effectiveTaxRate);
+
     const id = await this.ds.transaction(async (manager) => {
       const seq = await this.counters.nextNumber(COUNTER_KIND, year, manager);
       const number = CountersService.format(NUMBER_PREFIX, year, seq);
@@ -290,6 +318,10 @@ export class DispatchService {
         customerId: dto.customerId,
         warehouseId: dto.warehouseId,
         dispatchedAt,
+        subtotal: totals.subtotal,
+        taxAmount: totals.taxAmount,
+        total: totals.total,
+        vatExempt,
         carrier: dto.carrier?.trim() || null,
         trackingNumber: dto.trackingNumber?.trim() || null,
         addressStreet: dto.addressStreet?.trim() || null,
@@ -303,12 +335,17 @@ export class DispatchService {
       const saved = await manager.getRepository(DispatchNote).save(note);
 
       const itemRepo = manager.getRepository(DispatchNoteItem);
-      for (const it of dto.items) {
+      for (const [idx, it] of dto.items.entries()) {
+        // `computeDocumentTotals` devuelve una línea por item, en el mismo orden.
+        const line = totals.lines[idx]!;
         await itemRepo.save(
           itemRepo.create({
             dispatchNoteId: saved.id,
             productId: it.productId,
             qty: it.qty,
+            unitPrice: it.unitPrice,
+            discount: line.discountAmount,
+            subtotal: line.lineGross,
           }),
         );
 
@@ -346,12 +383,14 @@ export class DispatchService {
       dispatchNoteId: string;
       customerId: string;
       warehouseId: string | null;
+      vatExempt: boolean;
       items: Array<{
         productId: string;
         sku: string | null;
         name: string;
         qty: number;
         unitPrice: string;
+        discount: string;
       }>;
     };
   }> {
@@ -385,14 +424,17 @@ export class DispatchService {
         dispatchNoteId: note.id,
         customerId: note.customerId!,
         warehouseId: note.warehouseId,
+        vatExempt: note.vatExempt,
         items: items.map((it) => ({
           productId: it.productId,
           sku: it.product?.sku ?? null,
           name: it.product?.name ?? '',
           qty: it.qty,
-          // Precio de venta ACTUAL del producto. El operador puede ajustarlo
-          // en el form de venta antes de confirmar.
-          unitPrice: it.product?.price ?? '0',
+          // Precio congelado en la guía, no el precio actual del producto: la
+          // venta debe coincidir con el documento que ya recibió el cliente.
+          // El operador todavía puede ajustarlo en el form antes de confirmar.
+          unitPrice: it.unitPrice,
+          discount: it.discount,
         })),
       },
     };
@@ -595,16 +637,25 @@ export class DispatchService {
       warehouse: d.warehouse
         ? { id: d.warehouse.id, name: d.warehouse.name }
         : null,
-      // Items propios de la guía independiente (producto + cantidad). En guías
-      // SALE queda vacío — los items se leen de `sale.items`.
+      // Items propios y valorizados de la guía independiente. En guías SALE
+      // queda vacío — los items se leen de `sale.items`.
       items: (d.items ?? []).map((it) => ({
         id: it.id,
         productId: it.productId,
         qty: it.qty,
+        unitPrice: it.unitPrice,
+        discount: it.discount,
+        subtotal: it.subtotal,
         product: it.product
           ? { id: it.product.id, sku: it.product.sku, name: it.product.name }
           : undefined,
       })),
+      // Totales propios de la guía independiente. En guías SALE quedan en '0'
+      // y el frontend lee los de `sale`.
+      subtotal: d.subtotal,
+      taxAmount: d.taxAmount,
+      total: d.total,
+      vatExempt: d.vatExempt,
       sale: sale
         ? {
             id: sale.id,

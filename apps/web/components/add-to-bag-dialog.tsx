@@ -16,6 +16,7 @@ import {
   listProductImages,
   publicImageUrl,
 } from '@/lib/catalog-api';
+import { pickDefaultWarehouse } from '@/lib/default-warehouse';
 import { formatCurrency } from '@/lib/format';
 import { listWarehouses } from '@/lib/warehouses-api';
 import { useProductBag } from '@/lib/use-product-bag';
@@ -138,12 +139,18 @@ export function AddToBagDialog({ productId, onClose }: Props) {
     return rows;
   }, [warehouses.data, stockRows, warehouseNameById]);
 
-  // Default de la bodega seleccionada: la que tenga más stock (la más útil para
-  // despachar). Se setea cuando llegan las bodegas y aún no hay selección.
+  // Default de la bodega seleccionada: siempre "Tienda", que es desde donde el
+  // operador atiende.
+  //
+  // Antes esto elegía "la bodega con más stock", pero nunca funcionó: el efecto
+  // corría apenas llegaban las bodegas, y el stock responde después. En ese
+  // instante todas las filas valían 0, el sort no desempataba y ganaba la
+  // primera alfabética ("Bodega"). Al llegar el stock el efecto ya no volvía a
+  // correr. Elegir por nombre no depende de qué query resuelve primero.
   useEffect(() => {
-    if (selectedWarehouseId || warehouseRows.length === 0) return;
-    const top = [...warehouseRows].sort((a, b) => b.quantity - a.quantity)[0];
-    if (top) setSelectedWarehouseId(top.warehouseId);
+    if (selectedWarehouseId) return;
+    const preferred = pickDefaultWarehouse(warehouseRows);
+    if (preferred) setSelectedWarehouseId(preferred.warehouseId);
   }, [warehouseRows, selectedWarehouseId]);
 
   const selectedStock = useMemo(
@@ -208,11 +215,16 @@ export function AddToBagDialog({ productId, onClose }: Props) {
                 )}
               >
                 {product.data.coverUrl ? (
+                  // `object-contain`: la foto entra entera, nunca se recorta ni
+                  // se amplía. En un repuesto la silueta de la pieza es lo que
+                  // lo identifica — recortarla (object-cover) lo vuelve
+                  // irreconocible, sobre todo cuando el contenedor se estira a
+                  // lo alto de la columna de detalles.
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={publicImageUrl(product.data.coverUrl) ?? ''}
                     alt={product.data.name}
-                    className="absolute inset-0 h-full w-full object-cover"
+                    className="absolute inset-0 h-full w-full object-contain p-4"
                   />
                 ) : (
                   <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
@@ -309,7 +321,18 @@ export function AddToBagDialog({ productId, onClose }: Props) {
                               <span className="block text-muted-foreground">
                                 Stock en bodega
                               </span>
-                              <span className="font-mono text-sm font-bold tabular-nums">
+                              {/* En rojo cuando la bodega elegida no tiene
+                                  unidades: el bolso se lleva esta bodega y con
+                                  ella se prellena la venta, así que conviene
+                                  que salte a la vista. No bloquea: la venta
+                                  valida el stock al confirmar. */}
+                              <span
+                                className={cn(
+                                  'font-mono text-sm font-bold tabular-nums',
+                                  selectedStock.quantity === 0 &&
+                                    'text-rose-500',
+                                )}
+                              >
                                 {selectedStock.quantity} un.
                               </span>
                             </div>

@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CountersModule } from '../common/counters.module';
 import {
   Commune,
+  CompanySettings,
   Customer,
   DispatchNote,
   DispatchNoteItem,
@@ -28,6 +29,7 @@ import { DispatchService } from './dispatch.service';
       Product,
       Commune,
       Warehouse,
+      CompanySettings,
     ]),
     CountersModule,
     InventoryModule,

@@ -10,10 +10,10 @@ import { DispatchNote } from './dispatch-note.entity';
 import { Product } from './product.entity';
 
 /**
- * Ítem de una guía de despacho INDEPENDIENTE (origin='INDEPENDENT'). Solo
- * lleva producto + cantidad — la guía independiente es un documento logístico
- * sin precios. Al convertir la guía en venta, el precio se toma del producto
- * en ese momento.
+ * Ítem de una guía de despacho INDEPENDIENTE (origin='INDEPENDENT'). Lleva
+ * producto, cantidad y su propio precio: la guía se emite valorizada porque el
+ * cliente la usa para cotizar envíos a empresas. Al convertir la guía en venta,
+ * la venta hereda estos precios (no vuelve a leer el precio del producto).
  *
  * Las guías con origin='SALE' NO usan esta tabla: leen sus líneas prestadas
  * de la venta origen (sale_items).
@@ -44,4 +44,17 @@ export class DispatchNoteItem {
 
   @Column({ type: 'int' })
   qty!: number;
+
+  // Precio unitario BRUTO (IVA incluido), en espejo de sale_items.unitPrice.
+  // Congelado al emitir la guía: el documento no cambia si luego cambia la
+  // lista de precios.
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  unitPrice!: string;
+
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  discount!: string;
+
+  // (unitPrice * qty) - discount.
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  subtotal!: string;
 }

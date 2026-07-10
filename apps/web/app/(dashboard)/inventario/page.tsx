@@ -53,6 +53,7 @@ import {
 } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
 import { apiAbsoluteUrl } from '@/lib/api';
+import { pickDefaultWarehouse } from '@/lib/default-warehouse';
 import { invalidateProductCaches } from '@/lib/invalidate-product-caches';
 import { apiErrorMessage, publicImageUrl } from '@/lib/catalog-api';
 import { listStockPaginated, setStockLocation } from '@/lib/inventory-api';
@@ -96,11 +97,12 @@ export default function InventarioPage() {
       : (warehouses.data?.items ?? [])
   ) as WarehouseDto[];
 
-  // Auto-select de la primera bodega si no hay ?warehouse= en la URL.
+  // Auto-select de la bodega por defecto ("Tienda") si no hay ?warehouse= en
+  // la URL.
   useEffect(() => {
-    if (!warehouseId && activeWarehouses.length > 0) {
-      setFilter('warehouse', activeWarehouses[0]!.id);
-    }
+    if (warehouseId) return;
+    const preferred = pickDefaultWarehouse(activeWarehouses);
+    if (preferred) setFilter('warehouse', preferred.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [warehouseId, activeWarehouses.length]);
 

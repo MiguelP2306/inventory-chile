@@ -1,4 +1,8 @@
-import { PaymentMethod, SaleStatus } from '@inventory/shared';
+import {
+  PaymentMethod,
+  SaleIncidentFilterDto,
+  SaleStatus,
+} from '@inventory/shared';
 import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
@@ -6,6 +10,7 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
   IsNumberString,
   IsOptional,
@@ -119,6 +124,12 @@ export class ListSalesQueryDto {
   @IsOptional()
   @IsString()
   q?: string;
+
+  // Filtra por incidencia posterior a la venta. NONE = ventas sin devolución,
+  // cambio ni garantía.
+  @IsOptional()
+  @IsIn(['RETURN', 'EXCHANGE', 'WARRANTY', 'NONE'])
+  incident?: SaleIncidentFilterDto;
 
   @IsOptional()
   @Type(() => Number)
