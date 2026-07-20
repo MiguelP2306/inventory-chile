@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { SaleFormDialog } from '@/components/forms/sale-form-dialog';
+import { SaleDraftsPanel } from '@/components/sale-drafts-panel';
 import { SaleIncidentsBadges } from '@/components/sale-incidents-badges';
 import { SaleStatusBadge } from '@/components/sale-status-badge';
 import { apiAbsoluteUrl } from '@/lib/api';
@@ -173,6 +174,9 @@ export default function VentasPage() {
           </button>
         </div>
       </div>
+
+      {/* Ventas parkeadas: sólo se renderiza si hay borradores. */}
+      <SaleDraftsPanel />
 
       {/* KPIs */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">

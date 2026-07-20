@@ -17,8 +17,12 @@
  *     contenido en vez de superponerse.
  *
  *  ESTILO:
- *   · Fondo blanco (#0F131A en dark). Items rounded-xl con CHIP de ícono
- *     (slate-100 / azul al activo). Acento #2F6BFF.
+ *   · TODO el color sale de los tokens `--sidebar*` de globals.css: azul de
+ *     marca en claro, gris azulado en oscuro. Para cambiar el tono se toca
+ *     SOLO esa variable — acá no debe quedar ningún color literal.
+ *   · Los estados hover/activo se derivan por opacidad sobre el foreground
+ *     (bg-sidebar-foreground/10, etc.), así funcionan con cualquier fondo.
+ *   · Items rounded-xl con CHIP de ícono.
  *   · Headers de sección uppercase tracking-widest colapsables (acordeón
  *     persistido). Grupos con borde izquierdo border-l-2.
  *   · Marca "Inventario PYME" con caja azul + subtítulo. Footer con CTA
@@ -70,8 +74,6 @@ import { Brand, BrandMark } from '@/components/brand';
 import { getCompanySettings } from '@/lib/cashbox-api';
 import { useIsAdmin } from '@/lib/current-user-context';
 import { cn } from '@/lib/utils';
-
-const ACCENT = '#2F6BFF';
 
 interface NavSection {
   /** Identificador estable para persistir el estado del acordeón. */
@@ -263,7 +265,7 @@ export function SidebarNav({
             key={section.key}
             className={cn(
               'flex flex-col',
-              section.divider && 'mt-3 border-t border-slate-100 pt-3 dark:border-slate-800/80',
+              section.divider && 'mt-3 border-t border-sidebar-foreground/15 pt-3',
               !section.divider && section.label && 'pt-2',
             )}
           >
@@ -271,7 +273,7 @@ export function SidebarNav({
               <button
                 type="button"
                 onClick={() => toggleSection(section.key)}
-                className="flex w-full items-center justify-between rounded-md px-3 py-1.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 transition-colors hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+                className="flex w-full items-center justify-between rounded-md px-3 py-1.5 text-left text-[11px] font-bold uppercase tracking-widest text-sidebar-muted transition-colors hover:text-sidebar-foreground"
               >
                 <span>{section.label}</span>
                 <ChevronDown
@@ -287,7 +289,7 @@ export function SidebarNav({
                 'flex flex-col overflow-hidden transition-[max-height,opacity] duration-200 ease-out',
                 bodyVisible ? 'max-h-[1200px] opacity-100' : 'max-h-0 opacity-0',
                 // Borde-guía del grupo (solo expandido y con header).
-                !collapsed && section.label && 'ml-1 gap-0.5 border-l-2 border-slate-100 pl-2 dark:border-slate-800/80',
+                !collapsed && section.label && 'ml-1 gap-0.5 border-l-2 border-sidebar-foreground/15 pl-2',
                 (!section.label || collapsed) && 'gap-0.5',
               )}
             >
@@ -309,8 +311,8 @@ export function SidebarNav({
                       'group flex h-9 items-center rounded-xl text-[13px] font-medium transition-all',
                       collapsed ? 'justify-center px-0' : 'justify-between px-3',
                       active
-                        ? 'bg-[#2F6BFF]/10 text-[#2F6BFF] dark:bg-[#2F6BFF]/15 dark:text-blue-400'
-                        : 'text-slate-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800/60',
+                        ? 'bg-sidebar-accent/15 text-sidebar-accent'
+                        : 'text-sidebar-muted hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground',
                     )}
                   >
                     <span className="flex min-w-0 items-center gap-3">
@@ -318,8 +320,8 @@ export function SidebarNav({
                         className={cn(
                           'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors',
                           active
-                            ? 'bg-[#2F6BFF]/15 text-[#2F6BFF] dark:bg-[#2F6BFF]/25 dark:text-blue-400'
-                            : 'bg-slate-100 text-slate-500 group-hover:bg-white dark:bg-slate-800/80 dark:text-slate-400 dark:group-hover:bg-slate-700/80',
+                            ? 'bg-sidebar-accent/25 text-sidebar-accent'
+                            : 'bg-sidebar-foreground/10 text-sidebar-muted group-hover:bg-sidebar-foreground/20',
                         )}
                       >
                         <Icon className="h-4 w-4" />
@@ -329,7 +331,7 @@ export function SidebarNav({
                       </span>
                     </span>
                     {item.badge !== undefined && !collapsed && (
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                      <span className="rounded-full bg-sidebar-foreground/15 px-2 py-0.5 text-[11px] font-semibold text-sidebar-foreground">
                         {item.badge}
                       </span>
                     )}
@@ -358,7 +360,7 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        'sticky top-0 z-40 hidden h-screen shrink-0 flex-col self-start border-r border-slate-200/70 bg-white transition-[width] duration-300 ease-out dark:border-slate-800 dark:bg-[#0F131A] md:flex',
+        'sticky top-0 z-40 hidden h-screen shrink-0 flex-col self-start border-r border-sidebar-foreground/10 bg-sidebar text-sidebar-foreground transition-[width] duration-300 ease-out md:flex',
         collapsed ? 'w-[76px]' : 'w-64',
       )}
     >
@@ -371,19 +373,19 @@ export function Sidebar() {
       >
         {collapsed ? (
           <Link href="/" aria-label="Inicio" title="Autopartes Gran Pacífico">
-            <BrandMark height={36} priority />
+            <BrandMark height={36} priority onDarkSurface />
           </Link>
         ) : (
           <>
             <Link href="/" className="min-w-0 flex-1" aria-label="Inicio">
-              <Brand priority />
+              <Brand priority onDarkSurface />
             </Link>
             <button
               type="button"
               onClick={toggleCollapsed}
               aria-label="Contraer sidebar"
               title="Contraer"
-              className="shrink-0 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-300"
+              className="shrink-0 rounded-lg p-1.5 text-sidebar-muted transition-colors hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground"
             >
               <PanelLeftClose className="h-4 w-4" />
             </button>
@@ -399,7 +401,7 @@ export function Sidebar() {
             onClick={toggleCollapsed}
             aria-label="Expandir sidebar"
             title="Expandir"
-            className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-300"
+            className="rounded-lg p-1.5 text-sidebar-muted transition-colors hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground"
           >
             <PanelLeftClose className="h-4 w-4 rotate-180" />
           </button>
@@ -409,22 +411,18 @@ export function Sidebar() {
       <SidebarNav collapsed={collapsed} />
 
       {/* Footer — CTA + accesos */}
-      <div className="space-y-3 border-t border-slate-100 p-3 dark:border-slate-800/80">
+      <div className="space-y-3 border-t border-sidebar-foreground/15 p-3">
         {!collapsed ? (
-          <div
-            className="rounded-2xl border p-4 text-center"
-            style={{ borderColor: 'rgba(47,107,255,0.1)', backgroundColor: 'rgba(47,107,255,0.05)' }}
-          >
-            <p className="mb-1 text-xs font-bold" style={{ color: ACCENT }}>
+          <div className="rounded-2xl border border-sidebar-foreground/15 bg-sidebar-foreground/10 p-4 text-center">
+            <p className="mb-1 text-xs font-bold text-sidebar-foreground">
               Acceso rápido
             </p>
-            <p className="mb-3 text-[10px] font-medium text-slate-500 dark:text-slate-400">
+            <p className="mb-3 text-[10px] font-medium text-sidebar-muted">
               Genera una nueva venta POS en segundos
             </p>
             <Link
               href="/ventas/nueva"
-              style={{ backgroundColor: ACCENT, boxShadow: '0 10px 22px -8px rgba(47,107,255,0.45)' }}
-              className="block w-full rounded-xl py-2 text-xs font-bold text-white transition-opacity hover:opacity-90"
+              className="block w-full rounded-xl bg-sidebar-cta py-2 text-xs font-bold text-sidebar-cta-foreground shadow-md transition-opacity hover:opacity-90"
             >
               Nueva venta
             </Link>
@@ -433,19 +431,18 @@ export function Sidebar() {
           <Link
             href="/ventas/nueva"
             title="Nueva venta"
-            style={{ backgroundColor: ACCENT }}
-            className="flex h-10 w-10 items-center justify-center rounded-xl text-white"
+            className="flex h-10 w-10 items-center justify-center rounded-xl bg-sidebar-cta text-sidebar-cta-foreground"
           >
             <ShoppingCart className="h-4 w-4" />
           </Link>
         )}
 
         {!collapsed && (
-          <div className="flex items-center justify-between px-1 text-[12px] font-medium text-slate-500 dark:text-slate-400">
+          <div className="flex items-center justify-between px-1 text-[12px] font-medium text-sidebar-muted">
             {isAdmin ? (
               <Link
                 href="/configuracion"
-                className="flex items-center gap-1.5 transition-colors hover:text-slate-900 dark:hover:text-white"
+                className="flex items-center gap-1.5 transition-colors hover:text-sidebar-foreground"
               >
                 <Settings className="h-4 w-4" />
                 <span>Config</span>
@@ -455,7 +452,7 @@ export function Sidebar() {
             )}
             <Link
               href="/ayuda"
-              className="flex items-center gap-1.5 transition-colors hover:text-slate-900 dark:hover:text-white"
+              className="flex items-center gap-1.5 transition-colors hover:text-sidebar-foreground"
             >
               <HelpCircle className="h-4 w-4" />
               <span>Ayuda</span>

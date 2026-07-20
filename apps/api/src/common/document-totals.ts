@@ -24,10 +24,25 @@ export interface DocumentLineTotals {
   tax: string;
 }
 
+/**
+ * Descuento aplicado al total del documento, después de sumar las líneas.
+ * `percent` tiene precedencia sobre `amount` cuando ambos vienen, igual que
+ * en las líneas. Ambos se interpretan sobre el BRUTO (la suma de los
+ * subtotales impresos), coherente con que los precios cargados son brutos.
+ */
+export interface DocumentDiscountInput {
+  amount?: string | null;
+  percent?: string | null;
+}
+
 export interface DocumentTotals {
   subtotal: string;
   taxAmount: string;
   total: string;
+  /** Suma de los subtotales de línea, antes del descuento global. */
+  grossBeforeDiscount: string;
+  /** Monto del descuento global efectivamente aplicado (0 si no hay). */
+  discountAmount: string;
   lines: DocumentLineTotals[];
 }
 
@@ -45,10 +60,16 @@ export function fmt2(n: number): string {
  * el total queda íntegro como neto y el IVA en 0.
  *
  * `discountPercent` tiene precedencia sobre `discount` cuando ambos vienen.
+ *
+ * `globalDiscount` (opcional) se descuenta del bruto ya sumado; el neto y el
+ * IVA se recalculan sobre ese bruto rebajado, de modo que el IVA siempre grava
+ * el monto realmente cobrado. Sin descuento global el resultado es idéntico al
+ * de antes (suma de los netos por línea).
  */
 export function computeDocumentTotals(
   items: DocumentLineInput[],
   taxRate: number,
+  globalDiscount?: DocumentDiscountInput | null,
 ): DocumentTotals {
   const lines: DocumentLineTotals[] = [];
   let totalGross = 0;
@@ -84,10 +105,60 @@ export function computeDocumentTotals(
     totalTax += taxNum;
   }
 
+  const grossBeforeDiscount = roundHalfUp(totalGross);
+  const globalDiscountAmount = resolveGlobalDiscount(
+    globalDiscount,
+    grossBeforeDiscount,
+  );
+
+  // Sin descuento global conservamos la suma por línea tal cual, para no mover
+  // ni un peso en los documentos que ya existen.
+  if (globalDiscountAmount === 0) {
+    return {
+      subtotal: fmt2(totalNeto),
+      taxAmount: fmt2(totalTax),
+      total: fmt2(grossBeforeDiscount),
+      grossBeforeDiscount: fmt2(grossBeforeDiscount),
+      discountAmount: '0.00',
+      lines,
+    };
+  }
+
+  const netGross = roundHalfUp(grossBeforeDiscount - globalDiscountAmount);
+  const netoNum = roundHalfUp(netGross / (1 + taxRate));
+  const taxNum = roundHalfUp(netGross - netoNum);
+
   return {
-    subtotal: fmt2(totalNeto),
-    taxAmount: fmt2(totalTax),
-    total: fmt2(totalGross),
+    subtotal: fmt2(netoNum),
+    taxAmount: fmt2(taxNum),
+    total: fmt2(netGross),
+    grossBeforeDiscount: fmt2(grossBeforeDiscount),
+    discountAmount: fmt2(globalDiscountAmount),
     lines,
   };
+}
+
+/**
+ * Resuelve el descuento global a un monto en pesos, acotado a [0, bruto]: un
+ * descuento no puede dejar el documento en negativo ni ser mayor al total.
+ */
+function resolveGlobalDiscount(
+  globalDiscount: DocumentDiscountInput | null | undefined,
+  grossBeforeDiscount: number,
+): number {
+  if (!globalDiscount) return 0;
+
+  let amount: number;
+  if (globalDiscount.percent != null && globalDiscount.percent !== '') {
+    const pct = Math.min(100, Math.max(0, parseFloat(globalDiscount.percent)));
+    if (!Number.isFinite(pct)) return 0;
+    amount = (grossBeforeDiscount * pct) / 100;
+  } else if (globalDiscount.amount != null && globalDiscount.amount !== '') {
+    amount = parseFloat(globalDiscount.amount);
+    if (!Number.isFinite(amount)) return 0;
+  } else {
+    return 0;
+  }
+
+  return roundHalfUp(Math.min(Math.max(0, amount), grossBeforeDiscount));
 }

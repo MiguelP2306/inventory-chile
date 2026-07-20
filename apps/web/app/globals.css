@@ -29,6 +29,34 @@
     --stock-ok: 142 71% 45%;
     --stock-low: 38 92% 50%;
     --stock-out: 0 84% 60%;
+
+    /* ---- Sidebar ----------------------------------------------------
+       El panel izquierdo va con el azul de marca (#2F6BFF) en modo claro,
+       a pedido del cliente. Todo el color del sidebar sale de estas tres
+       variables: para cambiar el tono, se toca SOLO `--sidebar` acá (y su
+       par en `.dark`), no las clases del componente.
+
+       `--sidebar-foreground` es el texto principal y `--sidebar-muted` el
+       secundario (headers de sección, textos de apoyo). Los estados
+       hover/activo se derivan por opacidad sobre el foreground, así que
+       siguen cualquier color de fondo que se elija.
+
+       Sobre el tono: es el MISMO hue del azul de marca (#2F6BFF = hsl 222.7
+       100% 59.2%) pero más profundo. A 59% de luminosidad el texto secundario
+       contra ese fondo da 3.0:1 y el blanco apenas 4.5:1 — o sea, los ítems
+       inactivos (la mayor parte del panel) quedaban por debajo del mínimo
+       legible. A 32% el blanco sube a 10.9:1 y el secundario a 7.3:1. Subir
+       este número aclara el panel y baja el contraste; no pasar de ~44%. */
+    --sidebar: 222.7 100% 32%;
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-muted: 222.7 100% 88%;
+    /* Ítem activo. Sobre el azul el acento tiene que ser el blanco: azul sobre
+       azul no se distinguiría. */
+    --sidebar-accent: 0 0% 100%;
+    /* Botón "Nueva venta": relleno blanco con texto azul (10.9:1 en ambas
+       direcciones), que resalta más que un botón azul sobre fondo azul. */
+    --sidebar-cta: 0 0% 100%;
+    --sidebar-cta-foreground: 222.7 100% 32%;
   }
 
   /* Wrapper opt-in para forzar tema claro en subtrees (vista pública,
@@ -79,6 +107,20 @@
     --stock-ok: 142 71% 45%;
     --stock-low: 38 92% 50%;
     --stock-out: 0 84% 60%;
+
+    /* En oscuro el sidebar mantiene el gris azulado que ya tenía (#0F131A):
+       el azul de marca a pantalla completa sobre un tema oscuro encandila.
+       El acento sigue presente en el ítem activo y en "Nueva venta". */
+    --sidebar: 218 27% 8%;
+    --sidebar-foreground: 0 0% 98%;
+    --sidebar-muted: 215 20% 65%;
+    /* Acá el fondo es oscuro, así que el acento vuelve a ser el azul (tono
+       claro, blue-400, para que se lea sobre el gris casi negro). */
+    --sidebar-accent: 213 94% 68%;
+    /* Acá el botón sí va en el azul de marca exacto: resalta contra el fondo
+       casi negro, que es como se veía antes de tokenizar. */
+    --sidebar-cta: 222.7 100% 59.2%;
+    --sidebar-cta-foreground: 0 0% 100%;
   }
 }
 

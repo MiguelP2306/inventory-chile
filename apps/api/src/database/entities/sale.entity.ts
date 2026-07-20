@@ -47,7 +47,9 @@ export class Sale {
   @Column({ type: 'datetime', precision: 6 })
   date!: Date;
 
-  // Total bruto (con IVA). Coincide con la suma de items y es lo que paga el cliente.
+  // Total bruto (con IVA) y es lo que paga el cliente. Coincide con la suma de
+  // items, salvo que haya `discount` global: en ese caso es la suma menos ese
+  // descuento.
   @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
   total!: string;
 
@@ -58,6 +60,17 @@ export class Sale {
   // IVA descompuesto. total - subtotal.
   @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
   taxAmount!: string;
+
+  // Descuento sobre el TOTAL de la venta (aparte de los descuentos por línea).
+  // Se aplica sobre el bruto sumado; `subtotal` y `taxAmount` ya vienen
+  // recalculados sobre el bruto rebajado.
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  discount!: string;
+
+  // Si el operador lo ingresó como %, queda persistido para reimprimir la nota
+  // con la misma representación. `discount` siempre tiene el monto.
+  @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
+  discountPercent!: string | null;
 
   // Venta NO afecta a IVA (sin documento). Default false → afecta 19%. Cuando
   // es true, la venta se guarda con taxAmount=0 (todo el total es neto) y NO

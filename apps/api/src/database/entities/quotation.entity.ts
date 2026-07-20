@@ -67,6 +67,17 @@ export class Quotation {
   @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
   total!: string;
 
+  // Descuento sobre el TOTAL del documento (aparte de los descuentos por
+  // línea). Se aplica sobre el bruto sumado; el neto y el IVA de arriba ya
+  // vienen recalculados sobre el bruto rebajado.
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  discount!: string;
+
+  // Si el operador lo ingresó como %, queda persistido para reimprimir la
+  // cotización con la misma representación. `discount` siempre tiene el monto.
+  @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
+  discountPercent!: string | null;
+
   @Column({ type: 'text', nullable: true })
   notes!: string | null;
 

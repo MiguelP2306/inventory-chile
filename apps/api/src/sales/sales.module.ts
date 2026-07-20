@@ -10,6 +10,8 @@ import {
   Product,
   Quotation,
   Sale,
+  SaleDraft,
+  SaleDraftItem,
   SaleItem,
   Stock,
   Warehouse,
@@ -17,6 +19,8 @@ import {
 import { InventoryModule } from '../inventory/inventory.module';
 import { LifecycleModule } from '../lifecycle/lifecycle.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { SaleDraftsController } from './sale-drafts.controller';
+import { SaleDraftsService } from './sale-drafts.service';
 import { SalesController } from './sales.controller';
 import { SalesService } from './sales.service';
 
@@ -25,6 +29,8 @@ import { SalesService } from './sales.service';
     TypeOrmModule.forFeature([
       Sale,
       SaleItem,
+      SaleDraft,
+      SaleDraftItem,
       Customer,
       Warehouse,
       Product,
@@ -40,8 +46,8 @@ import { SalesService } from './sales.service';
     NotificationsModule,
     LifecycleModule,
   ],
-  controllers: [SalesController],
-  providers: [SalesService],
-  exports: [SalesService],
+  controllers: [SalesController, SaleDraftsController],
+  providers: [SalesService, SaleDraftsService],
+  exports: [SalesService, SaleDraftsService],
 })
 export class SalesModule {}

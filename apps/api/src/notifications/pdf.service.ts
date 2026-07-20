@@ -73,6 +73,11 @@ interface PdfInput {
   subtotal: string | null;
   taxAmount: string | null;
   total: string;
+  // Descuento sobre el total del documento. Se imprime como línea propia entre
+  // los ítems y el neto, con el % cuando así fue pactado. '0.00' → no se
+  // imprime nada.
+  discount?: string | null;
+  discountPercent?: string | null;
   notes: string | null;
   customer: CustomerInfo;
   items: QuotationItemLine[];
@@ -111,6 +116,8 @@ export class PdfService {
       subtotal: q.subtotal,
       taxAmount: q.taxAmount,
       total: q.total,
+      discount: q.discount,
+      discountPercent: q.discountPercent,
       notes: q.notes,
       customer: {
         name: q.customerView.name,
@@ -158,6 +165,8 @@ export class PdfService {
       subtotal: p.subtotal,
       taxAmount: p.taxAmount,
       total: p.total,
+      discount: p.discount,
+      discountPercent: p.discountPercent,
       notes: p.notes,
       customer: p.customer,
       items: p.items,
@@ -182,6 +191,8 @@ export class PdfService {
       subtotal: s.subtotal,
       taxAmount: s.taxAmount,
       total: s.total,
+      discount: s.discount,
+      discountPercent: s.discountPercent,
       notes: s.notes,
       paymentMethod: s.paymentMethod,
       commissionAmount: s.commissionAmount,
@@ -220,7 +231,7 @@ export class PdfService {
   }
 
   private async generateLetter(input: PdfInput): Promise<Buffer> {
-    const doc = new jsPDF({ unit: 'pt', format: 'letter' });
+    const doc = new jsPDF({ unit: 'pt', format: 'letter', compress: true });
     const pageWidth = doc.internal.pageSize.getWidth();
     const margin = 40;
     let y = margin;
@@ -383,6 +394,22 @@ export class PdfService {
 
     const totalsX = pageWidth - margin - 200;
     doc.setFontSize(10);
+    // Descuento sobre el total. Va antes del neto porque el neto y el IVA ya
+    // salen calculados sobre el monto rebajado.
+    const globalDiscount = Number(input.discount ?? 0);
+    if (globalDiscount > 0) {
+      const label = input.discountPercent
+        ? `Descuento (${Number(input.discountPercent)}%):`
+        : 'Descuento:';
+      doc.text(label, totalsX, totalsY);
+      doc.text(
+        `-${formatMoney(input.discount!)}`,
+        pageWidth - margin,
+        totalsY,
+        { align: 'right' },
+      );
+      totalsY += 14;
+    }
     // Subtotal, IVA y comisión solo si el viewer tiene el desglose.
     if (input.subtotal != null) {
       doc.text('Subtotal neto:', totalsX, totalsY);
@@ -584,6 +611,20 @@ export class PdfService {
     let totalsY = tableEnd + 8;
 
     doc.setFontSize(7);
+    const thermalDiscount = Number(input.discount ?? 0);
+    if (thermalDiscount > 0) {
+      doc.text(
+        input.discountPercent
+          ? `Descuento (${Number(input.discountPercent)}%):`
+          : 'Descuento:',
+        margin,
+        totalsY,
+      );
+      doc.text(`-${formatMoney(input.discount!)}`, widthPt - margin, totalsY, {
+        align: 'right',
+      });
+      totalsY += 9;
+    }
     if (input.subtotal != null) {
       doc.text('Subtotal neto:', margin, totalsY);
       doc.text(formatMoney(input.subtotal), widthPt - margin, totalsY, {
@@ -722,7 +763,7 @@ export class PdfService {
   private async generateDispatchLetter(
     input: DispatchPdfInput,
   ): Promise<Buffer> {
-    const doc = new jsPDF({ unit: 'pt', format: 'letter' });
+    const doc = new jsPDF({ unit: 'pt', format: 'letter', compress: true });
     const pageWidth = doc.internal.pageSize.getWidth();
     const margin = 40;
     let y = margin;
@@ -1091,7 +1132,7 @@ export class PdfService {
    * placeholder con un ícono.
    */
   async generateCatalog(input: CatalogPdfInput): Promise<Buffer> {
-    const doc = new jsPDF({ unit: 'pt', format: 'letter' });
+    const doc = new jsPDF({ unit: 'pt', format: 'letter', compress: true });
     const widthPt = doc.internal.pageSize.getWidth();
     const heightPt = doc.internal.pageSize.getHeight();
     const margin = 40;
@@ -1343,12 +1384,20 @@ function thermalDocOptions(
   contentH: number,
   margin: number,
   widthPt: number,
-): { orientation: 'portrait' | 'landscape'; unit: 'pt'; format: [number, number] } {
+): {
+  orientation: 'portrait' | 'landscape';
+  unit: 'pt';
+  format: [number, number];
+  compress: boolean;
+} {
   const height = Math.ceil(contentH + margin);
   return {
     orientation: height >= widthPt ? 'portrait' : 'landscape',
     unit: 'pt',
     format: [widthPt, height],
+    // FlateEncode los streams: el logo se embebe como RGB crudo, así que
+    // comprimir reduce bastante el peso del archivo final.
+    compress: true,
   };
 }
 

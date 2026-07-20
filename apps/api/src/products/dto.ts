@@ -218,3 +218,20 @@ export class QuickSearchQueryDto {
   @IsBoolean()
   activeOnly?: boolean;
 }
+
+/**
+ * Corrección manual del costo unitario (solo admin). El costo normalmente es
+ * derivado del ponderado de lotes; esto existe para arreglar un costo que entró
+ * mal. Motivo obligatorio (queda auditado).
+ */
+export class CorrectCostDto {
+  // Costo bruto corregido, como string decimal (mismo formato que el resto de
+  // montos del sistema).
+  @IsNumberString({ no_symbols: false })
+  unitCost!: string;
+
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  reason!: string;
+}

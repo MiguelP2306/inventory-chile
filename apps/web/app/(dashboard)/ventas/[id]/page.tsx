@@ -324,6 +324,19 @@ export default function VentaDetailPage() {
           </div>
         )}
         <div className={`ml-auto min-w-[280px] space-y-2 text-xs ${CARD}`}>
+          {/* El descuento se muestra siempre: es precio pactado con el cliente,
+              no parte del desglose financiero gateado por permiso. */}
+          {Number(s.discount ?? 0) > 0 && (
+            <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
+              <span>
+                Descuento
+                {s.discountPercent ? ` (${Number(s.discountPercent)}%)` : ''}
+              </span>
+              <span className="font-mono font-semibold">
+                −{formatCurrency(s.discount)}
+              </span>
+            </div>
+          )}
           {canSeeBreakdown && s.subtotal != null && (
             <div className="flex justify-between text-slate-500 dark:text-slate-400">
               <span>Subtotal neto</span>

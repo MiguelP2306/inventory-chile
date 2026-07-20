@@ -68,7 +68,8 @@ import {
   uploadProductImage,
   type ProductInput,
 } from '@/lib/catalog-api';
-import { Permission, useCan } from '@/lib/current-user-context';
+import { Permission, useCan, useIsAdmin } from '@/lib/current-user-context';
+import { ProductCostCorrectionDialog } from '@/components/product-cost-correction-dialog';
 import { formatCurrency } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type {
@@ -560,8 +561,14 @@ export function ProductForm({ product }: Props) {
 
             {/* DATOS */}
             <TabsContent
+              // forceMount: Radix desmonta el panel inactivo, y al volver los
+              // inputs no controlados (register) perdían lo tipeado sin guardar
+              // — clásico "se borra el N° de parte al ir a Imágenes y volver".
+              // Manteniéndolo montado (Radix lo oculta con `hidden`) el valor
+              // sobrevive al cambio de pestaña.
+              forceMount
               value="datos"
-              className="mt-0 rounded-b-xl rounded-tr-xl border border-t-0 bg-card p-6 shadow-sm"
+              className="mt-0 rounded-b-xl rounded-tr-xl border border-t-0 bg-card p-6 shadow-sm data-[state=inactive]:hidden"
             >
               <SectionHeader
                 title="Datos básicos"
@@ -777,8 +784,14 @@ export function ProductForm({ product }: Props) {
 
             {/* PRECIOS Y STOCK */}
             <TabsContent
+              // forceMount: Radix desmonta el panel inactivo, y al volver los
+              // inputs no controlados (register) perdían lo tipeado sin guardar
+              // — clásico "se borra el N° de parte al ir a Imágenes y volver".
+              // Manteniéndolo montado (Radix lo oculta con `hidden`) el valor
+              // sobrevive al cambio de pestaña.
+              forceMount
               value="precios"
-              className="mt-0 rounded-b-xl rounded-tr-xl border border-t-0 bg-card p-6 shadow-sm"
+              className="mt-0 rounded-b-xl rounded-tr-xl border border-t-0 bg-card p-6 shadow-sm data-[state=inactive]:hidden"
             >
               <SectionHeader
                 title="Precios y stock"
@@ -790,13 +803,20 @@ export function ProductForm({ product }: Props) {
                 currentStock={product?.currentStock}
                 canSeeCost={canSeeCost}
                 isEdit={!!product}
+                product={product}
               />
             </TabsContent>
 
             {/* COMPATIBILIDAD */}
             <TabsContent
+              // forceMount: Radix desmonta el panel inactivo, y al volver los
+              // inputs no controlados (register) perdían lo tipeado sin guardar
+              // — clásico "se borra el N° de parte al ir a Imágenes y volver".
+              // Manteniéndolo montado (Radix lo oculta con `hidden`) el valor
+              // sobrevive al cambio de pestaña.
+              forceMount
               value="compat"
-              className="mt-0 rounded-b-xl rounded-tr-xl border border-t-0 bg-card p-6 shadow-sm"
+              className="mt-0 rounded-b-xl rounded-tr-xl border border-t-0 bg-card p-6 shadow-sm data-[state=inactive]:hidden"
             >
               <SectionHeader
                 title="Vehículos compatibles"
@@ -1010,8 +1030,14 @@ export function ProductForm({ product }: Props) {
 
             {/* CÓDIGOS COMPATIBLES */}
             <TabsContent
+              // forceMount: Radix desmonta el panel inactivo, y al volver los
+              // inputs no controlados (register) perdían lo tipeado sin guardar
+              // — clásico "se borra el N° de parte al ir a Imágenes y volver".
+              // Manteniéndolo montado (Radix lo oculta con `hidden`) el valor
+              // sobrevive al cambio de pestaña.
+              forceMount
               value="codigos"
-              className="mt-0 rounded-b-xl rounded-tr-xl border border-t-0 bg-card p-6 shadow-sm"
+              className="mt-0 rounded-b-xl rounded-tr-xl border border-t-0 bg-card p-6 shadow-sm data-[state=inactive]:hidden"
             >
               <SectionHeader
                 title="Códigos compatibles"
@@ -1449,13 +1475,17 @@ function PriciosSection({
   currentStock,
   canSeeCost,
   isEdit,
+  product,
 }: {
   form: UseFormReturn<FormValues>;
   errors: FieldErrors<FormValues>;
   currentStock?: number;
   canSeeCost: boolean;
   isEdit: boolean;
+  product?: ProductDto;
 }) {
+  const isAdmin = useIsAdmin();
+  const [costDialogOpen, setCostDialogOpen] = useState(false);
   // Margen calculado en tiempo real (cost vs price)
   const cost = useWatch({ control: form.control, name: 'cost' });
   const price = useWatch({ control: form.control, name: 'price' });
@@ -1468,6 +1498,7 @@ function PriciosSection({
   }, [cost, price, canSeeCost]);
 
   return (
+    <>
     <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
       {canSeeCost &&
         (isEdit ? (
@@ -1480,12 +1511,25 @@ function PriciosSection({
             optional="CLP · automático"
             hint="Promedio ponderado de los lotes con stock disponible. Se actualiza solo con cada compra, venta, devolución o ajuste."
           >
-            <div className="flex h-10 items-center rounded-md border border-input bg-muted/40 px-3 font-mono text-sm font-semibold">
-              <span className="mr-1 text-muted-foreground">$</span>
-              {cost ? Number(cost).toLocaleString('es-CL', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              }) : '—'}
+            <div className="flex items-center gap-2">
+              <div className="flex h-10 flex-1 items-center rounded-md border border-input bg-muted/40 px-3 font-mono text-sm font-semibold">
+                <span className="mr-1 text-muted-foreground">$</span>
+                {cost ? Number(cost).toLocaleString('es-CL', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                }) : '—'}
+              </div>
+              {/* Corregir: solo admin. Para el caso de un costo que entró mal
+                  (típicamente por Excel) y que el ponderado no deja editar. */}
+              {isAdmin && product && (
+                <button
+                  type="button"
+                  onClick={() => setCostDialogOpen(true)}
+                  className="h-10 shrink-0 whitespace-nowrap rounded-md border border-input px-3 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  Corregir
+                </button>
+              )}
             </div>
           </Field>
         ) : (
@@ -1516,8 +1560,18 @@ function PriciosSection({
           margin != null ? (
             <>
               Margen sobre el costo:{' '}
-              <strong className="text-emerald-600 dark:text-emerald-400">
-                +{margin}%
+              {/* El signo se arma según el valor: un margen negativo (venta
+                  bajo costo) mostraba "+-313%" y en verde. Ahora sale "-313%"
+                  y en rojo. */}
+              <strong
+                className={
+                  margin < 0
+                    ? 'text-rose-600 dark:text-rose-400'
+                    : 'text-emerald-600 dark:text-emerald-400'
+                }
+              >
+                {margin > 0 ? '+' : ''}
+                {margin}%
               </strong>
             </>
           ) : (
@@ -1536,8 +1590,16 @@ function PriciosSection({
             className="pl-7 pr-14"
           />
           {margin != null && (
-            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-              +{margin}%
+            <span
+              className={cn(
+                'pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold',
+                margin < 0
+                  ? 'text-rose-600 dark:text-rose-400'
+                  : 'text-emerald-600 dark:text-emerald-400',
+              )}
+            >
+              {margin > 0 ? '+' : ''}
+              {margin}%
             </span>
           )}
         </div>
@@ -1566,6 +1628,19 @@ function PriciosSection({
         </div>
       </Field>
     </div>
+    {isAdmin && product && (
+      <ProductCostCorrectionDialog
+        product={{ id: product.id, sku: product.sku, name: product.name }}
+        currentCost={cost || product.cost || '0'}
+        open={costDialogOpen}
+        onOpenChange={setCostDialogOpen}
+        onCorrected={(newCost) =>
+          // Refresca el campo de solo lectura y el margen sin recargar la página.
+          form.setValue('cost', newCost, { shouldDirty: false })
+        }
+      />
+    )}
+    </>
   );
 }
 
@@ -1840,8 +1915,16 @@ function PreviewCard({
               <div>costo {costN > 0 ? formatCurrency(String(costN)) : '$ 0,00'}</div>
             )}
             {margin != null && (
-              <div className="mt-0.5 font-semibold text-emerald-600 dark:text-emerald-400">
-                +{margin}% margen
+              <div
+                className={cn(
+                  'mt-0.5 font-semibold',
+                  margin < 0
+                    ? 'text-rose-600 dark:text-rose-400'
+                    : 'text-emerald-600 dark:text-emerald-400',
+                )}
+              >
+                {margin > 0 ? '+' : ''}
+                {margin}% margen
               </div>
             )}
           </div>

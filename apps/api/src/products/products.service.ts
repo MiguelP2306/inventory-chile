@@ -277,6 +277,72 @@ export class ProductsService {
   }
 
   /**
+   * Corrige a mano el costo unitario de un producto (solo admin).
+   *
+   * El costo normalmente es derivado del promedio ponderado de los lotes, y el
+   * PATCH normal ignora `cost` a propósito. Esta corrección existe para el caso
+   * en que el costo entró MAL (típicamente por Excel): reescribe el `unitCost`
+   * de TODOS los lotes activos (con stock disponible) al valor corregido y fija
+   * el costo del producto.
+   *
+   * Por qué reescribir los lotes y no solo `products.cost`: el costo del
+   * producto se re-deriva de los lotes en cada movimiento. Si solo tocáramos
+   * `products.cost`, la próxima compra/venta lo volvería a pisar con el
+   * ponderado viejo. Al poner todos los lotes activos en el nuevo valor, el
+   * ponderado pasa a ser exactamente ese valor y la corrección es estable.
+   *
+   * NO toca ventas ya registradas: su costo quedó congelado en el `sale_item`
+   * al confirmarse. La corrección aplica de acá en adelante.
+   *
+   * Cada corrección se audita en `cost_corrections` (quién, cuándo, de cuánto a
+   * cuánto, y por qué).
+   */
+  async correctCost(
+    id: string,
+    dto: { unitCost: string; reason: string },
+    userId: string,
+  ) {
+    const existing = await this.products.findOne({ where: { id } });
+    if (!existing) throw new NotFoundException('Producto no encontrado');
+
+    const newCost = Number(dto.unitCost);
+    if (!Number.isFinite(newCost) || newCost < 0) {
+      throw new BadRequestException('El costo corregido no es válido.');
+    }
+    const reason = dto.reason?.trim();
+    if (!reason) {
+      throw new BadRequestException('El motivo de la corrección es obligatorio.');
+    }
+    const normalized = newCost.toFixed(2);
+    const previousCost = existing.cost;
+
+    await this.dataSource.transaction(async (manager) => {
+      // 1) Reescribir el costo de todos los lotes activos del producto.
+      await manager.query(
+        `UPDATE product_lots SET unitCost = ?
+         WHERE productId = ? AND remainingQty > 0`,
+        [normalized, id],
+      );
+      // 2) Fijar el costo del producto. Con todos los lotes activos en el mismo
+      //    valor, el ponderado ES ese valor; si el producto no tiene stock
+      //    (ningún lote activo), igual dejamos registrada la referencia.
+      await manager.query(`UPDATE products SET cost = ? WHERE id = ?`, [
+        normalized,
+        id,
+      ]);
+      // 3) Auditoría.
+      await manager.query(
+        `INSERT INTO cost_corrections
+           (id, productId, previousCost, newCost, reason, userId, createdAt)
+         VALUES (UUID(), ?, ?, ?, ?, ?, NOW(6))`,
+        [id, previousCost, normalized, reason, userId],
+      );
+    });
+
+    return this.getOne(id);
+  }
+
+  /**
    * Cuenta las relaciones del producto para el modal de confirmación de
    * borrado. Como el borrado es SOFT (ver `remove`), estos registros se
    * conservan — el conteo solo informa el impacto al operador.

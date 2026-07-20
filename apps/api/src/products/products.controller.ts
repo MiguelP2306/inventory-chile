@@ -27,7 +27,7 @@ import {
   ValidateIf,
 } from 'class-validator';
 import type { Response } from 'express';
-import { Permission } from '@inventory/shared';
+import { Permission, UserRole } from '@inventory/shared';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/types';
 import { BrandsService } from '../brands/brands.service';
@@ -48,6 +48,7 @@ import {
 } from '../uploads/upload-config';
 import {
   ByVehicleQueryDto,
+  CorrectCostDto,
   CreateProductDto,
   ListProductsQueryDto,
   QuickSearchQueryDto,
@@ -509,6 +510,24 @@ export class ProductsController {
     @Body() dto: UpdateProductDto,
   ) {
     return this.svc.update(id, dto);
+  }
+
+  /**
+   * Corrección manual del costo unitario. Solo admin: afecta rentabilidad y
+   * valorización de inventario. Reescribe los lotes activos y audita el motivo.
+   */
+  @Patch(':id/cost')
+  correctCost(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: CorrectCostDto,
+    @CurrentUser() viewer: JwtPayload,
+  ) {
+    if (viewer.role !== UserRole.ADMIN) {
+      throw new ForbiddenException(
+        'Solo un administrador puede corregir el costo de un producto.',
+      );
+    }
+    return this.svc.correctCost(id, dto, viewer.sub);
   }
 
   @Delete(':id')

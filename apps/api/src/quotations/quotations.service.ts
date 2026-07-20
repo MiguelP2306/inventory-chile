@@ -19,7 +19,11 @@ import { randomBytes } from 'crypto';
 import { Brackets, DataSource, EntityManager, Repository } from 'typeorm';
 import { CountersService } from '../common/counters.service';
 import { dayRange } from '../common/date-range';
-import { computeDocumentTotals } from '../common/document-totals';
+import {
+  computeDocumentTotals,
+  DocumentLineInput,
+  DocumentTotals,
+} from '../common/document-totals';
 import { businessNoonToday, parseBusinessDate } from '../common/timezone';
 import { rethrowFkAsConflict } from '../common/fk-error';
 import { normalizePhone } from '../common/validators/phone';
@@ -149,6 +153,8 @@ export class QuotationsService {
       subtotal: q.subtotal,
       taxAmount: q.taxAmount,
       total: q.total,
+      discount: q.discount,
+      discountPercent: q.discountPercent,
       notes: q.notes,
       customer: {
         name: view.name,
@@ -240,7 +246,10 @@ export class QuotationsService {
       const number = CountersService.format(NUMBER_PREFIX, year, seq);
       const publicToken = randomBytes(24).toString('hex');
 
-      const totals = computeDocumentTotals(dto.items, taxRate);
+      const totals = computeDocumentTotals(dto.items, taxRate, {
+        amount: dto.discount,
+        percent: dto.discountPercent,
+      });
 
       // Cliente libre → se persiste como cliente BORRADOR y se vincula (queda en
       // Clientes > Borradores y se puede completar/reusar). Si ya hay customerId
@@ -266,6 +275,10 @@ export class QuotationsService {
         subtotal: totals.subtotal,
         taxAmount: totals.taxAmount,
         total: totals.total,
+        // Guardamos el monto ya acotado que devolvió el cálculo, no el crudo
+        // del dto: si vino un monto mayor al bruto, quedó capado.
+        discount: totals.discountAmount,
+        discountPercent: dto.discountPercent ?? null,
         notes: dto.notes ?? null,
         publicToken,
         sentAt: null,
@@ -273,27 +286,7 @@ export class QuotationsService {
       });
       const saved = await manager.getRepository(Quotation).save(quotation);
 
-      for (let i = 0; i < dto.items.length; i++) {
-        const it = dto.items[i]!;
-        const lineTotals = totals.lines[i]!;
-        const item = manager.getRepository(QuotationItem).create({
-          quotationId: saved.id,
-          productId: it.productId ?? null,
-          // Ronda 9 — snapshots de productos temporales.
-          tempProductName: it.productId ? null : it.tempProductName?.trim() ?? null,
-          tempProductSku: it.productId ? null : it.tempProductSku?.trim() ?? null,
-          tempProductPartNumber: it.productId
-            ? null
-            : it.tempProductPartNumber?.trim() ?? null,
-          qty: it.qty,
-          unitPrice: it.unitPrice,
-          discount: lineTotals.discountAmount,
-          discountPercent: it.discountPercent ?? null,
-          subtotal: lineTotals.lineGross,
-          observation: it.observation?.trim() || null,
-        });
-        await manager.getRepository(QuotationItem).save(item);
-      }
+      await this.insertQuotationItems(manager, saved.id, dto.items, totals);
 
       // Fase 8.5 — mover el lifecycle del cliente a QUOTED y agendar
       // follow-up dentro de la MISMA transacción del create. Aplica también al
@@ -379,40 +372,48 @@ export class QuotationsService {
           : null;
       if (dto.notes !== undefined) existing.notes = dto.notes ?? null;
 
-      if (dto.items) {
-        // Replace strategy: borrar e insertar.
-        await manager
-          .getRepository(QuotationItem)
-          .delete({ quotationId: id });
+      if (dto.discount !== undefined) existing.discount = dto.discount ?? '0';
+      if (dto.discountPercent !== undefined)
+        existing.discountPercent = dto.discountPercent ?? null;
 
-        const totals = computeDocumentTotals(dto.items, taxRate);
+      // El descuento global puede cambiar sin que cambien los ítems, y en ese
+      // caso igual hay que rehacer los totales sobre los ítems ya guardados.
+      const discountChanged =
+        dto.discount !== undefined || dto.discountPercent !== undefined;
+
+      if (dto.items || discountChanged) {
+        const linesForCalc: DocumentLineInput[] = dto.items
+          ? dto.items
+          // El orden no importa: solo se usan para sumar el bruto y recalcular
+          // el descuento global; las líneas no se reescriben en esta rama.
+          : (
+              await manager
+                .getRepository(QuotationItem)
+                .find({ where: { quotationId: id } })
+            ).map((it) => ({
+              qty: it.qty,
+              unitPrice: it.unitPrice,
+              discount: it.discount,
+              discountPercent: it.discountPercent,
+            }));
+
+        const totals = computeDocumentTotals(linesForCalc, taxRate, {
+          amount: existing.discount,
+          percent: existing.discountPercent,
+        });
         existing.subtotal = totals.subtotal;
         existing.taxAmount = totals.taxAmount;
         existing.total = totals.total;
+        // Persistimos el monto ya acotado a [0, bruto] por el cálculo.
+        existing.discount = totals.discountAmount;
 
-        for (let i = 0; i < dto.items.length; i++) {
-          const it = dto.items[i]!;
-          const lineTotals = totals.lines[i]!;
-          const item = manager.getRepository(QuotationItem).create({
-            quotationId: id,
-            productId: it.productId ?? null,
-            tempProductName: it.productId
-              ? null
-              : it.tempProductName?.trim() ?? null,
-            tempProductSku: it.productId
-              ? null
-              : it.tempProductSku?.trim() ?? null,
-            tempProductPartNumber: it.productId
-              ? null
-              : it.tempProductPartNumber?.trim() ?? null,
-            qty: it.qty,
-            unitPrice: it.unitPrice,
-            discount: lineTotals.discountAmount,
-            discountPercent: it.discountPercent ?? null,
-            subtotal: lineTotals.lineGross,
-            observation: it.observation?.trim() || null,
-          });
-          await manager.getRepository(QuotationItem).save(item);
+        if (dto.items) {
+          // Replace strategy: borrar e insertar.
+          await manager
+            .getRepository(QuotationItem)
+            .delete({ quotationId: id });
+
+          await this.insertQuotationItems(manager, id, dto.items, totals);
         }
       }
 
@@ -420,6 +421,39 @@ export class QuotationsService {
     });
 
     return this.getOne(id);
+  }
+
+  /**
+   * Inserta las líneas de la cotización con sus totales ya calculados.
+   * `totals.lines` viene alineado por índice con `items`.
+   */
+  private async insertQuotationItems(
+    manager: EntityManager,
+    quotationId: string,
+    items: CreateQuotationItemDto[],
+    totals: DocumentTotals,
+  ): Promise<void> {
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i]!;
+      const lineTotals = totals.lines[i]!;
+      const item = manager.getRepository(QuotationItem).create({
+        quotationId,
+        productId: it.productId ?? null,
+        // Ronda 9 — snapshots de productos temporales.
+        tempProductName: it.productId ? null : it.tempProductName?.trim() ?? null,
+        tempProductSku: it.productId ? null : it.tempProductSku?.trim() ?? null,
+        tempProductPartNumber: it.productId
+          ? null
+          : it.tempProductPartNumber?.trim() ?? null,
+        qty: it.qty,
+        unitPrice: it.unitPrice,
+        discount: lineTotals.discountAmount,
+        discountPercent: it.discountPercent ?? null,
+        subtotal: lineTotals.lineGross,
+        observation: it.observation?.trim() || null,
+      });
+      await manager.getRepository(QuotationItem).save(item);
+    }
   }
 
   async markApproved(id: string): Promise<QuotationDto> {
@@ -520,6 +554,8 @@ export class QuotationsService {
       subtotal: string;
       taxAmount: string;
       total: string;
+      discount: string;
+      discountPercent: string | null;
       notes: string | null;
       quotationId: string;
     };
@@ -571,6 +607,8 @@ export class QuotationsService {
         subtotal: q.subtotal,
         taxAmount: q.taxAmount,
         total: q.total,
+        discount: q.discount,
+        discountPercent: q.discountPercent,
         notes: q.notes,
       },
     };
@@ -643,6 +681,13 @@ export class QuotationsService {
 
   private async assertProductsExist(productIds: string[]): Promise<void> {
     const unique = Array.from(new Set(productIds));
+    // Ronda 9 — una cotización puede ser 100% de productos temporales, y ahí
+    // esta lista llega vacía. Hay que cortar acá: TypeORM interpreta
+    // `where: []` como "sin condición" y devuelve TODOS los productos, con lo
+    // que la comparación de largos fallaba y tiraba un 404 con la lista de
+    // faltantes vacía. Solo se notaba cuando NINGÚN ítem tenía productId.
+    if (unique.length === 0) return;
+
     const found = await this.productRepo.find({
       where: unique.map((id) => ({ id })),
       select: { id: true },
@@ -825,6 +870,8 @@ export class QuotationsService {
       subtotal: q.subtotal,
       taxAmount: q.taxAmount,
       total: q.total,
+      discount: q.discount,
+      discountPercent: q.discountPercent,
       notes: q.notes,
       publicToken: q.publicToken,
       publicUrl: `${baseUrl}/p/cotizacion/${q.publicToken}`,

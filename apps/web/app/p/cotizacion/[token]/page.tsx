@@ -202,6 +202,15 @@ export default async function PublicQuotationPage({
       </div>
 
       <div className="ml-auto max-w-sm rounded-md border bg-background p-4 text-sm space-y-2">
+        {Number(q.discount ?? 0) > 0 && (
+          <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
+            <span>
+              Descuento
+              {q.discountPercent ? ` (${Number(q.discountPercent)}%)` : ''}
+            </span>
+            <span className="tabular-nums">−{formatCurrency(q.discount)}</span>
+          </div>
+        )}
         <div className="flex justify-between">
           <span className="text-muted-foreground">Subtotal neto</span>
           <span className="tabular-nums">{formatCurrency(q.subtotal)}</span>

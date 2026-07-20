@@ -951,6 +951,11 @@ export interface QuotationDto {
   subtotal: string;
   taxAmount: string;
   total: string;
+  // Descuento sobre el total del documento (aparte de los descuentos por
+  // línea). `subtotal` y `taxAmount` ya vienen recalculados sobre el bruto
+  // rebajado. `discountPercent` sólo viene si se ingresó como porcentaje.
+  discount: string;
+  discountPercent: string | null;
   notes: string | null;
   publicToken: string;
   publicUrl: string;
@@ -977,6 +982,10 @@ export interface PublicQuotationDto {
   subtotal: string;
   taxAmount: string;
   total: string;
+  // Descuento sobre el total. Se muestra como línea propia en el documento
+  // que ve el cliente, con el % si así fue pactado.
+  discount: string;
+  discountPercent: string | null;
   notes: string | null;
   customer: {
     name: string;
@@ -1085,6 +1094,11 @@ export interface SaleDto {
   taxAmount: string | null;
   commissionAmount: string | null;
   total: string;
+  // Descuento sobre el total de la venta (aparte de los descuentos por línea).
+  // NO va gateado por `SALE_VIEW_FINANCIAL_BREAKDOWN`: es parte del precio
+  // pactado con el cliente, no del desglose de márgenes.
+  discount: string;
+  discountPercent: string | null;
   // Venta NO afecta a IVA (sin documento). Si es true, taxAmount es 0 y la
   // venta no entra al Reporte de IVA. Default false (afecta 19%).
   vatExempt: boolean;
@@ -1127,17 +1141,111 @@ export interface CreateSaleInput {
   vatExempt?: boolean;
   date?: string;
   notes?: string | null;
+  // Descuento sobre el total de la venta. Si `discountPercent` viene, el monto
+  // se calcula a partir del % y se ignora `discount` en el cómputo (pero se
+  // guarda igual). Se acota a [0, bruto] en el backend.
+  discount?: string | null;
+  discountPercent?: string | null;
   // Si se está convirtiendo desde una cotización, mandar su id para que el
   // backend marque la cotización como CONVERTED en la misma transacción.
   quotationId?: string | null;
   // Si la venta se crea convirtiendo una guía de despacho independiente, su id
   // viaja acá para que el backend linkee la guía en la misma transacción.
   dispatchNoteId?: string | null;
+  // Si la venta viene de un borrador parkeado, su id viaja acá para que el
+  // backend lo elimine en la MISMA transacción del create. Así no queda un
+  // borrador huérfano de una venta ya confirmada.
+  draftId?: string | null;
   items: CreateSaleItemInput[];
 }
 
 export interface CancelSaleInput {
   reason: string;
+}
+
+// ---------- Borradores de venta ("ventas parkeadas") ----------
+//
+// Viven en tablas propias (`sale_drafts` / `sale_draft_items`), NO en `sales`.
+// Un borrador no descuenta stock, no registra caja, no consume correlativo y
+// no aparece en ningún reporte. Todo eso ocurre recién al confirmar la venta.
+//
+// Son del negocio, no del vendedor: cualquiera puede retomar uno.
+
+export interface SaleDraftItemDto {
+  id: string;
+  productId: string;
+  qty: number;
+  unitPrice: string;
+  discount: string;
+  discountPercent: string | null;
+  observation: string | null;
+  product?: {
+    id: string;
+    sku: string | null;
+    name: string;
+    partNumber: string | null;
+  };
+}
+
+export interface SaleDraftDto {
+  id: string;
+  /** Etiqueta libre para reconocerlo en la lista. */
+  label: string | null;
+  customerId: string | null;
+  // Forma reducida a propósito: al listar borradores alcanza con saber de
+  // quién es. Al RETOMAR uno, el frontend trae el cliente completo con
+  // `getCustomer(customerId)` — así no hay que duplicar el mapeo de
+  // CustomerDto (que tiene fechas) solo para esto.
+  customer?: {
+    id: string;
+    name: string;
+    taxId: string | null;
+  } | null;
+  warehouseId: string | null;
+  warehouse?: { id: string; name: string } | null;
+  paymentMethod: PaymentMethodDto | null;
+  vatExempt: boolean;
+  notes: string | null;
+  discount: string;
+  discountPercent: string | null;
+  /** Total bruto estimado, solo para mostrar en el listado. */
+  total: string;
+  quotationId: string | null;
+  dispatchNoteId: string | null;
+  /** Quién lo creó y quién lo tocó por última vez (informativo). */
+  user?: { id: string; name: string; email: string };
+  updatedBy?: { id: string; name: string; email: string } | null;
+  items?: SaleDraftItemDto[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaleDraftItemInput {
+  productId: string;
+  qty: number;
+  unitPrice: string;
+  discount?: string | null;
+  discountPercent?: string | null;
+  observation?: string | null;
+}
+
+/**
+ * Payload de creación/actualización. Todo opcional salvo los ítems: el
+ * borrador existe para poder estar incompleto. En el update, los ítems se
+ * reemplazan por completo (misma estrategia que cotizaciones).
+ */
+export interface SaveSaleDraftInput {
+  label?: string | null;
+  customerId?: string | null;
+  warehouseId?: string | null;
+  paymentMethod?: PaymentMethodDto | null;
+  vatExempt?: boolean;
+  notes?: string | null;
+  discount?: string | null;
+  discountPercent?: string | null;
+  quotationId?: string | null;
+  dispatchNoteId?: string | null;
+  items: SaleDraftItemInput[];
 }
 
 // ---------- Bodegas y transferencias (Fase 7.5) ----------

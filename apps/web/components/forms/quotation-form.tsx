@@ -70,10 +70,14 @@ import { WhatsappSendDialog } from '@/components/whatsapp-send-dialog';
 import { isValidPhone, normalizePhone } from '@/lib/validators/phone';
 import { isValidRut, normalizeRut } from '@/lib/validators/rut';
 import { cn } from '@/lib/utils';
+import {
+  computeTotalsPreview,
+  serializeGlobalDiscount,
+  type DiscountKind,
+} from '@/lib/document-discount';
 import type { CustomerDto, QuotationDto } from '@inventory/shared';
 
 type ClientType = 'catalog' | 'free';
-type DiscountKind = '$' | '%';
 
 interface ItemRow {
   // Ronda 9 — productId puede ser null para productos temporales creados
@@ -197,6 +201,20 @@ export function QuotationForm({
       }));
     }
     return itemsFromQuotation(initialData);
+  });
+
+  // Descuento sobre el total del documento, aparte de los descuentos por línea.
+  // Al editar recuperamos la representación original: si se pactó un %, se
+  // vuelve a mostrar como % y no como el monto ya resuelto.
+  const [globalDiscountKind, setGlobalDiscountKind] = useState<DiscountKind>(
+    initialData?.discountPercent != null ? '%' : '$',
+  );
+  const [globalDiscountValue, setGlobalDiscountValue] = useState<string>(() => {
+    if (initialData?.discountPercent != null) {
+      return String(Number(initialData.discountPercent));
+    }
+    const amount = Number(initialData?.discount ?? 0);
+    return amount > 0 ? String(amount) : '0';
   });
   // Ronda 10 — tabs simplificadas: la sección "Cliente" y la tabla de items
   // viven en la misma tab para que el flujo sea más rápido. La tab "Notas"
@@ -326,9 +344,22 @@ export function QuotationForm({
     [items],
   );
 
-  const totalBruto = itemsForCalc.reduce((acc, it) => acc + it.subtotal, 0);
-  const subtotalNeto = totalBruto / (1 + taxRate);
-  const taxAmount = totalBruto - subtotalNeto;
+  const {
+    grossBeforeDiscount,
+    discountAmount: globalDiscountAmount,
+    subtotalNeto,
+    taxAmount,
+    totalBruto,
+  } = useMemo(
+    () =>
+      computeTotalsPreview(
+        itemsForCalc.map((it) => it.subtotal),
+        taxRate,
+        globalDiscountKind,
+        globalDiscountValue,
+      ),
+    [itemsForCalc, taxRate, globalDiscountKind, globalDiscountValue],
+  );
 
   // Items que exceden el stock disponible. La validación NO bloquea el guardado
   // — solo informa. El stock se vuelve a chequear al convertir a venta.
@@ -428,6 +459,11 @@ export function QuotationForm({
       date: values.date,
       validUntil: values.validUntil,
       notes: (values.notes ?? '').trim() || null,
+      ...serializeGlobalDiscount(
+        globalDiscountKind,
+        globalDiscountValue,
+        grossBeforeDiscount,
+      ),
       items: clean,
     };
     return payload;
@@ -504,6 +540,17 @@ export function QuotationForm({
       date: values.date,
       validUntil: values.validUntil,
       notes: (values.notes ?? '').trim() || null,
+      // El borrador filtra los ítems a medio cargar, así que el bruto puede ser
+      // menor al del preview. Serializamos contra el bruto de los ítems que
+      // realmente viajan para que un descuento en $ no quede sobredimensionado.
+      ...serializeGlobalDiscount(
+        globalDiscountKind,
+        globalDiscountValue,
+        clean.reduce(
+          (acc, i) => acc + Number(i.unitPrice) * i.qty - Number(i.discount),
+          0,
+        ),
+      ),
       items: clean,
     };
   };
@@ -605,8 +652,10 @@ export function QuotationForm({
           dv: it.discountValue,
           o: it.observation,
         })),
+        gdk: globalDiscountKind,
+        gdv: globalDiscountValue,
       }),
-    [watchedAuto, items],
+    [watchedAuto, items, globalDiscountKind, globalDiscountValue],
   );
 
   // Ref reasignada en cada render → captura siempre los valores frescos
@@ -1191,18 +1240,25 @@ export function QuotationForm({
                 />
               </div>
             </div>
-            <Table>
+            {/* `table-fixed`: sin esto el layout automático repartía el ancho
+                según el contenido y el input de precio quedaba cortado. Con
+                anchos fijos, Producto se queda con el sobrante y el resto
+                respeta lo declarado. */}
+            <Table className="table-fixed">
               <TableHeader>
                 <TableRow>
-                  <TableHead>SKU</TableHead>
+                  {/* Anchos ajustados para que el precio unitario se vea
+                      completo: la tabla compite por el ancho del modal, así que
+                      Cant. y Descuento van al mínimo necesario. */}
+                  <TableHead className="w-[112px]">SKU</TableHead>
                   <TableHead>Producto</TableHead>
-                  <TableHead className="w-[100px] text-right">Cant.</TableHead>
-                  <TableHead className="w-[140px] text-right">
+                  <TableHead className="w-[88px] text-right">Cant.</TableHead>
+                  <TableHead className="w-[148px] text-right">
                     P. Unit (bruto)
                   </TableHead>
-                  <TableHead className="w-[180px] text-right">Descuento</TableHead>
-                  <TableHead className="w-[140px] text-right">Subtotal</TableHead>
-                  <TableHead className="w-[60px]" />
+                  <TableHead className="w-[120px] text-right">Descuento</TableHead>
+                  <TableHead className="w-[120px] text-right">Subtotal</TableHead>
+                  <TableHead className="w-[48px]" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1232,7 +1288,10 @@ export function QuotationForm({
                         exceeds && 'bg-amber-500/5 hover:bg-amber-500/10',
                       )}
                     >
-                      <TableCell className="font-mono text-xs">
+                      <TableCell
+                        className="truncate font-mono text-xs"
+                        title={it.sku ?? undefined}
+                      >
                         {it.sku ?? '—'}
                       </TableCell>
                       <TableCell className="max-w-[260px]">
@@ -1297,18 +1356,24 @@ export function QuotationForm({
                             )}
                           />
                           {stockLoaded && (
+                            // Sin `whitespace-nowrap`: este texto era lo que
+                            // ensanchaba la columna Cant. y dejaba el precio
+                            // unitario cortado. Ahora envuelve si hace falta.
                             <div
                               className={cn(
-                                'whitespace-nowrap text-xs tabular-nums',
+                                'text-xs tabular-nums leading-tight',
                                 exceeds
                                   ? 'font-medium text-amber-700 dark:text-amber-300'
                                   : 'text-muted-foreground',
                               )}
                               title="Stock total disponible sumando todas las bodegas activas"
                             >
-                              {exceeds
-                                ? `Stock total: ${available} (faltan ${it.qty - available})`
-                                : `Stock total: ${available}`}
+                              Stock: {available}
+                              {exceeds && (
+                                <span className="block">
+                                  faltan {it.qty - available}
+                                </span>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1425,6 +1490,65 @@ export function QuotationForm({
       </Tabs>
 
       <div className="ml-auto max-w-md space-y-2 rounded-2xl border border-slate-100 bg-white p-5 text-xs shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+        {/* Descuento sobre el total, aparte de los descuentos por línea. Se
+            resta del bruto y el neto/IVA de abajo ya salen rebajados. */}
+        <div className="flex items-center justify-between gap-3 text-slate-500 dark:text-slate-400">
+          <span>Descuento global</span>
+          <div className="flex items-center gap-2">
+            <div className="flex h-9 w-32 items-stretch overflow-hidden rounded-md border focus-within:ring-2 focus-within:ring-ring">
+              <input
+                type="text"
+                inputMode="decimal"
+                value={globalDiscountValue}
+                onChange={(e) => setGlobalDiscountValue(e.target.value)}
+                className="min-w-0 flex-1 bg-background px-2 text-right text-sm outline-none"
+                aria-label="Valor del descuento global"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  setGlobalDiscountKind(
+                    globalDiscountKind === '$' ? '%' : '$',
+                  )
+                }
+                title={
+                  globalDiscountKind === '$'
+                    ? 'Descuento en monto fijo. Click para cambiar a porcentaje.'
+                    : 'Descuento porcentual. Click para cambiar a monto fijo.'
+                }
+                aria-label={
+                  globalDiscountKind === '$'
+                    ? 'Cambiar a porcentaje'
+                    : 'Cambiar a monto fijo'
+                }
+                className="flex w-9 shrink-0 items-center justify-center border-l bg-muted text-sm font-semibold text-foreground hover:bg-muted/70"
+              >
+                {globalDiscountKind}
+              </button>
+            </div>
+          </div>
+        </div>
+        {globalDiscountAmount > 0 && (
+          <>
+            <div className="flex justify-between text-slate-500 dark:text-slate-400">
+              <span>Subtotal bruto</span>
+              <span className="font-mono font-semibold">
+                {formatCurrency(grossBeforeDiscount.toFixed(2))}
+              </span>
+            </div>
+            <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
+              <span>
+                Descuento aplicado
+                {globalDiscountKind === '%'
+                  ? ` (${Math.max(0, Math.min(100, Number(globalDiscountValue) || 0))}%)`
+                  : ''}
+              </span>
+              <span className="font-mono font-semibold">
+                −{formatCurrency(globalDiscountAmount.toFixed(2))}
+              </span>
+            </div>
+          </>
+        )}
         <div className="flex justify-between text-slate-500 dark:text-slate-400">
           <span>Subtotal neto</span>
           <span className="font-mono font-semibold">

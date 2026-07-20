@@ -33,6 +33,10 @@ export interface CreateQuotationInput {
   date: string;
   validUntil?: string | null;
   notes?: string | null;
+  // Descuento sobre el total del documento. `discountPercent` solo va cuando se
+  // ingresó como %; `discount` siempre lleva el monto resuelto.
+  discount?: string | null;
+  discountPercent?: string | null;
   items: CreateQuotationItemInput[];
 }
 

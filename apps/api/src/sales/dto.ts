@@ -17,6 +17,7 @@ import {
   IsString,
   IsUUID,
   Max,
+  MaxLength,
   Min,
   MinLength,
   ValidateNested,
@@ -74,6 +75,17 @@ export class CreateSaleDto {
   @IsString()
   notes?: string | null;
 
+  // Descuento sobre el total de la venta. `discountPercent` tiene precedencia
+  // sobre `discount` cuando ambos vienen. El service acota el resultado a
+  // [0, bruto], así que un monto excesivo no deja el total en negativo.
+  @IsOptional()
+  @IsNumberString({ no_symbols: false })
+  discount?: string | null;
+
+  @IsOptional()
+  @IsNumberString({ no_symbols: false })
+  discountPercent?: string | null;
+
   // Si la venta proviene de una cotización, el backend la marca como
   // CONVERTED dentro de la misma transacción atómica del create.
   @IsOptional()
@@ -86,6 +98,12 @@ export class CreateSaleDto {
   @IsOptional()
   @IsUUID()
   dispatchNoteId?: string | null;
+
+  // Borrador de origen. El backend lo elimina en la misma transacción del
+  // create para no dejarlo huérfano de una venta ya confirmada.
+  @IsOptional()
+  @IsUUID()
+  draftId?: string | null;
 
   @IsArray()
   @ArrayMinSize(1)
@@ -164,4 +182,87 @@ export class SalesKpisQueryDto {
   @IsOptional()
   @IsDateString()
   dateTo?: string;
+}
+
+/* ============================================================================
+ *  Borradores de venta ("ventas parkeadas")
+ * ========================================================================== */
+
+export class SaleDraftItemDto {
+  @IsUUID()
+  productId!: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  qty!: number;
+
+  @IsNumberString({ no_symbols: false })
+  unitPrice!: string;
+
+  @IsOptional()
+  @IsNumberString({ no_symbols: false })
+  discount?: string | null;
+
+  @IsOptional()
+  @IsNumberString({ no_symbols: false })
+  discountPercent?: string | null;
+
+  @IsOptional()
+  @IsString()
+  observation?: string | null;
+}
+
+/**
+ * Casi todo opcional: un borrador existe justamente para poder estar
+ * incompleto. Lo único que se exige es al menos un ítem — un borrador sin
+ * productos no tiene nada que recordar.
+ */
+export class SaveSaleDraftDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  label?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  customerId?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  warehouseId?: string | null;
+
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  paymentMethod?: PaymentMethod | null;
+
+  @IsOptional()
+  @IsBoolean()
+  vatExempt?: boolean;
+
+  @IsOptional()
+  @IsString()
+  notes?: string | null;
+
+  @IsOptional()
+  @IsNumberString({ no_symbols: false })
+  discount?: string | null;
+
+  @IsOptional()
+  @IsNumberString({ no_symbols: false })
+  discountPercent?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  quotationId?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  dispatchNoteId?: string | null;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => SaleDraftItemDto)
+  items!: SaleDraftItemDto[];
 }

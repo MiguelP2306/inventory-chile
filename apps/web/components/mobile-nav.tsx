@@ -41,10 +41,13 @@ export function MobileNav() {
           <Menu className="h-5 w-5" />
         </button>
       </SheetTrigger>
-      <SheetContent side="left" className="flex w-72 flex-col p-0">
-        <SheetHeader className="h-16 flex-row items-center border-b px-4">
+      <SheetContent
+        side="left"
+        className="flex w-72 flex-col bg-sidebar p-0 text-sidebar-foreground"
+      >
+        <SheetHeader className="h-16 flex-row items-center border-b border-sidebar-foreground/15 px-4">
           <SheetTitle className="min-w-0">
-            <Brand />
+            <Brand onDarkSurface />
           </SheetTitle>
         </SheetHeader>
         <div className="flex-1 overflow-y-auto">

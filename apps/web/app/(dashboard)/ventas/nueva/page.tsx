@@ -15,6 +15,7 @@ import {
   getDispatchConvertPrefill,
 } from '@/lib/dispatch-api';
 import { getQuotation } from '@/lib/quotations-api';
+import { getSaleDraft } from '@/lib/sales-api';
 import {
   bagLineKey,
   clearProductBagItems,
@@ -38,6 +39,9 @@ export default function NuevaVentaPage() {
   // Conversión de una guía de despacho independiente en venta.
   const fromDispatchId = searchParams.get('fromDispatch');
   const fromBag = searchParams.get('fromBag') === '1';
+  // Retomar una venta parkeada. El borrador manda sobre cualquier otro
+  // prefill: es lo último que el operador guardó a propósito.
+  const draftId = searchParams.get('draft');
   // Ronda 9 — si llega `generateDispatch=1`, después de crear la venta se
   // dispara la creación automática de una guía con datos mínimos (sin
   // dirección custom — el operador puede editarla desde /guias/[id]).
@@ -126,6 +130,12 @@ export default function NuevaVentaPage() {
           observation: it.observation,
         })),
       notes: q.notes,
+      // El descuento sobre el total viaja a la venta para que el cliente pague
+      // lo cotizado. Si se filtró algún ítem temporal, un descuento en % se
+      // recalcula solo sobre el bruto restante; uno en $ queda tal cual y el
+      // operador lo ajusta si corresponde.
+      discount: q.discount,
+      discountPercent: q.discountPercent,
     };
   }, [fromQuotationId, quotation.data]);
 
@@ -141,6 +151,21 @@ export default function NuevaVentaPage() {
     queryFn: () => getCustomer(dispatchCustomerId!),
     enabled: !!dispatchCustomerId,
   });
+  // Borrador que se está retomando.
+  const draftQuery = useQuery({
+    queryKey: ['sale-drafts', draftId],
+    queryFn: () => getSaleDraft(draftId!),
+    enabled: !!draftId,
+  });
+  // El DTO del borrador trae el cliente en forma reducida; el form necesita el
+  // CustomerDto completo (valida el RUT), así que lo resolvemos acá.
+  const draftCustomerId = draftQuery.data?.customerId ?? null;
+  const draftCustomerQuery = useQuery({
+    queryKey: ['customer', draftCustomerId],
+    queryFn: () => getCustomer(draftCustomerId!),
+    enabled: !!draftCustomerId,
+  });
+
   const dispatchPrefill = useMemo(() => {
     const p = dispatchPrefillQuery.data?.prefill;
     if (!p || !dispatchCustomerQuery.data) return undefined;
@@ -159,6 +184,16 @@ export default function NuevaVentaPage() {
   if (
     fromDispatchId &&
     (dispatchPrefillQuery.isLoading || dispatchCustomerQuery.isLoading)
+  ) {
+    return <Skeleton className="h-40 w-full" />;
+  }
+  // Sin esto el form montaría vacío y recién después llegaría el borrador —
+  // pero el estado se hidrata en el useState inicial, así que quedaría en
+  // blanco. Esperamos también al cliente para no re-montar dos veces.
+  if (
+    draftId &&
+    (draftQuery.isLoading ||
+      (!!draftCustomerId && draftCustomerQuery.isLoading))
   ) {
     return <Skeleton className="h-40 w-full" />;
   }
@@ -206,9 +241,15 @@ export default function NuevaVentaPage() {
       </div>
 
       <SaleForm
+        // `key` fuerza un remount cuando cambia el borrador: el form hidrata
+        // su estado en el useState inicial, así que sin esto retomar otro
+        // borrador no repintaría los ítems.
+        key={draftId ?? 'nuevo'}
         prefillFromQuotation={prefill}
         prefillFromDispatch={dispatchPrefill}
         initialBagItems={bagPrefill}
+        initialDraft={draftQuery.data}
+        initialCustomer={draftCustomerQuery.data}
         onSuccess={(sale) => {
           // Si la venta arrancó desde el bolso, quitamos del bolso SOLO los
           // productos que realmente quedaron en la venta creada. Así, si en el

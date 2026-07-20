@@ -5,10 +5,12 @@ import type {
   CreateSaleInput,
   PaginatedResult,
   PaymentMethodDto,
+  SaleDraftDto,
   SaleDto,
   SaleIncidentFilterDto,
   SalesKpisDto,
   SaleStatusDto,
+  SaveSaleDraftInput,
 } from '@inventory/shared';
 import { api } from './api';
 
@@ -88,3 +90,30 @@ export interface SalesKpisParams {
 }
 export const getSalesKpis = (params: SalesKpisParams = {}) =>
   api.get<SalesKpisDto>('/sales/kpis', { params }).then((r) => r.data);
+
+/* ============================================================================
+ *  Borradores de venta ("ventas parkeadas")
+ *
+ *  Ruta propia `/sale-drafts` (no `/sales/drafts`) para no chocar con
+ *  `GET /sales/:id`, que valida UUID.
+ *
+ *  Un borrador NO descuenta stock, no registra caja y no consume correlativo:
+ *  todo eso pasa recién al confirmar la venta. Al confirmar se manda su id en
+ *  `draftId` y el backend lo borra en la misma transacción.
+ * ========================================================================== */
+
+export const listSaleDrafts = () =>
+  api.get<SaleDraftDto[]>('/sale-drafts').then((r) => r.data);
+
+export const getSaleDraft = (id: string) =>
+  api.get<SaleDraftDto>(`/sale-drafts/${id}`).then((r) => r.data);
+
+export const createSaleDraft = (input: SaveSaleDraftInput) =>
+  api.post<SaleDraftDto>('/sale-drafts', input).then((r) => r.data);
+
+/** Parcial de verdad: lo que no mandes queda como estaba. */
+export const updateSaleDraft = (id: string, input: SaveSaleDraftInput) =>
+  api.patch<SaleDraftDto>(`/sale-drafts/${id}`, input).then((r) => r.data);
+
+export const deleteSaleDraft = (id: string) =>
+  api.delete<void>(`/sale-drafts/${id}`).then((r) => r.data);

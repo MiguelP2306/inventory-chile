@@ -106,6 +106,17 @@ export class CreateQuotationDto {
   @IsString()
   notes?: string | null;
 
+  // Descuento sobre el total del documento. `discountPercent` tiene precedencia
+  // sobre `discount` cuando ambos vienen. El service acota el resultado a
+  // [0, bruto], así que un monto excesivo no deja el total en negativo.
+  @IsOptional()
+  @IsNumberString({ no_symbols: false })
+  discount?: string | null;
+
+  @IsOptional()
+  @IsNumberString({ no_symbols: false })
+  discountPercent?: string | null;
+
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })

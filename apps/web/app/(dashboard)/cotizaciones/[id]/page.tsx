@@ -453,6 +453,19 @@ export default function QuotationDetailPage() {
         <div className={`space-y-3 ${CARD}`}>
           <h2 className={LABEL}>Totales</h2>
           <div className="space-y-2 text-xs">
+            {Number(q.discount ?? 0) > 0 && (
+              <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
+                <span>
+                  Descuento
+                  {q.discountPercent
+                    ? ` (${Number(q.discountPercent)}%)`
+                    : ''}
+                </span>
+                <span className="font-mono font-semibold">
+                  −{formatCurrency(q.discount)}
+                </span>
+              </div>
+            )}
             <div className="flex justify-between text-slate-500 dark:text-slate-400">
               <span>Subtotal neto</span>
               <span className="font-mono font-semibold">{formatCurrency(q.subtotal)}</span>

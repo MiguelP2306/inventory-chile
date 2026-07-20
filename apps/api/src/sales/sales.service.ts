@@ -63,6 +63,7 @@ import {
 } from '../database/entities';
 import { InventoryService } from '../inventory/inventory.service';
 import { LifecycleService } from '../lifecycle/lifecycle.service';
+import { SaleDraftsService } from './sale-drafts.service';
 import { CancelSaleDto, CreateSaleDto, ListSalesQueryDto } from './dto';
 
 const COUNTER_KIND = 'SALE';
@@ -90,6 +91,7 @@ export class SalesService {
     private readonly inventory: InventoryService,
     private readonly cashbox: CashboxService,
     private readonly lifecycle: LifecycleService,
+    private readonly saleDrafts: SaleDraftsService,
   ) {}
 
   // ---------------- reads ----------------
@@ -372,8 +374,13 @@ export class SalesService {
       // IVA descompuesto es 0.
       const vatExempt = dto.vatExempt ?? false;
       const effectiveTaxRate = vatExempt ? 0 : taxRate;
-      const totals = computeDocumentTotals(dto.items, effectiveTaxRate);
+      const totals = computeDocumentTotals(dto.items, effectiveTaxRate, {
+        amount: dto.discount,
+        percent: dto.discountPercent,
+      });
 
+      // La comisión se calcula sobre `totals.total`, que ya viene rebajado por
+      // el descuento global: se cobra sobre lo que realmente paga el cliente.
       const commissionAmount = chargesCommission
         ? roundHalfUp(parseFloat(totals.total) * commissionRate)
         : 0;
@@ -391,6 +398,9 @@ export class SalesService {
         vatExempt,
         commissionAmount: commissionAmount.toFixed(2),
         total: totals.total,
+        // Monto ya acotado a [0, bruto] por el cálculo, no el crudo del dto.
+        discount: totals.discountAmount,
+        discountPercent: dto.discountPercent ?? null,
         paymentMethod: dto.paymentMethod,
         status: SaleStatus.PAID,
         notes: dto.notes ?? null,
@@ -528,6 +538,13 @@ export class SalesService {
         savedSale.id,
         userId,
       );
+
+      // Si la venta venía de un borrador parkeado, lo eliminamos acá dentro:
+      // así o se confirma la venta Y desaparece el borrador, o no pasa nada.
+      // Nunca queda un borrador huérfano de una venta ya registrada.
+      if (dto.draftId) {
+        await this.saleDrafts.removeWithinTransaction(manager, dto.draftId);
+      }
 
       return savedSale.id;
     });
@@ -901,6 +918,8 @@ export class SalesService {
       taxAmount: s.taxAmount,
       commissionAmount: s.commissionAmount,
       total: s.total,
+      discount: s.discount,
+      discountPercent: s.discountPercent,
       vatExempt: s.vatExempt,
       paymentMethod: s.paymentMethod,
       status: s.status,

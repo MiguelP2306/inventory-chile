@@ -1,8 +1,8 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Banknote, Calendar as CalendarIcon, CreditCard, Receipt, Search, Send, Trash2, Warehouse as WarehouseIcon } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, Banknote, Calendar as CalendarIcon, CreditCard, Receipt, Save, Search, Send, Trash2, Warehouse as WarehouseIcon } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { ProductPicker } from '@/components/product-picker';
 import {
@@ -50,20 +50,27 @@ import { pickDefaultWarehouse } from '@/lib/default-warehouse';
 import { formatCurrency, todayIso } from '@/lib/format';
 import {
   createSale,
+  createSaleDraft,
   getAvailableStock,
+  updateSaleDraft,
   type AvailableStockRow,
 } from '@/lib/sales-api';
 import { cn } from '@/lib/utils';
 import { listWarehouses } from '@/lib/warehouses-api';
+import {
+  computeTotalsPreview,
+  serializeGlobalDiscount,
+  type DiscountKind,
+} from '@/lib/document-discount';
 import type {
   CreateSaleInput,
   CustomerDto,
   PaymentMethodDto,
+  SaleDraftDto,
   SaleDto,
+  SaveSaleDraftInput,
   WarehouseDto,
 } from '@inventory/shared';
-
-type DiscountKind = '$' | '%';
 
 interface ItemRow {
   productId: string;
@@ -126,6 +133,10 @@ interface Props {
       observation: string | null;
     }>;
     notes: string | null;
+    // Descuento sobre el total que traía la cotización. Se traspasa a la venta
+    // para que el cliente pague lo que se le cotizó; queda editable.
+    discount?: string | null;
+    discountPercent?: string | null;
   };
   /**
    * Items del bolso para prellenar la venta sin pasar por una cotización.
@@ -154,6 +165,18 @@ interface Props {
       discount: string;
     }>;
   };
+  /**
+   * Borrador parkeado que se está retomando. Trae los ítems y la cabecera tal
+   * como quedaron; el form sigue autoguardando sobre ESE mismo borrador (no
+   * crea uno nuevo) y al confirmar la venta el backend lo elimina.
+   */
+  initialDraft?: SaleDraftDto | null;
+  /**
+   * Cliente completo del borrador. El DTO del borrador trae una forma reducida
+   * (id/nombre/RUT), así que la página lo resuelve con `getCustomer` y lo pasa
+   * acá: el form necesita el CustomerDto entero para validar el RUT.
+   */
+  initialCustomer?: CustomerDto | null;
   onSuccess?: (sale: SaleDto) => void;
   onCancel?: () => void;
 }
@@ -162,6 +185,8 @@ export function SaleForm({
   prefillFromQuotation,
   initialBagItems,
   prefillFromDispatch,
+  initialDraft,
+  initialCustomer,
   onSuccess,
   onCancel,
 }: Props) {
@@ -180,7 +205,10 @@ export function SaleForm({
   const [clientOpen, setClientOpen] = useState(true);
 
   const [customer, setCustomer] = useState<CustomerDto | null>(
-    prefillFromQuotation?.customer ?? prefillFromDispatch?.customer ?? null,
+    initialCustomer ??
+      prefillFromQuotation?.customer ??
+      prefillFromDispatch?.customer ??
+      null,
   );
 
   // Si la cotización venía con cliente libre, mostramos un banner con el
@@ -194,18 +222,20 @@ export function SaleForm({
   );
   const [registerOpen, setRegisterOpen] = useState(false);
 
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodDto>('CASH');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodDto>(
+    initialDraft?.paymentMethod ?? 'CASH',
+  );
 
   // Venta afecta a IVA por default (19%). Si se desactiva → venta NO afecta
   // (sin documento): el backend la guarda con IVA 0 y no entra al Reporte de IVA.
   const [vatExempt, setVatExempt] = useState(
-    prefillFromDispatch?.vatExempt ?? false,
+    initialDraft?.vatExempt ?? prefillFromDispatch?.vatExempt ?? false,
   );
 
   // Bodega de la venta. Default = "Tienda" si existe, sino la primera
   // activa. El selector solo se muestra cuando hay 2+ bodegas activas.
   const [warehouseId, setWarehouseId] = useState<string>(
-    prefillFromDispatch?.warehouseId ?? '',
+    initialDraft?.warehouseId ?? prefillFromDispatch?.warehouseId ?? '',
   );
   const warehouses = useQuery({
     queryKey: ['warehouses', 'active'],
@@ -242,6 +272,20 @@ export function SaleForm({
         discountValue: '0',
       }));
     }
+    // El borrador gana sobre cualquier otro prefill: es el estado más reciente
+    // que el operador dejó guardado a propósito.
+    if (initialDraft && (initialDraft.items ?? []).length > 0) {
+      return (initialDraft.items ?? []).map((it) => ({
+        productId: it.productId,
+        sku: it.product?.sku ?? '',
+        name: it.product?.name ?? '',
+        qty: it.qty,
+        unitPrice: it.unitPrice,
+        discountKind: (it.discountPercent != null ? '%' : '$') as DiscountKind,
+        discountValue: it.discountPercent ?? it.discount ?? '0',
+        observation: it.observation ?? null,
+      }));
+    }
     if (prefillFromDispatch && prefillFromDispatch.items.length > 0) {
       return prefillFromDispatch.items.map((it) => ({
         productId: it.productId,
@@ -264,7 +308,24 @@ export function SaleForm({
       observation: it.observation ?? null,
     }));
   });
-  const [notes, setNotes] = useState<string>(prefillFromQuotation?.notes ?? '');
+  const [notes, setNotes] = useState<string>(
+    initialDraft?.notes ?? prefillFromQuotation?.notes ?? '',
+  );
+
+  // Descuento sobre el total de la venta, aparte de los descuentos por línea.
+  // Se hereda de la cotización cuando la venta la convierte, respetando la
+  // representación original ($ o %).
+  const discountSource = initialDraft ?? prefillFromQuotation;
+  const [globalDiscountKind, setGlobalDiscountKind] = useState<DiscountKind>(
+    discountSource?.discountPercent != null ? '%' : '$',
+  );
+  const [globalDiscountValue, setGlobalDiscountValue] = useState<string>(() => {
+    if (discountSource?.discountPercent != null) {
+      return String(Number(discountSource.discountPercent));
+    }
+    const amount = Number(discountSource?.discount ?? 0);
+    return amount > 0 ? String(amount) : '0';
+  });
 
   // Fecha de la venta. Solo el admin puede cambiarla (backdating); el resto
   // registra siempre con hoy. El backend reaplica esta regla por seguridad.
@@ -332,11 +393,26 @@ export function SaleForm({
     [items],
   );
 
-  const totalBruto = itemsForCalc.reduce((acc, it) => acc + it.subtotal, 0);
   // Si la venta es NO afecta a IVA: neto = total y IVA = 0 (espejo del backend).
   const effectiveTaxRate = vatExempt ? 0 : taxRate;
-  const subtotalNeto = totalBruto / (1 + effectiveTaxRate);
-  const taxAmount = totalBruto - subtotalNeto;
+  const {
+    grossBeforeDiscount,
+    discountAmount: globalDiscountAmount,
+    subtotalNeto,
+    taxAmount,
+    totalBruto,
+  } = useMemo(
+    () =>
+      computeTotalsPreview(
+        itemsForCalc.map((it) => it.subtotal),
+        effectiveTaxRate,
+        globalDiscountKind,
+        globalDiscountValue,
+      ),
+    [itemsForCalc, effectiveTaxRate, globalDiscountKind, globalDiscountValue],
+  );
+  // La comisión se cobra sobre lo que realmente paga el cliente, o sea sobre el
+  // total ya rebajado por el descuento global.
   const commissionAmount = chargesCommission ? totalBruto * commissionRate : 0;
   const netAfterCommission = totalBruto - commissionAmount;
 
@@ -361,19 +437,177 @@ export function SaleForm({
 
   const formValid = !!customer && !itemsHaveErrors;
 
+  /* ------------------------------------------------------------------
+   * Borrador ("venta parkeada")
+   *
+   * Espeja el mecanismo de cotizaciones pero con dos diferencias:
+   *  · Un borrador de venta NO consume correlativo ni toca stock, así que
+   *    autoguardar es barato y sin consecuencias contables.
+   *  · Solo se autoguarda si hay al menos un ítem válido. Un formulario
+   *    vacío recién abierto no debe generar borradores fantasma.
+   * ----------------------------------------------------------------*/
+  // Espeja `createMut.isPending`: el autoguardado corre dentro de un
+  // setTimeout, así que necesita leer el estado actual y no el capturado.
+  const createMutPendingRef = useRef(false);
+  const draftIdRef = useRef<string | null>(initialDraft?.id ?? null);
+  const [draftState, setDraftState] = useState<'idle' | 'saving' | 'saved'>(
+    initialDraft ? 'saved' : 'idle',
+  );
+  const savingDraftRef = useRef(false);
+  const draftDirtyRef = useRef(false);
+  const draftFirstRunRef = useRef(true);
+
+  /** `null` si todavía no hay nada que valga la pena guardar. */
+  function buildDraftPayload(): SaveSaleDraftInput | null {
+    const clean = itemsForCalc
+      .filter((it) => it.productId && it.qty >= 1 && Number(it.unitPrice) > 0)
+      .map((it) => {
+        const dv = Number(it.discountValue) || 0;
+        const pct = it.discountKind === '%';
+        return {
+          productId: it.productId,
+          qty: Number(it.qty),
+          unitPrice: Number(it.unitPrice).toFixed(2),
+          discount: pct ? '0' : Math.max(0, dv).toFixed(2),
+          discountPercent: pct
+            ? Math.max(0, Math.min(100, dv)).toFixed(2)
+            : null,
+          observation: it.observation?.trim() || null,
+        };
+      });
+    if (clean.length === 0) return null;
+
+    return {
+      customerId: customer?.id ?? null,
+      warehouseId: warehouseId || null,
+      paymentMethod,
+      vatExempt,
+      notes: notes.trim() || null,
+      ...serializeGlobalDiscount(
+        globalDiscountKind,
+        globalDiscountValue,
+        grossBeforeDiscount,
+      ),
+      quotationId: prefillFromQuotation?.quotationId ?? null,
+      dispatchNoteId: prefillFromDispatch?.dispatchNoteId ?? null,
+      items: clean,
+    };
+  }
+
+  // Ref reasignada en cada render para capturar siempre el estado fresco sin
+  // closures viejos dentro del setTimeout del debounce.
+  const doSaveDraftRef = useRef<(silent: boolean) => Promise<void>>(
+    async () => {},
+  );
+  doSaveDraftRef.current = async (silent: boolean) => {
+    if (createMutPendingRef.current) return; // venta confirmándose
+    if (savingDraftRef.current) {
+      draftDirtyRef.current = true; // cambió mientras guardaba → re-disparar
+      return;
+    }
+    const payload = buildDraftPayload();
+    if (!payload) {
+      if (!silent) toast.error('Agregá al menos un producto para guardar');
+      return;
+    }
+
+    savingDraftRef.current = true;
+    setDraftState('saving');
+    try {
+      const existingId = draftIdRef.current;
+      const saved = existingId
+        ? await updateSaleDraft(existingId, payload)
+        : await createSaleDraft(payload);
+      draftIdRef.current = saved.id;
+      setDraftState('saved');
+      qc.invalidateQueries({ queryKey: ['sale-drafts'] });
+      if (!silent) toast.success('Borrador guardado');
+    } catch (e) {
+      setDraftState('idle');
+      // El autoguardado es silencioso para no interrumpir la carga; el
+      // guardado manual sí reporta, porque el operador está esperando.
+      if (!silent) toast.error(apiErrorMessage(e));
+    } finally {
+      savingDraftRef.current = false;
+      if (draftDirtyRef.current) {
+        draftDirtyRef.current = false;
+        void doSaveDraftRef.current(true);
+      }
+    }
+  };
+
+  // Firma estable de lo guardable: cambia solo con lo que el operador edita.
+  // No incluye datos de stock, para no autoguardar al terminar de cargar.
+  const draftSig = useMemo(
+    () =>
+      JSON.stringify({
+        c: customer?.id ?? null,
+        w: warehouseId,
+        p: paymentMethod,
+        v: vatExempt,
+        n: notes,
+        gk: globalDiscountKind,
+        gv: globalDiscountValue,
+        i: items.map((it) => ({
+          p: it.productId,
+          q: it.qty,
+          u: it.unitPrice,
+          dk: it.discountKind,
+          dv: it.discountValue,
+          o: it.observation,
+        })),
+      }),
+    [
+      customer,
+      warehouseId,
+      paymentMethod,
+      vatExempt,
+      notes,
+      globalDiscountKind,
+      globalDiscountValue,
+      items,
+    ],
+  );
+
+  useEffect(() => {
+    // No autoguardar en el primer render: al montar (o al retomar un borrador)
+    // no hay nada nuevo que persistir.
+    if (draftFirstRunRef.current) {
+      draftFirstRunRef.current = false;
+      return;
+    }
+    const t = setTimeout(() => void doSaveDraftRef.current(true), 1200);
+    return () => clearTimeout(t);
+  }, [draftSig]);
+
   const createMut = useMutation({
-    mutationFn: (payload: CreateSaleInput) => createSale(payload),
+    mutationFn: (payload: CreateSaleInput) => {
+      // Frena el autoguardado mientras la venta se está confirmando: si el
+      // backend borra el borrador y el debounce lo reescribiera después,
+      // quedaría un borrador zombi de una venta ya registrada.
+      createMutPendingRef.current = true;
+      return createSale(payload);
+    },
     onSuccess: (sale) => {
       qc.invalidateQueries({ queryKey: ['sales'] });
       qc.invalidateQueries({ queryKey: ['stock'] });
       qc.invalidateQueries({ queryKey: ['cashbox-balance'] });
       qc.invalidateQueries({ queryKey: ['cash-transactions'] });
       qc.invalidateQueries({ queryKey: ['quotations'] });
+      // El backend borró el borrador dentro de la transacción; refrescamos la
+      // lista para que no siga apareciendo.
+      qc.invalidateQueries({ queryKey: ['sale-drafts'] });
+      draftIdRef.current = null;
       invalidateProductCaches(qc);
       toast.success(`Venta ${sale.number} registrada`);
       onSuccess?.(sale);
     },
-    onError: (err) => toast.error(apiErrorMessage(err, 'No se pudo registrar la venta')),
+    onError: (err) => {
+      // Falló la venta: el borrador sigue vivo y el autoguardado se reanuda,
+      // así el operador no pierde lo que tenía cargado.
+      createMutPendingRef.current = false;
+      toast.error(apiErrorMessage(err, 'No se pudo registrar la venta'));
+    },
   });
 
   function buildPayload(): CreateSaleInput | null {
@@ -418,6 +652,14 @@ export function SaleForm({
       // Solo mandamos fecha si es admin; el backend la ignora para no-admins.
       ...(isAdmin ? { date: saleDate } : {}),
       notes: notes.trim() || null,
+      ...serializeGlobalDiscount(
+        globalDiscountKind,
+        globalDiscountValue,
+        grossBeforeDiscount,
+      ),
+      // Si la venta viene de un borrador, el backend lo elimina en la misma
+      // transacción del create.
+      draftId: draftIdRef.current,
       quotationId: prefillFromQuotation?.quotationId ?? null,
       dispatchNoteId: prefillFromDispatch?.dispatchNoteId ?? null,
       items: items.map((it) => {
@@ -745,20 +987,27 @@ export function SaleForm({
                 }}
               />
             </div>
-            <Table>
+            {/* `table-fixed`: sin esto el layout automático repartía el ancho
+                según el contenido y el input de precio quedaba cortado. Con
+                anchos fijos, Producto se queda con el sobrante y el resto
+                respeta lo declarado. */}
+            <Table className="table-fixed">
               <TableHeader>
                 <TableRow>
-                  <TableHead>SKU</TableHead>
+                  {/* Anchos ajustados para que el precio unitario se vea
+                      completo: la tabla compite por el ancho del modal, así que
+                      Cant. y Descuento van al mínimo necesario. */}
+                  <TableHead className="w-[112px]">SKU</TableHead>
                   <TableHead>Producto</TableHead>
-                  <TableHead className="w-[130px] text-right">
-                    Cant. / Stock
+                  <TableHead className="w-[88px] text-right">
+                    Cant.
                   </TableHead>
-                  <TableHead className="w-[140px] text-right">
+                  <TableHead className="w-[148px] text-right">
                     P. Unit (bruto)
                   </TableHead>
-                  <TableHead className="w-[180px] text-right">Descuento</TableHead>
-                  <TableHead className="w-[140px] text-right">Subtotal</TableHead>
-                  <TableHead className="w-[60px]" />
+                  <TableHead className="w-[120px] text-right">Descuento</TableHead>
+                  <TableHead className="w-[120px] text-right">Subtotal</TableHead>
+                  <TableHead className="w-[48px]" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -782,7 +1031,12 @@ export function SaleForm({
                       key={`${it.productId}-${idx}`}
                       className={cn('[&>td]:align-top', exceeds && 'bg-destructive/5')}
                     >
-                      <TableCell className="font-mono text-xs">{it.sku}</TableCell>
+                      <TableCell
+                        className="truncate font-mono text-xs"
+                        title={it.sku ?? undefined}
+                      >
+                        {it.sku}
+                      </TableCell>
                       <TableCell className="max-w-[260px] align-top">
                         <div className="flex flex-col gap-1">
                           <span className="truncate">{it.name}</span>
@@ -840,9 +1094,11 @@ export function SaleForm({
                             )}
                           />
                           {available != null && (
+                            // Sin `whitespace-nowrap`: ensanchaba la columna
+                            // Cant. y dejaba el precio unitario cortado.
                             <div
                               className={cn(
-                                'whitespace-nowrap text-xs tabular-nums',
+                                'text-xs tabular-nums leading-tight',
                                 exceeds
                                   ? 'font-medium text-destructive'
                                   : 'text-muted-foreground',
@@ -946,6 +1202,62 @@ export function SaleForm({
       </Tabs>
 
       <div className="ml-auto max-w-md space-y-2 rounded-2xl border border-slate-100 bg-white p-5 text-xs shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
+        {/* Descuento sobre el total, aparte de los descuentos por línea. NO va
+            gateado por `canSeeBreakdown`: es parte del precio que se le cobra
+            al cliente, no del desglose de márgenes. */}
+        <div className="flex items-center justify-between gap-3 text-slate-500 dark:text-slate-400">
+          <span>Descuento global</span>
+          <div className="flex h-9 w-32 items-stretch overflow-hidden rounded-md border focus-within:ring-2 focus-within:ring-ring">
+            <input
+              type="text"
+              inputMode="decimal"
+              value={globalDiscountValue}
+              onChange={(e) => setGlobalDiscountValue(e.target.value)}
+              className="min-w-0 flex-1 bg-background px-2 text-right text-sm outline-none"
+              aria-label="Valor del descuento global"
+            />
+            <button
+              type="button"
+              onClick={() =>
+                setGlobalDiscountKind(globalDiscountKind === '$' ? '%' : '$')
+              }
+              title={
+                globalDiscountKind === '$'
+                  ? 'Descuento en monto fijo. Click para cambiar a porcentaje.'
+                  : 'Descuento porcentual. Click para cambiar a monto fijo.'
+              }
+              aria-label={
+                globalDiscountKind === '$'
+                  ? 'Cambiar a porcentaje'
+                  : 'Cambiar a monto fijo'
+              }
+              className="flex w-9 shrink-0 items-center justify-center border-l bg-muted text-sm font-semibold text-foreground hover:bg-muted/70"
+            >
+              {globalDiscountKind}
+            </button>
+          </div>
+        </div>
+        {globalDiscountAmount > 0 && (
+          <>
+            <div className="flex justify-between text-slate-500 dark:text-slate-400">
+              <span>Subtotal bruto</span>
+              <span className="font-mono font-semibold">
+                {formatCurrency(grossBeforeDiscount.toFixed(2))}
+              </span>
+            </div>
+            <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
+              <span>
+                Descuento aplicado
+                {globalDiscountKind === '%'
+                  ? ` (${Math.max(0, Math.min(100, Number(globalDiscountValue) || 0))}%)`
+                  : ''}
+              </span>
+              <span className="font-mono font-semibold">
+                −{formatCurrency(globalDiscountAmount.toFixed(2))}
+              </span>
+            </div>
+          </>
+        )}
         {canSeeBreakdown && (
           <>
             <div className="flex justify-between text-slate-500 dark:text-slate-400">
@@ -984,6 +1296,11 @@ export function SaleForm({
       </div>
 
       <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-850">
+        {draftState !== 'idle' && (
+          <span className="mr-auto text-[11px] font-semibold text-slate-400">
+            {draftState === 'saving' ? 'Guardando borrador…' : '✓ Borrador guardado'}
+          </span>
+        )}
         <button
           type="button"
           onClick={() => onCancel?.()}
@@ -991,6 +1308,17 @@ export function SaleForm({
           className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:text-slate-300 dark:hover:bg-slate-900"
         >
           Cancelar
+        </button>
+        {/* Guardar borrador NO exige cliente ni forma de pago: parkear una
+            venta a medias es justamente el caso de uso. */}
+        <button
+          type="button"
+          onClick={() => void doSaveDraftRef.current(false)}
+          disabled={createMut.isPending || draftState === 'saving'}
+          className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-850 dark:text-slate-300 dark:hover:bg-slate-900"
+        >
+          <Save className="h-4 w-4" />
+          Guardar borrador
         </button>
         <button
           type="submit"

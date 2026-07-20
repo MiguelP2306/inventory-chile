@@ -63,6 +63,17 @@ const config: Config = {
           low: 'hsl(var(--stock-low))',
           out: 'hsl(var(--stock-out))',
         },
+        // Panel izquierdo. Con `<alpha-value>` las utilidades de opacidad
+        // (bg-sidebar-foreground/10, etc.) funcionan sobre estos tokens, que es
+        // como el sidebar deriva sus estados hover/activo sin hardcodear nada.
+        sidebar: {
+          DEFAULT: 'hsl(var(--sidebar) / <alpha-value>)',
+          foreground: 'hsl(var(--sidebar-foreground) / <alpha-value>)',
+          muted: 'hsl(var(--sidebar-muted) / <alpha-value>)',
+          accent: 'hsl(var(--sidebar-accent) / <alpha-value>)',
+          cta: 'hsl(var(--sidebar-cta) / <alpha-value>)',
+          'cta-foreground': 'hsl(var(--sidebar-cta-foreground) / <alpha-value>)',
+        },
       },
       borderRadius: {
         lg: 'var(--radius)',

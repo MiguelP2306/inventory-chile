@@ -221,6 +221,19 @@ export const deleteProduct = (id: string) =>
   api.delete(`/products/${id}`).then((r) => r.data);
 
 /**
+ * Corrección manual del costo unitario (solo admin). El costo normalmente es
+ * autogestionado (ponderado de lotes); esto reescribe los lotes activos al
+ * valor corregido. Motivo obligatorio (queda auditado en el backend).
+ */
+export const correctProductCost = (
+  id: string,
+  input: { unitCost: string; reason: string },
+) =>
+  api
+    .patch<ProductDto>(`/products/${id}/cost`, input)
+    .then((r) => r.data);
+
+/**
  * Fase 12 — conteo de relaciones del producto para el modal de confirmación de
  * borrado (informar impacto antes de eliminar; el borrado es soft).
  */
