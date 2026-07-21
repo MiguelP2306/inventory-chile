@@ -93,6 +93,9 @@ interface ItemRow {
   // Ronda 9 — snapshot del producto temporal cuando productId es null.
   tempProductPartNumber?: string | null;
   isTemporary?: boolean;
+  // Servicio (envío/flete): producto real sin inventario. No descuenta stock
+  // y su precio es libre. Se traspasa a la venta como un ítem normal.
+  isService?: boolean;
   // Observación libre por ítem (opcional). Se imprime debajo del producto.
   observation?: string | null;
 }
@@ -306,7 +309,10 @@ export function QuotationForm({
   const productIds = useMemo(
     // Ronda 9 — sólo IDs reales (productos temporales tienen productId=null).
     (): string[] =>
-      items.map((it) => it.productId).filter((id): id is string => !!id),
+      items
+        .filter((it) => !it.isService)
+        .map((it) => it.productId)
+        .filter((id): id is string => !!id),
     [items],
   );
   // Ronda 7 — Cotizaciones no se atan a una bodega específica (la conversión
@@ -1215,6 +1221,33 @@ export function QuotationForm({
                         unitPrice: p.price ?? '0',
                         discountKind: '$',
                         discountValue: '0',
+                      },
+                    ]);
+                  }}
+                />
+                {/* Servicio (envío/flete): producto real sin inventario, precio
+                    libre. Se traspasa a la venta al convertir. */}
+                <ProductPicker
+                  isService="true"
+                  buttonLabel="Agregar servicio"
+                  title="Elegir servicio"
+                  subtitle="Envío, flete u otro cargo. No afecta inventario."
+                  onPick={(p) => {
+                    if (items.some((i) => i.productId === p.id)) {
+                      toast.info('El servicio ya está en la lista');
+                      return;
+                    }
+                    setItems((prev) => [
+                      ...prev,
+                      {
+                        productId: p.id,
+                        sku: p.sku,
+                        name: p.name,
+                        qty: 1,
+                        unitPrice: p.price ?? '0',
+                        discountKind: '$',
+                        discountValue: '0',
+                        isService: true,
                       },
                     ]);
                   }}

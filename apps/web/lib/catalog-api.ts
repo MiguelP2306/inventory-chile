@@ -136,6 +136,9 @@ export interface ListProductsParams {
   categoryId?: string;
   brandId?: string;
   productKind?: ProductKindDto;
+  // 'true' → solo servicios; 'all' → productos + servicios; sin valor → solo
+  // productos de inventario (excluye servicios). Ver backend.
+  isService?: 'true' | 'all';
   // Ronda 9 — filtros por fecha de creación (ISO date YYYY-MM-DD).
   createdFrom?: string;
   createdTo?: string;
@@ -190,7 +193,9 @@ export interface ProductInput {
   // Ronda 9 — SKU opcional. Backend autogenera si llega null/undefined.
   sku?: string | null;
   name: string;
-  partNumber: string;
+  // Obligatorio para productos de inventario; los servicios no lo llevan (el
+  // backend lo valida condicionalmente según `isService`).
+  partNumber?: string;
   barcode?: string | null;
   // Código universal opcional y único.
   universalCode?: string | null;
@@ -205,6 +210,8 @@ export interface ProductInput {
   minStock?: number;
   location?: string | null;
   isActive?: boolean;
+  // Servicio (envío/flete): Product sin inventario, precio libre por venta.
+  isService?: boolean;
   // Fase 4B
   productKind?: ProductKindDto;
   fitments?: FitmentInput[];
@@ -219,6 +226,19 @@ export const updateProduct = (id: string, input: Partial<ProductInput>) =>
 
 export const deleteProduct = (id: string) =>
   api.delete(`/products/${id}`).then((r) => r.data);
+
+/* ---- Servicios (productos con isService=true) ---- */
+
+export const listServices = (q?: string) =>
+  listProducts({ isService: 'true', q, pageSize: 200 });
+
+export const createService = (input: { name: string; price?: string }) =>
+  createProduct({ ...input, isService: true });
+
+export const updateService = (
+  id: string,
+  input: { name?: string; price?: string; isActive?: boolean },
+) => updateProduct(id, input);
 
 /**
  * Corrección manual del costo unitario (solo admin). El costo normalmente es

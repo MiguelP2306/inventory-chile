@@ -430,10 +430,12 @@ export class SalesService {
         await manager.getRepository(SaleItem).save(item);
 
         // Aplicar el movimiento de stock. applyMovement valida que no quede
-        // negativo y tira ConflictException si pasa. EXCEPCIÓN: si la venta
-        // convierte una guía independiente, el stock ya bajó al emitir la guía
-        // (DISPATCH_OUT) → NO descontamos de nuevo para no duplicar.
-        if (!fromDispatch) {
+        // negativo y tira ConflictException si pasa. EXCEPCIONES (NO se
+        // descuenta stock):
+        //  · fromDispatch: la guía ya bajó el stock al emitirse (DISPATCH_OUT).
+        //  · servicios (envío/flete): no son inventario, no tienen stock ni
+        //    lotes; aplicar un movimiento reventaría por "stock insuficiente".
+        if (!fromDispatch && !product.isService) {
           await this.inventory.applyMovement(manager, {
             productId: it.productId,
             warehouseId: effectiveWarehouseId,
@@ -573,7 +575,22 @@ export class SalesService {
       const items = await manager.getRepository(SaleItem).find({
         where: { saleId: id },
       });
+      // Los servicios no descontaron stock al vender, así que tampoco se
+      // revierten: aplicarles RETURN_IN les crearía stock fantasma y un lote.
+      const serviceIds = new Set(
+        (
+          await manager
+            .getRepository(Product)
+            .find({
+              where: { id: In(items.map((it) => it.productId)) },
+              select: { id: true, isService: true },
+            })
+        )
+          .filter((p) => p.isService)
+          .map((p) => p.id),
+      );
       for (const it of items) {
+        if (serviceIds.has(it.productId)) continue;
         await this.inventory.applyMovement(manager, {
           productId: it.productId,
           warehouseId: existing.warehouseId,

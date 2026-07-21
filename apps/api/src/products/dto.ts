@@ -16,6 +16,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 
@@ -44,7 +45,16 @@ export class CreateProductDto {
   @MaxLength(60)
   sku?: string | null;
 
-  // Ronda 9 — partNumber pasa a obligatorio junto con `name`.
+  // Un servicio (ej: envío/flete) es un Product sin inventario y con precio
+  // libre por venta. Ver product.entity.ts.
+  @IsOptional()
+  @IsBoolean()
+  isService?: boolean;
+
+  // Ronda 9 — partNumber obligatorio junto con `name`. EXCEPCIÓN: los servicios
+  // no tienen número de parte (no son repuestos), así que solo se exige cuando
+  // NO es servicio.
+  @ValidateIf((o: CreateProductDto) => !o.isService)
   @IsString()
   @MinLength(1)
   @MaxLength(80)
@@ -150,6 +160,14 @@ export class ListProductsQueryDto {
   @IsOptional()
   @IsEnum(ProductKind)
   productKind?: ProductKind;
+
+  // Filtro de servicios. Sin este parámetro, el listado devuelve SOLO productos
+  // de inventario (excluye servicios) — así el catálogo normal, el selector de
+  // productos y el inventario no se ensucian. `isService=true` trae SOLO
+  // servicios (para la pantalla de Servicios y el selector de servicios).
+  @IsOptional()
+  @IsString()
+  isService?: string;
 
   // Ronda 9 — filtros por fecha de creación.
   @IsOptional()

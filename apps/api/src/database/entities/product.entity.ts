@@ -101,6 +101,21 @@ export class Product {
   @Column({ type: 'boolean', default: true })
   isActive!: boolean;
 
+  /**
+   * Un "servicio" (ej: envío / flete) es un Product que NO es inventario: no
+   * descuenta stock, no tiene lotes ni costo, y su precio se fija libremente en
+   * cada venta/cotización. Se modela como Product porque `sale_items.productId`
+   * es NOT NULL, así que una línea de venta necesita referenciar un producto
+   * real. El comportamiento especial (saltear inventario) se ramifica sobre
+   * este flag, NO sobre `productKind` (que es solo clasificación descriptiva).
+   *
+   * Los servicios se excluyen de stock, inventario, alertas de reposición y del
+   * selector normal de productos.
+   */
+  @Index('idx_products_is_service')
+  @Column({ type: 'boolean', default: false })
+  isService!: boolean;
+
   // ORIGINAL (OEM) o ALTERNATIVE (equivalente / aftermarket). Default ORIGINAL.
   @Index('idx_products_kind')
   @Column({

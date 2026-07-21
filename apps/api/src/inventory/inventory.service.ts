@@ -945,7 +945,9 @@ export class InventoryService {
       .addSelect('COALESCE(s.quantity, 0)', 'qty')
       .addSelect('s.id', 'stockId')
       .addSelect('s.locationCode', 'locationCode')
-      .where('p.isActive = TRUE');
+      // Los servicios (envío/flete) no son inventario: fuera del listado de stock.
+      .where('p.isActive = TRUE')
+      .andWhere('p.isService = FALSE');
 
     if (query.q) {
       qb.andWhere(

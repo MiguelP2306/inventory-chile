@@ -314,7 +314,7 @@ export class ReportsService {
        FROM products p
        LEFT JOIN categories c ON c.id = p.categoryId
        LEFT JOIN brands b ON b.id = p.brandId
-       WHERE p.isActive = TRUE
+       WHERE p.isActive = TRUE AND p.isService = FALSE
          AND NOT EXISTS (
            SELECT 1 FROM inventory_movements m2
            WHERE m2.productId = p.id AND m2.createdAt >= ?

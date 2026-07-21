@@ -14,11 +14,22 @@ import type { ProductDto } from '@inventory/shared';
 interface Props {
   onPick: (product: ProductDto) => void;
   buttonLabel?: string;
+  // Cuando es 'true' el picker lista SOLO servicios (envío/flete) en vez de
+  // productos de inventario. Cambia también los textos del modal.
+  isService?: 'true';
+  title?: string;
+  subtitle?: string;
 }
 
 const PAGE_SIZE = 10;
 
-export function ProductPicker({ onPick, buttonLabel = 'Agregar producto' }: Props) {
+export function ProductPicker({
+  onPick,
+  buttonLabel = 'Agregar producto',
+  isService,
+  title,
+  subtitle,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
@@ -44,12 +55,13 @@ export function ProductPicker({ onPick, buttonLabel = 'Agregar producto' }: Prop
   }, [open]);
 
   const results = useQuery({
-    queryKey: ['product-picker', { q: debouncedQ, page }],
+    queryKey: ['product-picker', { q: debouncedQ, page, isService: isService ?? '' }],
     queryFn: () =>
       listProducts({
         q: debouncedQ || undefined,
         page,
         pageSize: PAGE_SIZE,
+        isService,
       }),
     enabled: open,
   });
@@ -67,8 +79,8 @@ export function ProductPicker({ onPick, buttonLabel = 'Agregar producto' }: Prop
       <SoftModal
         open={open}
         onOpenChange={setOpen}
-        title="Elegir producto"
-        subtitle="Buscá por SKU, código de barras o nombre"
+        title={title ?? 'Elegir producto'}
+        subtitle={subtitle ?? 'Buscá por SKU, código de barras o nombre'}
         size="xl"
       >
         <div className="space-y-3 p-5">
@@ -76,7 +88,7 @@ export function ProductPicker({ onPick, buttonLabel = 'Agregar producto' }: Prop
               <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
                 autoFocus
-                placeholder="SKU, código de barras o nombre"
+                placeholder={isService ? "Buscar servicio" : "SKU, código de barras o nombre"}
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 className={`${softInputClass} pl-10`}
@@ -92,7 +104,7 @@ export function ProductPicker({ onPick, buttonLabel = 'Agregar producto' }: Prop
               )}
               {!results.isLoading && items.length === 0 && (
                 <p className="py-6 text-center text-sm text-muted-foreground">
-                  {debouncedQ ? 'Sin resultados.' : 'No hay productos cargados.'}
+                  {debouncedQ ? 'Sin resultados.' : isService ? 'No hay servicios cargados.' : 'No hay productos cargados.'}
                 </p>
               )}
               {items.map((p) => (

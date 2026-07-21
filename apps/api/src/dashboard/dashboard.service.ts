@@ -507,7 +507,7 @@ export class DashboardService {
                 SUM(st.quantity * p.cost) AS inventoryValue
          FROM stocks st
          INNER JOIN products p ON p.id = st.productId
-         WHERE p.isActive = TRUE AND p.categoryId IS NOT NULL
+         WHERE p.isActive = TRUE AND p.isService = FALSE AND p.categoryId IS NOT NULL
          GROUP BY p.categoryId
        ) invAgg ON invAgg.catId = c.id
        ORDER BY salesAgg.amount DESC`,
@@ -700,7 +700,7 @@ export class DashboardService {
       `SELECT COALESCE(SUM(s.quantity * p.cost), 0) AS total
        FROM stocks s
        INNER JOIN products p ON p.id = s.productId
-       WHERE p.isActive = TRUE AND s.quantity > 0`,
+       WHERE p.isActive = TRUE AND p.isService = FALSE AND s.quantity > 0`,
     );
     return Number(rows[0]?.total ?? 0).toFixed(2);
   }
@@ -723,7 +723,7 @@ export class DashboardService {
       `SELECT p.minStock AS minStock, COALESCE(SUM(s.quantity), 0) AS qty
        FROM products p
        LEFT JOIN stocks s ON s.productId = p.id
-       WHERE p.isActive = TRUE
+       WHERE p.isActive = TRUE AND p.isService = FALSE
        GROUP BY p.id, p.minStock`,
     );
 
@@ -754,7 +754,7 @@ export class DashboardService {
     const rows: Array<{ count: string | number }> = await this.ds.query(
       `SELECT COUNT(DISTINCT p.id) AS count
        FROM products p
-       WHERE p.isActive = TRUE
+       WHERE p.isActive = TRUE AND p.isService = FALSE
          AND NOT EXISTS (
            SELECT 1 FROM inventory_movements m
            WHERE m.productId = p.id AND m.createdAt >= ?

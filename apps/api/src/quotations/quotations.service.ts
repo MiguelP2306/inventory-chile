@@ -850,6 +850,7 @@ export class QuotationsService {
             name: it.product.name,
             partNumber: it.product.partNumber,
             description: it.product.description,
+            isService: it.product.isService,
           }
         : undefined,
     }));

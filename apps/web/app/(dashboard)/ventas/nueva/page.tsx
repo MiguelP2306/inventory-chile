@@ -128,6 +128,7 @@ export default function NuevaVentaPage() {
           discount: it.discount,
           discountPercent: it.discountPercent,
           observation: it.observation,
+          isService: it.product?.isService ?? false,
         })),
       notes: q.notes,
       // El descuento sobre el total viaja a la venta para que el cliente pague

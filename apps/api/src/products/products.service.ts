@@ -115,6 +115,17 @@ export class ProductsService {
     if (query.productKind)
       qb.andWhere('p.productKind = :productKind', { productKind: query.productKind });
 
+    // Servicios vs productos de inventario. Por defecto el listado excluye
+    // servicios (catálogo/selector/inventario "normal"). `isService=true` trae
+    // SOLO servicios (pantalla de Servicios y selector de servicios).
+    if (query.isService === 'true') {
+      qb.andWhere('p.isService = TRUE');
+    } else if (query.isService === 'all') {
+      // sin filtro — incluye ambos (uso interno puntual)
+    } else {
+      qb.andWhere('p.isService = FALSE');
+    }
+
     // Ronda 9 — filtros por fecha de creación.
     if (query.createdFrom || query.createdTo) {
       const { from, to } = dayRange(query.createdFrom, query.createdTo);
@@ -664,6 +675,7 @@ export class ProductsService {
     if (dto.minStock !== undefined) fields.minStock = dto.minStock;
     if (dto.location !== undefined) fields.location = dto.location ?? null;
     if (dto.isActive !== undefined) fields.isActive = dto.isActive;
+    if (dto.isService !== undefined) fields.isService = dto.isService;
     if (dto.productKind !== undefined) fields.productKind = dto.productKind;
     return fields;
   }

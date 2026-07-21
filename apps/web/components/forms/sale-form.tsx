@@ -84,6 +84,8 @@ interface ItemRow {
   discountValue: string;
   // Observación libre por ítem (opcional). Se copia desde la cotización.
   observation?: string | null;
+  // Servicio (envío/flete): no descuenta stock, no se valida disponibilidad.
+  isService?: boolean;
 }
 
 export interface SaleBagItem {
@@ -131,6 +133,8 @@ interface Props {
       discount: string;
       discountPercent: string | null;
       observation: string | null;
+      // Servicio (envío/flete): no se valida stock al convertir.
+      isService?: boolean;
     }>;
     notes: string | null;
     // Descuento sobre el total que traía la cotización. Se traspasa a la venta
@@ -303,9 +307,10 @@ export function SaleForm({
       name: it.name,
       qty: it.qty,
       unitPrice: it.unitPrice,
-      discountKind: it.discountPercent != null ? '%' : '$',
+      discountKind: (it.discountPercent != null ? '%' : '$') as DiscountKind,
       discountValue: it.discountPercent ?? it.discount ?? '0',
       observation: it.observation ?? null,
+      isService: it.isService ?? false,
     }));
   });
   const [notes, setNotes] = useState<string>(
@@ -358,7 +363,7 @@ export function SaleForm({
   // Mostramos un badge al lado de la cantidad y bloqueamos el botón final si
   // alguna línea excede.
   const productIds = useMemo(
-    () => items.map((it) => it.productId).filter(Boolean),
+    () => items.filter((it) => !it.isService).map((it) => it.productId).filter(Boolean),
     [items],
   );
   const stockQuery = useQuery({
@@ -420,6 +425,7 @@ export function SaleForm({
     ? []
     : items
         .map((it, idx) => {
+          if (it.isService) return null; // los servicios no tienen stock
           const available = stockMap.get(it.productId);
           if (available == null) return null;
           if (it.qty > available) return { idx, available, requested: it.qty };
@@ -963,29 +969,58 @@ export function SaleForm({
 
           {/* Items debajo del cliente, en el mismo tab (Ronda 10). */}
           <div className="rounded-2xl border border-slate-100 bg-white shadow-sm dark:border-slate-850 dark:bg-[#11151C]">
-            <div className="flex items-center justify-between border-b p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b p-4">
               <h2 className="font-medium">Items de la venta</h2>
-              <ProductPicker
-                buttonLabel="Agregar producto"
-                onPick={(p) => {
-                  if (items.some((i) => i.productId === p.id)) {
-                    toast.info('El producto ya está en la lista');
-                    return;
-                  }
-                  setItems((prev) => [
-                    ...prev,
-                    {
-                      productId: p.id,
-                      sku: p.sku,
-                      name: p.name,
-                      qty: 1,
-                      unitPrice: p.price ?? '0',
-                      discountKind: '$',
-                      discountValue: '0',
-                    },
-                  ]);
-                }}
-              />
+              <div className="flex flex-wrap items-center gap-2">
+                <ProductPicker
+                  buttonLabel="Agregar producto"
+                  onPick={(p) => {
+                    if (items.some((i) => i.productId === p.id)) {
+                      toast.info('El producto ya está en la lista');
+                      return;
+                    }
+                    setItems((prev) => [
+                      ...prev,
+                      {
+                        productId: p.id,
+                        sku: p.sku,
+                        name: p.name,
+                        qty: 1,
+                        unitPrice: p.price ?? '0',
+                        discountKind: '$',
+                        discountValue: '0',
+                      },
+                    ]);
+                  }}
+                />
+                {/* Servicios (envío/flete): no descuentan stock; el precio
+                    sugerido queda editable en la línea. */}
+                <ProductPicker
+                  isService="true"
+                  buttonLabel="Agregar servicio"
+                  title="Elegir servicio"
+                  subtitle="Envío, flete u otro cargo. No afecta inventario."
+                  onPick={(p) => {
+                    if (items.some((i) => i.productId === p.id)) {
+                      toast.info('El servicio ya está en la lista');
+                      return;
+                    }
+                    setItems((prev) => [
+                      ...prev,
+                      {
+                        productId: p.id,
+                        sku: p.sku,
+                        name: p.name,
+                        qty: 1,
+                        unitPrice: p.price ?? '0',
+                        discountKind: '$',
+                        discountValue: '0',
+                        isService: true,
+                      },
+                    ]);
+                  }}
+                />
+              </div>
             </div>
             {/* `table-fixed`: sin esto el layout automático repartía el ancho
                 según el contenido y el input de precio quedaba cortado. Con

@@ -108,6 +108,9 @@ export interface ProductDto {
   minStock: number;
   location: string | null;
   isActive: boolean;
+  // Un servicio (ej: envío/flete) es un Product que NO es inventario: sin
+  // stock, sin costo, precio libre por venta. Ver product.entity.ts.
+  isService: boolean;
   // Fase 4B
   productKind: ProductKindDto;
   images?: ProductImageDto[];
@@ -921,6 +924,9 @@ export interface QuotationItemDto {
     name: string;
     partNumber: string | null;
     description: string | null;
+    // Servicio (envío/flete): no descuenta stock. Se propaga a la venta al
+    // convertir para que no se valide disponibilidad.
+    isService: boolean;
   };
 }
 
