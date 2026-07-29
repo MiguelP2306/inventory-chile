@@ -98,12 +98,9 @@ export class SalesController {
       { header: 'Cliente', key: 'customer', width: 30 },
       { header: 'RUT', key: 'taxId', width: 14 },
       { header: 'Bodega', key: 'warehouse', width: 18 },
-      // Columnas de desglose financiero solo para usuarios con permiso.
-      ...(canSeeBreakdown
-        ? [
-            { header: 'Método pago', key: 'paymentMethod', width: 16 },
-          ]
-        : []),
+      // El método de pago lo ve todo el mundo (dato operativo); las columnas
+      // de desglose financiero solo para usuarios con permiso.
+      { header: 'Método pago', key: 'paymentMethod', width: 16 },
       { header: 'Items', key: 'itemsCount', width: 8 },
       ...(canSeeBreakdown
         ? [
@@ -142,11 +139,11 @@ export class SalesController {
         customer: s.customer?.name ?? '',
         taxId: s.customer?.taxId ?? '',
         warehouse: s.warehouse?.name ?? '',
+        paymentMethod: s.paymentMethod
+          ? PAYMENT_METHOD_LABEL[s.paymentMethod] ?? s.paymentMethod
+          : '',
         ...(canSeeBreakdown
           ? {
-              paymentMethod: s.paymentMethod
-                ? PAYMENT_METHOD_LABEL[s.paymentMethod] ?? s.paymentMethod
-                : '',
               subtotal: Number(s.subtotal ?? 0) || 0,
               taxAmount: Number(s.taxAmount ?? 0) || 0,
               commissionAmount: Number(s.commissionAmount ?? 0) || 0,

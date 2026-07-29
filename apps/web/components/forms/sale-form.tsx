@@ -881,51 +881,65 @@ export function SaleForm({
               )}
             </div>
 
-            {canSeeBreakdown && (
-              <div className="space-y-2">
-                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">Método de pago</span>
-                {/* Ronda 9 — 5 opciones: efectivo, transferencia, débito,
-                    crédito, link de pago. Cada tarjeta de pago tiene su propia
-                    comisión configurable en Configuración. */}
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
-                  <PaymentOption
-                    selected={paymentMethod === 'CASH'}
-                    onClick={() => setPaymentMethod('CASH')}
-                    icon={<Banknote className="h-5 w-5" />}
-                    label="Efectivo"
-                    hint="Sin comisión"
-                  />
-                  <PaymentOption
-                    selected={paymentMethod === 'TRANSFER'}
-                    onClick={() => setPaymentMethod('TRANSFER')}
-                    icon={<Send className="h-5 w-5" />}
-                    label="Transferencia"
-                    hint="Sin comisión"
-                  />
-                  <PaymentOption
-                    selected={paymentMethod === 'CARD_DEBIT'}
-                    onClick={() => setPaymentMethod('CARD_DEBIT')}
-                    icon={<CreditCard className="h-5 w-5" />}
-                    label="Débito"
-                    hint={`Comisión ${(Number(settings.data?.cardDebitCommissionRate ?? '0') * 100).toFixed(2)}%`}
-                  />
-                  <PaymentOption
-                    selected={paymentMethod === 'CARD_CREDIT'}
-                    onClick={() => setPaymentMethod('CARD_CREDIT')}
-                    icon={<CreditCard className="h-5 w-5" />}
-                    label="Crédito"
-                    hint={`Comisión ${(Number(settings.data?.cardCreditCommissionRate ?? '0') * 100).toFixed(2)}%`}
-                  />
-                  <PaymentOption
-                    selected={paymentMethod === 'PAYMENT_LINK'}
-                    onClick={() => setPaymentMethod('PAYMENT_LINK')}
-                    icon={<Send className="h-5 w-5" />}
-                    label="Link de pago"
-                    hint={`Comisión ${(Number(settings.data?.paymentLinkCommissionRate ?? '0') * 100).toFixed(2)}%`}
-                  />
-                </div>
+            {/* El selector de método de pago NO va gateado por
+                `canSeeBreakdown`: el vendedor es quien cobra y tiene que
+                registrar cómo pagó el cliente. Lo único sensible es la
+                comisión de cada tarjeta, así que ese hint sí se oculta. */}
+            <div className="space-y-2">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">Método de pago</span>
+              {/* Ronda 9 — 5 opciones: efectivo, transferencia, débito,
+                  crédito, link de pago. Cada tarjeta de pago tiene su propia
+                  comisión configurable en Configuración. */}
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                <PaymentOption
+                  selected={paymentMethod === 'CASH'}
+                  onClick={() => setPaymentMethod('CASH')}
+                  icon={<Banknote className="h-5 w-5" />}
+                  label="Efectivo"
+                  hint={canSeeBreakdown ? 'Sin comisión' : undefined}
+                />
+                <PaymentOption
+                  selected={paymentMethod === 'TRANSFER'}
+                  onClick={() => setPaymentMethod('TRANSFER')}
+                  icon={<Send className="h-5 w-5" />}
+                  label="Transferencia"
+                  hint={canSeeBreakdown ? 'Sin comisión' : undefined}
+                />
+                <PaymentOption
+                  selected={paymentMethod === 'CARD_DEBIT'}
+                  onClick={() => setPaymentMethod('CARD_DEBIT')}
+                  icon={<CreditCard className="h-5 w-5" />}
+                  label="Débito"
+                  hint={
+                    canSeeBreakdown
+                      ? `Comisión ${(Number(settings.data?.cardDebitCommissionRate ?? '0') * 100).toFixed(2)}%`
+                      : undefined
+                  }
+                />
+                <PaymentOption
+                  selected={paymentMethod === 'CARD_CREDIT'}
+                  onClick={() => setPaymentMethod('CARD_CREDIT')}
+                  icon={<CreditCard className="h-5 w-5" />}
+                  label="Crédito"
+                  hint={
+                    canSeeBreakdown
+                      ? `Comisión ${(Number(settings.data?.cardCreditCommissionRate ?? '0') * 100).toFixed(2)}%`
+                      : undefined
+                  }
+                />
+                <PaymentOption
+                  selected={paymentMethod === 'PAYMENT_LINK'}
+                  onClick={() => setPaymentMethod('PAYMENT_LINK')}
+                  icon={<Send className="h-5 w-5" />}
+                  label="Link de pago"
+                  hint={
+                    canSeeBreakdown
+                      ? `Comisión ${(Number(settings.data?.paymentLinkCommissionRate ?? '0') * 100).toFixed(2)}%`
+                      : undefined
+                  }
+                />
               </div>
-            )}
+            </div>
 
             {canSeeBreakdown && (
               <div className="space-y-2">
@@ -1478,7 +1492,8 @@ function PaymentOption({
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
-  hint: string;
+  // Sin hint cuando el usuario no puede ver comisiones (rol USER).
+  hint?: string;
 }) {
   return (
     <button
@@ -1496,7 +1511,7 @@ function PaymentOption({
       </div>
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium">{label}</div>
-        <div className="text-xs text-muted-foreground">{hint}</div>
+        {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
       </div>
     </button>
   );

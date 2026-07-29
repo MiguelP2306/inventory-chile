@@ -53,8 +53,11 @@ export function redactProductCostList<T extends { cost?: string | null }>(
 
 /**
  * Redacta el desglose financiero de una venta cuando el viewer no tiene
- * `SALE_VIEW_FINANCIAL_BREAKDOWN`. Setea a null los campos de comisión y
- * método de pago — el USER solo ve el total final.
+ * `SALE_VIEW_FINANCIAL_BREAKDOWN`. Setea a null comisión, subtotal e IVA —
+ * el USER solo ve el total final.
+ *
+ * `paymentMethod` NO se redacta: es dato operativo (el vendedor es quien
+ * cobra y lo registra al crear la venta), no parte del margen.
  */
 export function redactSaleBreakdown<
   T extends {
@@ -68,7 +71,6 @@ export function redactSaleBreakdown<
   return {
     ...sale,
     commissionAmount: null,
-    paymentMethod: null,
     subtotal: null,
     taxAmount: null,
   };
@@ -86,7 +88,6 @@ export function redactSaleBreakdownList<
   return sales.map((s) => ({
     ...s,
     commissionAmount: null,
-    paymentMethod: null,
     subtotal: null,
     taxAmount: null,
   }));

@@ -10,7 +10,6 @@ import { SaleDraftsPanel } from '@/components/sale-drafts-panel';
 import { SaleIncidentsBadges } from '@/components/sale-incidents-badges';
 import { SaleStatusBadge } from '@/components/sale-status-badge';
 import { apiAbsoluteUrl } from '@/lib/api';
-import { Permission, useCan } from '@/lib/current-user-context';
 import { formatCurrency } from '@/lib/format';
 import { getSalesKpis, listSales } from '@/lib/sales-api';
 import { useDebouncedUrlFilter } from '@/lib/use-debounced-url-filter';
@@ -55,15 +54,15 @@ const THEAD =
 /**
  * /ventas — Rediseño UI (look Compras / Movimientos / Cotizaciones).
  * SOLO UI/UX. Lógica idéntica: KPIs del mes, filtros URL + debounce,
- * listSales paginado, export Excel, modal Nueva venta (?new=1), y gating
- * por permiso SALE_VIEW_FINANCIAL_BREAKDOWN para método/desglose.
+ * listSales paginado, export Excel y modal Nueva venta (?new=1).
+ * El método de pago es dato operativo y se muestra a todos los roles; el
+ * desglose financiero (subtotal/IVA/comisión) sigue gateado en el backend.
  */
 export default function VentasPage() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const qc = useQueryClient();
-  const canSeeBreakdown = useCan(Permission.SALE_VIEW_FINANCIAL_BREAKDOWN);
 
   const filters = useUrlFilters({
     status: '',
@@ -322,23 +321,21 @@ export default function VentasPage() {
             </option>
           ))}
         </select>
-        {canSeeBreakdown && (
-          <select
-            value={method}
-            onChange={(e) => {
-              setFilter('method', e.target.value === ALL ? null : e.target.value);
-              setFilter('page', null);
-            }}
-            className={FIELD}
-          >
-            <option value={ALL}>Todos los métodos</option>
-            {METHOD_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        )}
+        <select
+          value={method}
+          onChange={(e) => {
+            setFilter('method', e.target.value === ALL ? null : e.target.value);
+            setFilter('page', null);
+          }}
+          className={FIELD}
+        >
+          <option value={ALL}>Todos los métodos</option>
+          {METHOD_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
         <select
           value={incident}
           onChange={(e) => {
@@ -385,7 +382,7 @@ export default function VentasPage() {
                 <th className="py-4">Cliente</th>
                 <th className="py-4 text-right">Items</th>
                 <th className="py-4 text-right">Total</th>
-                {canSeeBreakdown && <th className="py-4 pl-8">Método</th>}
+                <th className="py-4 pl-8">Método</th>
                 <th className="py-4 pl-8">Estado</th>
                 <th className="py-4 pl-8">Incidencias</th>
                 <th className="w-[60px] py-4 pr-6 text-right" />
@@ -434,13 +431,11 @@ export default function VentasPage() {
                   <td className="py-5 text-right font-mono text-[13px] font-black text-slate-900 dark:text-white">
                     {formatCurrency(s.total)}
                   </td>
-                  {canSeeBreakdown && (
-                    <td className="py-5 pl-8 font-medium text-slate-500 dark:text-slate-400">
-                      {s.paymentMethod
-                        ? METHOD_OPTIONS.find((o) => o.value === s.paymentMethod)?.label ?? s.paymentMethod
-                        : '—'}
-                    </td>
-                  )}
+                  <td className="py-5 pl-8 font-medium text-slate-500 dark:text-slate-400">
+                    {s.paymentMethod
+                      ? METHOD_OPTIONS.find((o) => o.value === s.paymentMethod)?.label ?? s.paymentMethod
+                      : '—'}
+                  </td>
                   <td className="py-5 pl-8">
                     <SaleStatusBadge status={s.status} />
                   </td>

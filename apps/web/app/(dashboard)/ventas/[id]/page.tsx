@@ -233,9 +233,11 @@ export default function VentaDetailPage() {
         </div>
 
         <div className={`space-y-2 ${CARD}`}>
-          <h2 className={LABEL}>{canSeeBreakdown ? 'Pago' : 'Detalles'}</h2>
+          <h2 className={LABEL}>Pago</h2>
           <div className="space-y-1.5 text-xs text-slate-500 dark:text-slate-400">
-            {canSeeBreakdown && s.paymentMethod && (
+            {/* Método visible para todos: lo registra el vendedor al cobrar.
+                La comisión sí queda gateada por `canSeeBreakdown`. */}
+            {s.paymentMethod && (
               <div>
                 Método:{' '}
                 <span className="font-bold text-slate-800 dark:text-slate-200">
