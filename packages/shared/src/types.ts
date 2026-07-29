@@ -104,6 +104,10 @@ export interface ProductDto {
   // in depth: aunque el frontend olvide esconder el campo, el valor no
   // llega al cliente. ADMIN siempre lo recibe como string.
   cost: string | null;
+  // `true` si el producto tiene costo cargado (> 0). Se expone aparte de
+  // `cost` porque el vendedor NO puede ver el monto pero la UI igual necesita
+  // avisarle que el producto no se puede vender hasta cargarle el costo.
+  hasCost: boolean;
   price: string;
   minStock: number;
   location: string | null;
@@ -810,12 +814,20 @@ export interface ReportSalesResponseDto {
   dateFrom: string | null;
   dateTo: string | null;
   rows: ReportSalesRowDto[];
-  // Totales agregan SOLO las ventas no canceladas.
+  // Totales agregan SOLO las ventas no canceladas y van BRUTOS (sin descontar
+  // devoluciones), para poder mostrar el desglose bruto → devoluciones → neto.
   totalSubtotal: string;
   totalTax: string;
   totalAmount: string;
   countActive: number;
   countCancelled: number;
+  // Devoluciones a cliente registradas en el mismo período (por fecha de la
+  // devolución) y los totales ya netos.
+  totalReturns: string;
+  countReturns: number;
+  netSubtotal: string;
+  netTax: string;
+  netAmount: string;
 }
 
 export interface ReportIvaSaleRowDto {
@@ -1701,7 +1713,10 @@ export interface DashboardSummaryDto {
   // La clave se llama `today` por compatibilidad con la versión anterior del
   // DTO; semánticamente es "current period".
   today: {
+    // `amount` va NETO de devoluciones del período; `returns` expone cuánto se
+    // descontó para que el número sea explicable en la UI.
     sales: { count: number; amount: string };
+    returns: { count: number; amount: string };
     quotations: { count: number; amount: string };
     cash: {
       total: string;
@@ -2083,13 +2098,21 @@ export interface SalesTopCustomerDto {
  * (independiente del período de los demás KPIs).
  */
 export interface SalesKpisDto {
-  // Total vendido en el período (excluye canceladas).
+  // Total vendido en el período, NETO de devoluciones (excluye canceladas).
+  // Las devoluciones se descuentan por su propia fecha, no por la de la venta
+  // original — ver `apps/api/src/common/sales-returns.ts`.
   totalAmount: string;
   count: number;
   averageAmount: string;
-  // Total vendido HOY (siempre el día actual del servidor).
+  // Total vendido HOY (siempre el día actual del servidor), también neto.
   todayAmount: string;
   todayCount: number;
+  // Devoluciones descontadas arriba, para poder mostrarlas explícitas en la UI
+  // (si no, el operador ve un total más bajo sin saber por qué).
+  returnsAmount: string;
+  returnsCount: number;
+  todayReturnsAmount: string;
+  todayReturnsCount: number;
   // Última venta registrada (cualquier período). Útil cuando count=0.
   lastSale: {
     id: string;

@@ -166,15 +166,21 @@ export default function ReporteVentasPage() {
             value={report.data.countCancelled.toLocaleString('es-CL')}
             tone={report.data.countCancelled > 0 ? 'danger' : 'default'}
           />
+          {/* Neto de devoluciones, para que cuadre con el Reporte de IVA (que
+              ya descuenta las notas de crédito). */}
           <KpiCard
             icon={<FileText className="h-3.5 w-3.5" />}
             label="IVA débito"
-            value={formatCurrency(report.data.totalTax)}
+            value={formatCurrency(report.data.netTax)}
           />
           <KpiCard
             icon={<Calendar className="h-3.5 w-3.5" />}
-            label="Total facturado"
-            value={formatCurrency(report.data.totalAmount)}
+            label={
+              report.data.countReturns > 0
+                ? 'Total facturado (neto)'
+                : 'Total facturado'
+            }
+            value={formatCurrency(report.data.netAmount)}
             accent
           />
         </div>
@@ -306,6 +312,56 @@ export default function ReporteVentasPage() {
                     {formatCurrency(report.data.totalAmount)}
                   </td>
                 </tr>
+                {/* Devoluciones del período (por fecha de la devolución) y el
+                    neto resultante. Solo se muestran si las hubo. */}
+                {report.data.countReturns > 0 && (
+                  <>
+                    <tr className="bg-slate-50/50 dark:bg-slate-900/20">
+                      <td
+                        colSpan={6}
+                        className="py-3 pl-6 text-right text-[10px] font-extrabold uppercase tracking-widest text-amber-600 dark:text-amber-400"
+                      >
+                        Devoluciones ({report.data.countReturns})
+                      </td>
+                      <td className="py-3 text-right font-mono text-[12px] font-bold tabular-nums text-amber-600 dark:text-amber-400">
+                        −{formatCurrency(
+                          (
+                            Number(report.data.totalSubtotal) -
+                            Number(report.data.netSubtotal)
+                          ).toFixed(2),
+                        )}
+                      </td>
+                      <td className="py-3 text-right font-mono text-[12px] font-bold tabular-nums text-amber-600 dark:text-amber-400">
+                        −{formatCurrency(
+                          (
+                            Number(report.data.totalTax) -
+                            Number(report.data.netTax)
+                          ).toFixed(2),
+                        )}
+                      </td>
+                      <td className="py-3 pr-6 text-right font-mono text-[12px] font-bold tabular-nums text-amber-600 dark:text-amber-400">
+                        −{formatCurrency(report.data.totalReturns)}
+                      </td>
+                    </tr>
+                    <tr className="border-t border-slate-100 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/20">
+                      <td
+                        colSpan={6}
+                        className="py-4 pl-6 text-right text-[10px] font-extrabold uppercase tracking-widest text-slate-500 dark:text-slate-300"
+                      >
+                        Neto de devoluciones
+                      </td>
+                      <td className="py-4 text-right font-mono text-[12px] font-bold tabular-nums text-slate-600 dark:text-slate-300">
+                        {formatCurrency(report.data.netSubtotal)}
+                      </td>
+                      <td className="py-4 text-right font-mono text-[12px] font-bold tabular-nums text-slate-600 dark:text-slate-300">
+                        {formatCurrency(report.data.netTax)}
+                      </td>
+                      <td className="py-4 pr-6 text-right font-mono text-[14px] font-black tabular-nums text-[#2F6BFF]">
+                        {formatCurrency(report.data.netAmount)}
+                      </td>
+                    </tr>
+                  </>
+                )}
               </tfoot>
             )}
           </table>

@@ -86,6 +86,10 @@ interface ItemRow {
   observation?: string | null;
   // Servicio (envío/flete): no descuenta stock, no se valida disponibilidad.
   isService?: boolean;
+  // El producto no tiene costo cargado. La venta congela el costo al emitirse,
+  // así que si vendemos con costo 0 esa venta reporta margen 100% para siempre
+  // y corregir el costo después NO la arregla. Se bloquea el confirmar.
+  missingCost?: boolean;
 }
 
 export interface SaleBagItem {
@@ -380,6 +384,17 @@ export function SaleForm({
     return m;
   }, [stockQuery.data]);
 
+  // Productos sin costo cargado según el backend. Cubre los items precargados
+  // (cotización, borrador, bolso) que nunca pasaron por el ProductPicker — que
+  // es justo el caso donde se coló la venta con costo 0.
+  const missingCostIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const row of stockQuery.data ?? ([] as AvailableStockRow[])) {
+      if (!row.hasCost) s.add(row.productId);
+    }
+    return s;
+  }, [stockQuery.data]);
+
   // Cálculos en vivo
   const itemsForCalc = useMemo(
     () =>
@@ -436,10 +451,18 @@ export function SaleForm({
             x !== null,
         );
 
+  // Productos sin costo cargado: la venta se rechaza en el backend, así que se
+  // bloquea acá también para que el operador lo vea antes de confirmar.
+  const itemsMissingCost = items.filter(
+    (it) =>
+      !it.isService && (it.missingCost || missingCostIds.has(it.productId)),
+  );
+
   const itemsHaveErrors =
     items.length === 0 ||
     items.some((it) => it.qty < 1 || Number(it.unitPrice) <= 0) ||
-    stockShortages.length > 0;
+    stockShortages.length > 0 ||
+    itemsMissingCost.length > 0;
 
   const formValid = !!customer && !itemsHaveErrors;
 
@@ -993,6 +1016,11 @@ export function SaleForm({
                       toast.info('El producto ya está en la lista');
                       return;
                     }
+                    if (!p.hasCost) {
+                      toast.error(
+                        `"${p.name}" no tiene costo cargado. Corregí el costo en la ficha del producto antes de venderlo.`,
+                      );
+                    }
                     setItems((prev) => [
                       ...prev,
                       {
@@ -1003,6 +1031,7 @@ export function SaleForm({
                         unitPrice: p.price ?? '0',
                         discountKind: '$',
                         discountValue: '0',
+                        missingCost: !p.hasCost,
                       },
                     ]);
                   }}
@@ -1089,6 +1118,13 @@ export function SaleForm({
                       <TableCell className="max-w-[260px] align-top">
                         <div className="flex flex-col gap-1">
                           <span className="truncate">{it.name}</span>
+                          {!it.isService &&
+                            (it.missingCost ||
+                              missingCostIds.has(it.productId)) && (
+                              <span className="w-fit rounded-md bg-destructive/10 px-2 py-0.5 text-[11px] font-bold text-destructive">
+                                Sin costo cargado
+                              </span>
+                            )}
                           {/* Observación por ítem (desplegable). null = oculta. */}
                           {it.observation == null ? (
                             <button
@@ -1349,6 +1385,24 @@ export function SaleForm({
           <span className="mr-auto text-[11px] font-semibold text-slate-400">
             {draftState === 'saving' ? 'Guardando borrador…' : '✓ Borrador guardado'}
           </span>
+        )}
+        {/* Aviso bloqueante: el costo se congela al emitir la venta, así que
+            vender con costo 0 deja esa venta con margen 100% para siempre. */}
+        {itemsMissingCost.length > 0 && (
+          <div className="w-full rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-xs text-destructive">
+            <p className="font-bold">
+              {itemsMissingCost.length === 1
+                ? 'Hay un producto sin costo cargado'
+                : `Hay ${itemsMissingCost.length} productos sin costo cargado`}
+              : {itemsMissingCost.map((it) => it.name).join(', ')}
+            </p>
+            <p className="mt-0.5 font-medium">
+              Cargá el costo en la ficha del producto y volvé a agregarlo. La
+              venta guarda el costo del momento, por eso no se puede emitir así:
+              quedaría con la ganancia mal calculada y corregir el costo después
+              no la arregla.
+            </p>
+          </div>
         )}
         <button
           type="button"

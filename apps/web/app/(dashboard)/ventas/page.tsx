@@ -179,10 +179,22 @@ export default function VentasPage() {
 
       {/* KPIs */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Los montos vienen NETOS de devoluciones desde el backend. El hint
+            muestra cuánto se descontó: si no, el operador ve un total más bajo
+            sin entender por qué. */}
         <KpiCard
           label="Vendido este mes"
           value={kpis.data ? formatCurrency(kpis.data.totalAmount) : '—'}
-          hint={kpis.data ? `${kpis.data.count} ${kpis.data.count === 1 ? 'venta' : 'ventas'}` : 'Cargando…'}
+          hint={
+            kpis.data
+              ? `${kpis.data.count} ${kpis.data.count === 1 ? 'venta' : 'ventas'}${
+                  kpis.data.returnsCount > 0
+                    ? ` · devoluciones −${formatCurrency(kpis.data.returnsAmount)}`
+                    : ''
+                }`
+              : 'Cargando…'
+          }
+          truncateHint
         />
         <KpiCard
           label="Promedio por venta"
@@ -192,7 +204,16 @@ export default function VentasPage() {
         <KpiCard
           label="Vendido hoy"
           value={kpis.data ? formatCurrency(kpis.data.todayAmount) : '—'}
-          hint={kpis.data ? `${kpis.data.todayCount} venta(s) hoy` : 'Cargando…'}
+          hint={
+            kpis.data
+              ? `${kpis.data.todayCount} venta(s) hoy${
+                  kpis.data.todayReturnsCount > 0
+                    ? ` · devoluciones −${formatCurrency(kpis.data.todayReturnsAmount)}`
+                    : ''
+                }`
+              : 'Cargando…'
+          }
+          truncateHint
         />
         <KpiCard
           label="Última venta"

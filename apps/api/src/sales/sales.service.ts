@@ -40,6 +40,11 @@ import {
   roundHalfUp,
 } from '../common/document-totals';
 import {
+  refundTotalsInRange,
+  refundsByCustomerInRange,
+  refundsByProductInRange,
+} from '../common/sales-returns';
+import {
   businessTodayStr,
   endOfBusinessDay,
   resolveCreationDate,
@@ -68,6 +73,11 @@ import { CancelSaleDto, CreateSaleDto, ListSalesQueryDto } from './dto';
 
 const COUNTER_KIND = 'SALE';
 const NUMBER_PREFIX = 'VTA';
+
+// Tops de los KPIs: se muestran 5, pero se traen más filas de la DB porque al
+// restar las devoluciones el ranking puede reordenarse o quedar corto.
+const TOP_LIMIT = 5;
+const TOP_ROWS_FETCH = 20;
 const PAGE_SIZE_DEFAULT = 20;
 const CARD_COMMISSION_CATEGORY_NAME = 'Comisión Tarjeta';
 
@@ -303,6 +313,25 @@ export class SalesService {
     if (productIds.length !== new Set(productIds).size) {
       throw new BadRequestException(
         'Hay items duplicados. Sumá las cantidades en una sola línea.',
+      );
+    }
+
+    // El costo se congela en el item al vender (ver más abajo). Si el producto
+    // todavía no tiene costo cargado, la venta queda con costo 0 y reporta
+    // margen 100% para siempre — y corregir el costo del producto después NO
+    // arregla la venta ya emitida. Por eso se bloquea acá.
+    //
+    // Los servicios (flete, mano de obra) quedan exentos: no son inventario y
+    // legítimamente no tienen costo unitario.
+    const withoutCost = dto.items
+      .map((it) => productById.get(it.productId)!)
+      .filter((p) => !p.isService && Number(p.cost ?? 0) <= 0);
+    if (withoutCost.length > 0) {
+      const detail = withoutCost
+        .map((p) => `${p.sku ? `${p.sku} — ` : ''}${p.name}`)
+        .join(', ');
+      throw new ConflictException(
+        `No se puede emitir la venta: ${withoutCost.length === 1 ? 'este producto no tiene' : 'estos productos no tienen'} costo cargado (${detail}). Corregí el costo en la ficha del producto y volvé a intentar.`,
       );
     }
 
@@ -705,6 +734,11 @@ export class SalesService {
    * Excluye SIEMPRE ventas canceladas. Las card "Ventas del día" se
    * calculan sobre el día actual (no sobre el período custom, así el
    * operador puede ver el día corriente aunque el período sea otro).
+   *
+   * Los montos son NETOS de devoluciones: una venta devuelta sigue en estado
+   * PAID (la devolución es una incidencia, no cambia el estado), así que sin
+   * netear el KPI seguía mostrándola como vendida. Se descuenta por fecha de
+   * la devolución — ver `common/sales-returns.ts` para el criterio completo.
    */
   async kpis(query: {
     dateFrom?: string;
@@ -742,8 +776,7 @@ export class SalesService {
       select: ['id', 'total', 'customerId', 'date'],
     });
     const count = sales.length;
-    const totalAmount = sales.reduce((acc, s) => acc + parseFloat(s.total), 0);
-    const averageAmount = count > 0 ? totalAmount / count : 0;
+    const grossAmount = sales.reduce((acc, s) => acc + parseFloat(s.total), 0);
 
     // Ventas del día actual.
     const todaySales = await this.repo.find({
@@ -753,10 +786,20 @@ export class SalesService {
       },
       select: ['id', 'total'],
     });
-    const todayAmount = todaySales.reduce(
+    const todayGrossAmount = todaySales.reduce(
       (acc, s) => acc + parseFloat(s.total),
       0,
     );
+
+    // Devoluciones del período y del día, para netear los montos.
+    const [periodRefunds, todayRefunds] = await Promise.all([
+      refundTotalsInRange(this.ds, from, to),
+      refundTotalsInRange(this.ds, todayStart, todayEnd),
+    ]);
+
+    const totalAmount = grossAmount - periodRefunds.total;
+    const todayAmount = todayGrossAmount - todayRefunds.total;
+    const averageAmount = count > 0 ? totalAmount / count : 0;
 
     // Última venta confirmada (cualquier período).
     const last = await this.repo.findOne({
@@ -765,8 +808,16 @@ export class SalesService {
       order: { date: 'DESC' },
     });
 
+    // Devoluciones por producto / cliente del período: se restan de los tops
+    // para que un producto devuelto no siga liderando el ranking.
+    const [refundsByProduct, refundsByCustomer] = await Promise.all([
+      refundsByProductInRange(this.ds, from, to),
+      refundsByCustomerInRange(this.ds, from, to),
+    ]);
+
     // Top 5 productos por unidades vendidas en el período. Usa SaleItem
-    // joineado a Sale para filtrar por fecha + status.
+    // joineado a Sale para filtrar por fecha + status. Se piden más filas que
+    // el límite final porque el neteo puede reordenar (o vaciar) las de arriba.
     const productRows: Array<{
       productId: string;
       qty: string;
@@ -788,15 +839,24 @@ export class SalesService {
       .addGroupBy('p.sku')
       .addGroupBy('p.name')
       .orderBy('SUM(si.qty)', 'DESC')
-      .limit(5)
+      .limit(TOP_ROWS_FETCH)
       .getRawMany();
-    const topProducts: SalesTopProductDto[] = productRows.map((r) => ({
-      productId: r.productId,
-      sku: r.sku,
-      name: r.name,
-      qty: Number(r.qty),
-      totalAmount: Number(r.totalAmount).toFixed(2),
-    }));
+    const topProducts: SalesTopProductDto[] = productRows
+      .map((r) => {
+        const refunded = refundsByProduct.get(r.productId);
+        return {
+          productId: r.productId,
+          sku: r.sku,
+          name: r.name,
+          qty: Number(r.qty) - (refunded?.qty ?? 0),
+          totalAmount: Number(r.totalAmount) - (refunded?.amount ?? 0),
+        };
+      })
+      // Un producto vendido y devuelto entero queda en 0: fuera del ranking.
+      .filter((p) => p.qty > 0)
+      .sort((a, b) => b.qty - a.qty)
+      .slice(0, TOP_LIMIT)
+      .map((p) => ({ ...p, totalAmount: p.totalAmount.toFixed(2) }));
 
     // Top 5 clientes por monto vendido en el período.
     const customerRows: Array<{
@@ -819,15 +879,21 @@ export class SalesService {
       .addGroupBy('c.name')
       .addGroupBy('c.taxId')
       .orderBy('SUM(s.total)', 'DESC')
-      .limit(5)
+      .limit(TOP_ROWS_FETCH)
       .getRawMany();
-    const topCustomers: SalesTopCustomerDto[] = customerRows.map((r) => ({
-      customerId: r.customerId,
-      customerName: r.customerName,
-      customerTaxId: r.customerTaxId,
-      salesCount: Number(r.salesCount),
-      totalAmount: Number(r.totalAmount).toFixed(2),
-    }));
+    const topCustomers: SalesTopCustomerDto[] = customerRows
+      .map((r) => ({
+        customerId: r.customerId,
+        customerName: r.customerName,
+        customerTaxId: r.customerTaxId,
+        salesCount: Number(r.salesCount),
+        totalAmount:
+          Number(r.totalAmount) - (refundsByCustomer.get(r.customerId) ?? 0),
+      }))
+      .filter((c) => c.totalAmount > 0)
+      .sort((a, b) => b.totalAmount - a.totalAmount)
+      .slice(0, TOP_LIMIT)
+      .map((c) => ({ ...c, totalAmount: c.totalAmount.toFixed(2) }));
 
     return {
       totalAmount: totalAmount.toFixed(2),
@@ -835,6 +901,10 @@ export class SalesService {
       averageAmount: averageAmount.toFixed(2),
       todayAmount: todayAmount.toFixed(2),
       todayCount: todaySales.length,
+      returnsAmount: periodRefunds.total.toFixed(2),
+      returnsCount: periodRefunds.count,
+      todayReturnsAmount: todayRefunds.total.toFixed(2),
+      todayReturnsCount: todayRefunds.count,
       lastSale: last
         ? {
             id: last.id,
@@ -855,8 +925,27 @@ export class SalesService {
     productIds: string[],
     warehouseId?: string,
     aggregate?: boolean,
-  ): Promise<Array<{ productId: string; warehouseId: string; quantity: number }>> {
+  ): Promise<
+    Array<{
+      productId: string;
+      warehouseId: string;
+      quantity: number;
+      hasCost: boolean;
+    }>
+  > {
     if (productIds.length === 0) return [];
+
+    // `hasCost` viaja junto al stock porque el formulario de venta ya consulta
+    // este endpoint para TODOS sus items — incluidos los que vienen precargados
+    // de una cotización o un borrador, que nunca pasaron por el ProductPicker.
+    // Es un booleano: no filtra el costo a quien no puede verlo.
+    const costRows = await this.productRepo.find({
+      where: { id: In(productIds) },
+      select: { id: true, cost: true, isService: true },
+    });
+    const hasCostById = new Map(
+      costRows.map((p) => [p.id, p.isService || Number(p.cost ?? 0) > 0]),
+    );
 
     // Ronda 7 — modo aggregate: suma stock de TODAS las bodegas activas. Usado
     // por el QuotationForm porque las cotizaciones no se atan a una bodega
@@ -877,6 +966,7 @@ export class SalesService {
         productId: pid,
         warehouseId: 'aggregate',
         quantity: byId.get(pid) ?? 0,
+        hasCost: hasCostById.get(pid) ?? true,
       }));
     }
 
@@ -889,6 +979,7 @@ export class SalesService {
       productId: pid,
       warehouseId: wid,
       quantity: byId.get(pid) ?? 0,
+      hasCost: hasCostById.get(pid) ?? true,
     }));
   }
 

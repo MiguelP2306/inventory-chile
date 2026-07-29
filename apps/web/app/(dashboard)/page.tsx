@@ -519,6 +519,13 @@ function KpiVentas({
         · {s.today.sales.count} {s.today.sales.count === 1 ? 'venta' : 'ventas'}{' '}
         {txt.period}
       </span>
+      {/* El monto ya viene neto de devoluciones: se explicita cuánto se
+          descontó para que el número cuadre con lo que ve el operador. */}
+      {s.today.returns && s.today.returns.count > 0 && (
+        <span className="text-[10px] font-medium text-amber-600 dark:text-amber-400">
+          · devoluciones −{formatCurrency(s.today.returns.amount)}
+        </span>
+      )}
     </KpiCard>
   );
 }

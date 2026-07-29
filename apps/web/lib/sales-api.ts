@@ -44,6 +44,9 @@ export interface AvailableStockRow {
   productId: string;
   warehouseId: string;
   quantity: number;
+  // false = el producto no tiene costo cargado y no se puede vender (la venta
+  // congela el costo al emitirse). Los servicios siempre vienen en true.
+  hasCost: boolean;
 }
 
 /**

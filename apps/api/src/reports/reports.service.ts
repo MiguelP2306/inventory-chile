@@ -16,6 +16,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { Between, DataSource, Repository } from 'typeorm';
 import { dayRange } from '../common/date-range';
+import { refundTotalsInRange } from '../common/sales-returns';
 import {
   CashTransaction,
   PurchaseEntry,
@@ -54,11 +55,15 @@ export class ReportsService {
     dateTo?: string;
   }): Promise<ReportSalesResponseDto> {
     const { from, to } = dayRange(query.dateFrom, query.dateTo);
-    const sales = await this.sales.find({
-      where: { date: Between(from, to) },
-      relations: { customer: true },
-      order: { date: 'DESC' },
-    });
+    const [sales, refunds] = await Promise.all([
+      this.sales.find({
+        where: { date: Between(from, to) },
+        relations: { customer: true },
+        order: { date: 'DESC' },
+      }),
+      // Devoluciones a cliente del período: el reporte muestra bruto y neto.
+      refundTotalsInRange(this.ds, from, to),
+    ]);
 
     let totalSubtotal = 0;
     let totalTax = 0;
@@ -100,6 +105,11 @@ export class ReportsService {
       totalAmount: totalAmount.toFixed(2),
       countActive,
       countCancelled,
+      totalReturns: refunds.total.toFixed(2),
+      countReturns: refunds.count,
+      netSubtotal: (totalSubtotal - refunds.subtotal).toFixed(2),
+      netTax: (totalTax - refunds.tax).toFixed(2),
+      netAmount: (totalAmount - refunds.total).toFixed(2),
     };
   }
 

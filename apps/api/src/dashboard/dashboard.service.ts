@@ -18,6 +18,11 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { Between, DataSource, Repository } from 'typeorm';
 import { CashboxService } from '../cashbox/cashbox.service';
 import {
+  refundTotalsInRange,
+  refundedCogsInRange,
+  refundsByDayInRange,
+} from '../common/sales-returns';
+import {
   Customer,
   Expense,
   InventoryMovement,
@@ -165,6 +170,10 @@ export class DashboardService {
           count: currentSalesAgg.count,
           amount: currentSalesAgg.total,
         },
+        returns: {
+          count: currentSalesAgg.returnsCount,
+          amount: currentSalesAgg.returns,
+        },
         quotations: {
           count: currentQuotationsAgg.count,
           amount: currentQuotationsAgg.total,
@@ -226,26 +235,40 @@ export class DashboardService {
 
   /**
    * Suma de ventas (excluye CANCELLED) en el rango: count + total bruto +
-   * subtotal neto.
+   * subtotal neto, ambos NETOS de devoluciones del rango.
+   *
+   * Una venta devuelta no cambia de estado, así que sin restar las
+   * devoluciones el dashboard seguía contándola como ingreso del día.
    */
   private async aggregateSalesInRange(
     from: Date,
     to: Date,
-  ): Promise<{ count: number; total: string; subtotal: string }> {
-    const row = await this.sales
-      .createQueryBuilder('s')
-      .select('COUNT(s.id)', 'count')
-      .addSelect('COALESCE(SUM(s.total), 0)', 'total')
-      .addSelect('COALESCE(SUM(s.subtotal), 0)', 'subtotal')
-      .where('s.date BETWEEN :from AND :to', { from, to })
-      .andWhere('s.status != :cancelled', {
-        cancelled: SaleStatus.CANCELLED,
-      })
-      .getRawOne<{ count: string; total: string; subtotal: string }>();
+  ): Promise<{
+    count: number;
+    total: string;
+    subtotal: string;
+    returns: string;
+    returnsCount: number;
+  }> {
+    const [row, refunds] = await Promise.all([
+      this.sales
+        .createQueryBuilder('s')
+        .select('COUNT(s.id)', 'count')
+        .addSelect('COALESCE(SUM(s.total), 0)', 'total')
+        .addSelect('COALESCE(SUM(s.subtotal), 0)', 'subtotal')
+        .where('s.date BETWEEN :from AND :to', { from, to })
+        .andWhere('s.status != :cancelled', {
+          cancelled: SaleStatus.CANCELLED,
+        })
+        .getRawOne<{ count: string; total: string; subtotal: string }>(),
+      refundTotalsInRange(this.ds, from, to),
+    ]);
     return {
       count: Number(row?.count ?? 0),
-      total: Number(row?.total ?? 0).toFixed(2),
-      subtotal: Number(row?.subtotal ?? 0).toFixed(2),
+      total: (Number(row?.total ?? 0) - refunds.total).toFixed(2),
+      subtotal: (Number(row?.subtotal ?? 0) - refunds.subtotal).toFixed(2),
+      returns: refunds.total.toFixed(2),
+      returnsCount: refunds.count,
     };
   }
 
@@ -253,16 +276,24 @@ export class DashboardService {
    * COGS del mes: suma de `unitCost × qty` sobre los items de ventas no
    * canceladas. Raw SQL para evitar quirks de TypeORM con queryBuilder
    * sobre `from()` sin entity.
+   *
+   * Se descuenta el costo de lo devuelto que volvió al stock (RESELLABLE): esa
+   * mercadería sigue en inventario, no es costo de venta. Lo devuelto dañado NO
+   * se descuenta — ahí el costo sí lo perdió el negocio.
    */
   private async aggregateCogsInRange(from: Date, to: Date): Promise<string> {
-    const rows: Array<{ cogs: string | null }> = await this.ds.query(
-      `SELECT COALESCE(SUM(si.unitCost * si.qty), 0) AS cogs
-       FROM sale_items si
-       INNER JOIN sales s ON s.id = si.saleId
-       WHERE s.date BETWEEN ? AND ? AND s.status != ?`,
-      [from, to, SaleStatus.CANCELLED],
-    );
-    return Number(rows[0]?.cogs ?? 0).toFixed(2);
+    const [rows, refundedCogs]: [Array<{ cogs: string | null }>, number] =
+      await Promise.all([
+        this.ds.query(
+          `SELECT COALESCE(SUM(si.unitCost * si.qty), 0) AS cogs
+           FROM sale_items si
+           INNER JOIN sales s ON s.id = si.saleId
+           WHERE s.date BETWEEN ? AND ? AND s.status != ?`,
+          [from, to, SaleStatus.CANCELLED],
+        ),
+        refundedCogsInRange(this.ds, from, to),
+      ]);
+    return (Number(rows[0]?.cogs ?? 0) - refundedCogs).toFixed(2);
   }
 
   private async aggregateQuotationsInRange(
@@ -317,14 +348,18 @@ export class DashboardService {
 
   /**
    * Serie diaria de ventas en el rango (huecos rellenados con 0). Devuelve
-   * un punto por día calendario, ordenado ascendente.
+   * un punto por día calendario, ordenado ascendente. Cada día va neto de las
+   * devoluciones registradas ESE día, igual que los KPIs.
    */
   private async aggregateSalesByDayInRange(
     from: Date,
     to: Date,
   ): Promise<DashboardSalesTrendPointDto[]> {
-    const rows: Array<{ date: string; amount: string; count: string }> =
-      await this.ds.query(
+    const [rows, refundRows]: [
+      Array<{ date: string; amount: string; count: string }>,
+      Array<{ date: string | Date; amount: number; count: number }>,
+    ] = await Promise.all([
+      this.ds.query(
         `SELECT DATE(s.date) AS date,
                 COALESCE(SUM(s.total), 0) AS amount,
                 COUNT(s.id) AS count
@@ -333,18 +368,23 @@ export class DashboardService {
          GROUP BY DATE(s.date)
          ORDER BY DATE(s.date) ASC`,
         [from, to, SaleStatus.CANCELLED],
-      );
+      ),
+      refundsByDayInRange(this.ds, from, to),
+    ]);
     const byDate = new Map(
       rows.map((r) => [
         toIsoDate(r.date),
         { amount: Number(r.amount), count: Number(r.count) },
       ]),
     );
+    const refundsByDate = new Map(
+      refundRows.map((r) => [toIsoDate(r.date), r.amount]),
+    );
     return fillDailySeries(from, to, (dateIso) => {
       const hit = byDate.get(dateIso);
       return {
         date: dateIso,
-        amount: hit?.amount ?? 0,
+        amount: (hit?.amount ?? 0) - (refundsByDate.get(dateIso) ?? 0),
         count: hit?.count ?? 0,
       };
     });

@@ -29,13 +29,21 @@ function viewerCan(v: Viewer, perm: Permission): boolean {
 /**
  * Redacta `cost` (y derivados) de un producto cuando el viewer no tiene
  * `PRODUCT_VIEW_COST`. No muta la entrada — devuelve una copia.
+ *
+ * Siempre agrega `hasCost`: el vendedor no puede ver el monto, pero la UI sí
+ * necesita saber que el producto no tiene costo cargado para avisarle que no
+ * se puede vender hasta corregirlo (la venta se rechaza en el backend).
  */
-export function redactProductCost<T extends { cost?: string | null }>(
-  product: T,
-  viewer: Viewer,
-): T {
-  if (viewerCan(viewer, Permission.PRODUCT_VIEW_COST)) return product;
-  return { ...product, cost: null };
+export function redactProductCost<
+  T extends { cost?: string | null; isService?: boolean },
+>(product: T, viewer: Viewer): T & { hasCost: boolean } {
+  // Los servicios (flete, mano de obra) no son inventario y legítimamente no
+  // tienen costo: cuentan como "con costo" para no bloquear su venta.
+  const hasCost = !!product.isService || Number(product.cost ?? 0) > 0;
+  if (viewerCan(viewer, Permission.PRODUCT_VIEW_COST)) {
+    return { ...product, hasCost };
+  }
+  return { ...product, cost: null, hasCost };
 }
 
 /**
@@ -43,12 +51,10 @@ export function redactProductCost<T extends { cost?: string | null }>(
  * el orden original. Apto para usar en `list()` que devuelve `{ items, total }`
  * o array plano.
  */
-export function redactProductCostList<T extends { cost?: string | null }>(
-  items: T[],
-  viewer: Viewer,
-): T[] {
-  if (viewerCan(viewer, Permission.PRODUCT_VIEW_COST)) return items;
-  return items.map((i) => ({ ...i, cost: null }));
+export function redactProductCostList<
+  T extends { cost?: string | null; isService?: boolean },
+>(items: T[], viewer: Viewer): Array<T & { hasCost: boolean }> {
+  return items.map((i) => redactProductCost(i, viewer));
 }
 
 /**
