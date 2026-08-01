@@ -51,3 +51,23 @@ export function todayIso(): string {
 export function isoDaysAgo(days: number): string {
   return isoDateFormatter.format(new Date(Date.now() - days * 86_400_000));
 }
+
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Convierte una fecha-solo-día (`YYYY-MM-DD`, como las que devuelven las series
+ * diarias de la API) a un `Date` seguro para formatear.
+ *
+ * `new Date('2026-07-30')` la ancla a MEDIANOCHE UTC y, al mostrarla en Chile
+ * (UTC-3/-4), retrocede al día anterior: el gráfico etiquetaba cada punto con
+ * el día previo. Anclamos al MEDIODÍA local, que nunca cruza el borde del día.
+ *
+ * Los valores que ya traen hora (ISO completo con `T`) se parsean tal cual.
+ */
+export function parseIsoDateLocal(value: string): Date {
+  if (DATE_ONLY_RE.test(value)) {
+    const [y, m, d] = value.split('-').map(Number) as [number, number, number];
+    return new Date(y, m - 1, d, 12, 0, 0, 0);
+  }
+  return new Date(value);
+}

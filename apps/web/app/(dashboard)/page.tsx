@@ -59,7 +59,12 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { publicImageUrl } from '@/lib/catalog-api';
 import { getDashboardSummary } from '@/lib/dashboard-api';
-import { formatCurrency, isoDaysAgo, todayIso } from '@/lib/format';
+import {
+  formatCurrency,
+  isoDaysAgo,
+  parseIsoDateLocal,
+  todayIso,
+} from '@/lib/format';
 import { useUrlFilters } from '@/lib/use-url-filters';
 import { cn } from '@/lib/utils';
 import type { DashboardRangeDto } from '@inventory/shared';
@@ -748,7 +753,9 @@ function SalesTrendCard({
               <XAxis
                 dataKey="date"
                 tickFormatter={(v) =>
-                  new Date(v).toLocaleDateString('es-CL', { day: '2-digit' })
+                  parseIsoDateLocal(v).toLocaleDateString('es-CL', {
+                    day: '2-digit',
+                  })
                 }
                 stroke="#94A3B8"
                 fontSize={10}
@@ -840,7 +847,9 @@ function CashFlowCard({
                 <XAxis
                   dataKey="date"
                   tickFormatter={(v) =>
-                    new Date(v).toLocaleDateString('es-CL', { day: '2-digit' })
+                    parseIsoDateLocal(v).toLocaleDateString('es-CL', {
+                      day: '2-digit',
+                    })
                   }
                   stroke="#94A3B8"
                   fontSize={10}
@@ -1749,7 +1758,7 @@ function ChartTooltip({
       {label && (
         <div className="mb-1 font-mono text-[10px] uppercase tracking-wider text-slate-400">
           {typeof label === 'string' && label.length === 10
-            ? new Date(label).toLocaleDateString('es-CL', {
+            ? parseIsoDateLocal(label).toLocaleDateString('es-CL', {
                 day: '2-digit',
                 month: 'short',
               })
