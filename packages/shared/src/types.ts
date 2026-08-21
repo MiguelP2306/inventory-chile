@@ -174,6 +174,50 @@ export interface ProductPurchaseHistoryRowDto {
   subtotal: string;
 }
 
+/**
+ * Una línea del historial de VENTAS de un producto: cada venta (Sale) en la que
+ * se vendió, con su fecha, cliente, cantidad y precio unitario. La primera (más
+ * reciente) es la "última venta". `saleId` permite linkear a `/ventas/[saleId]`.
+ * Espejo de `ProductPurchaseHistoryRowDto`, pero del lado de la salida.
+ *
+ * `unitCost` / `profit` son datos de COSTO: el backend los manda en `null`
+ * cuando el viewer no tiene `PRODUCT_VIEW_COST` (típicamente USER/vendedor).
+ * El resto (precio de venta) sí lo ve cualquier rol.
+ */
+export interface ProductSaleHistoryRowDto {
+  saleId: string;
+  number: string;
+  date: string;
+  customerName: string | null;
+  status: SaleStatusDto;
+  qty: number;
+  unitPrice: string;
+  /** Descuento aplicado a la línea (monto, ya resuelto si fue %). */
+  discount: string;
+  subtotal: string;
+  unitCost: string | null;
+  /** Ganancia de la línea: subtotal - (qty * unitCost). */
+  profit: string | null;
+}
+
+/**
+ * Resumen del historial de ventas de un producto. Acompaña a las filas para
+ * poder mostrar totales sin recorrer las 100 últimas ventas en el cliente
+ * (el detalle viene capado; los totales son sobre TODAS las ventas del
+ * producto, excluyendo las canceladas).
+ */
+export interface ProductSalesHistoryDto {
+  rows: ProductSaleHistoryRowDto[];
+  /** Unidades vendidas acumuladas (ventas no canceladas). */
+  totalQty: number;
+  /** Monto vendido acumulado (ventas no canceladas). */
+  totalAmount: string;
+  /** Ganancia acumulada. `null` si el viewer no ve costos. */
+  totalProfit: string | null;
+  /** Cantidad de ventas (no canceladas) en las que aparece el producto. */
+  salesCount: number;
+}
+
 export interface PaginatedResult<T> {
   items: T[];
   total: number;

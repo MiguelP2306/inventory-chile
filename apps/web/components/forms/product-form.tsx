@@ -38,6 +38,7 @@ import { toast } from 'sonner';
 import { z } from 'zod';
 import { ProductImageGallery } from '@/components/product-image-gallery';
 import { ProductPurchaseHistory } from '@/components/product-purchase-history';
+import { ProductSaleHistory } from '@/components/product-sale-history';
 import { Button } from '@/components/ui/button';
 import {
   SoftModal,
@@ -202,7 +203,14 @@ const YEAR_OPTIONS = Array.from(
   (_, i) => MAX_YEAR - i,
 );
 
-type TabKey = 'datos' | 'precios' | 'compat' | 'codigos' | 'imagenes' | 'compras';
+type TabKey =
+  | 'datos'
+  | 'precios'
+  | 'compat'
+  | 'codigos'
+  | 'imagenes'
+  | 'compras'
+  | 'ventas';
 
 export function ProductForm({ product }: Props) {
   const router = useRouter();
@@ -556,6 +564,16 @@ export function ProductForm({ product }: Props) {
                   de costo de compra). */}
               {product && canSeeCost && (
                 <TabPill value="compras" index={6} label="Compras" />
+              )}
+              {/* Ventas: solo en edición, pero para cualquier rol — el precio
+                  de venta no es dato sensible (el costo/ganancia lo recorta el
+                  backend). El índice se corre si Compras no está visible. */}
+              {product && (
+                <TabPill
+                  value="ventas"
+                  index={canSeeCost ? 7 : 6}
+                  label="Ventas"
+                />
               )}
             </TabsList>
 
@@ -1083,6 +1101,20 @@ export function ProductForm({ product }: Props) {
                   description="Última compra de este producto y compras anteriores. Tocá una fila para revisar la compra completa. El costo unitario alimenta el costo ponderado."
                 />
                 <ProductPurchaseHistory productId={product.id} />
+              </TabsContent>
+            )}
+
+            {/* VENTAS — historial de ventas del producto (solo edición) */}
+            {product && (
+              <TabsContent
+                value="ventas"
+                className="mt-0 rounded-b-xl rounded-tr-xl border border-t-0 bg-card p-6 shadow-sm"
+              >
+                <SectionHeader
+                  title="Historial de ventas"
+                  description="Última venta de este producto y ventas anteriores. Tocá una fila para abrir la venta completa. Los acumulados excluyen las ventas canceladas."
+                />
+                <ProductSaleHistory productId={product.id} />
               </TabsContent>
             )}
           </Tabs>

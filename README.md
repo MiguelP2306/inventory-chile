@@ -30,7 +30,7 @@ El plan completo de implementación por fases está en [PLAN.md](PLAN.md).
 | 9 | Dashboard mobile-first con KPIs **clicables** del día + alertas (iteración 9.1; gráficos 9.2 pendiente) | ✅ |
 | 10 | **Carga masiva Excel + exports masivos** — importers UPSERT (productos por SKU + auto-create cat/marcas, clientes y proveedores por RUT, todos con partial success) + 10 exports XLSX masivos que respetan filtros e ignoran paginación. Parser robusto contra Google Sheets / Numbers / fórmulas / formato chileno. | ✅ |
 | 11 | ~~Códigos de barras + etiquetas térmicas + barcode en guía~~ — **descartada por el cliente** (mayo 2026). UI removida del sidebar y del detalle de producto; el código backend (`@zxing/browser`, `bwip-js`, endpoint `/products/lookup`) permanece en el repo por si se reactiva. Doc histórico: [PHASE-11.md](PHASE-11.md). | 🚫 |
-| 12 | **Deploy productivo** — Frontend en Vercel (`inventory-chile.vercel.app`), backend NestJS en Render Free (`inventory-chile-api.onrender.com`), DB MySQL en TiDB Cloud Serverless (5 GB gratis), archivos en Cloudinary, email transaccional via Resend. Cero costo. Detalle en [DEPLOY.md](DEPLOY.md). | ✅ |
+| 12 | **Deploy productivo** — VPS Hostinger (Ubuntu 24.04) en <https://erpautopartesgpi.com>: nginx como reverse proxy, PM2 corriendo Next.js (:3000) y NestJS (:4000), MySQL 8 local, uploads en filesystem, email via Resend, TLS con Certbot. Reemplazó al deploy free-tier original (Vercel + Render + TiDB Cloud) el 27-jun-2026. | ✅ |
 | 13 | HubSpot refinamientos post-MVP (webhook inverso + Deals + sync histórico) — base ya en Fase 8.5 | pendiente |
 | 14 | Manual + video + soporte post-entrega | pendiente |
 
@@ -719,7 +719,7 @@ Esto pasa por:
 
 **O usar Firefox / Safari** que no fuerzan https en `localhost`.
 
-Cuando se haga el deploy de producción (Fase 12) con un dominio real (ej. `https://cotizaciones.tu-dominio.cl`), este problema desaparece — `PUBLIC_BASE_URL` apunta al dominio https real y Chrome no necesita upgradear nada.
+Esto **solo afecta a desarrollo local**. En producción el problema no existe: `PUBLIC_BASE_URL=https://erpautopartesgpi.com` es un dominio https real con certificado válido, así que Chrome no tiene nada que upgradear.
 
 ### Verificación end-to-end
 
@@ -1629,47 +1629,136 @@ Ver [PHASE-11.md → Plan de tests end-to-end](PHASE-11.md#plan-de-tests-end-to-
 
 ---
 
-## Fase 12 — Deploy productivo (Render + Vercel + TiDB Cloud + Cloudinary + Resend)
+## Fase 12 — Deploy productivo (VPS Hostinger + nginx + PM2 + MySQL local)
 
-> **Guía paso a paso completa en [DEPLOY.md](DEPLOY.md)** — incluye creación de cuentas, copy-paste de env vars, troubleshooting y verificación end-to-end. Esta sección resume **qué se construyó, por qué** y los bugfixes pre-deploy aplicados.
+> ⚠️ **El deploy original de esta fase (Vercel + Render + TiDB Cloud + Cloudinary) ya NO está en uso.** El 27-jun-2026 se migró todo a un VPS propio con dominio real. Lo que sigue documenta la **infra vigente**; el histórico del deploy free-tier quedó al final de la sección porque explica varios cambios de código que siguen vivos en el repo.
+>
+> No existe `DEPLOY.md` — el `render.yaml` de la raíz también es histórico y no se usa.
 
-### URLs productivas
+### Infra actual
 
-| Servicio | URL | Plan |
+| Componente | Dónde | Detalle |
 | --- | --- | --- |
-| Frontend (Next.js) | <https://inventory-chile.vercel.app> | Vercel Hobby (gratis) |
-| Backend (NestJS) | <https://inventory-chile-api.onrender.com> | Render Free (gratis, sleep tras 15 min sin tráfico) |
-| Base de datos | TiDB Cloud Serverless `gateway01.us-west-2...:4000` | 5 GB gratis indefinido |
-| Storage de archivos | Cloudinary `dlqnie9eq` | 25 GB free tier |
-| Email transaccional | Resend (modo dev: `onboarding@resend.dev`) | 3.000 emails/mes gratis |
+| Dominio | <https://erpautopartesgpi.com> (+ `www`) | TLS Let's Encrypt vía Certbot, renovación automática |
+| Servidor | VPS Hostinger KVM 1 — `srv1781254.hstgr.cloud` (`2.25.71.195`) | Ubuntu 24.04 LTS, 4 GB RAM, 48 GB disco |
+| Repo desplegado | `/opt/inventory-chile` | clon de `origin/main`, se actualiza con `git pull` |
+| Reverse proxy | nginx 1.24.0 | `/etc/nginx/sites-enabled/erpautopartesgpi.com`, `client_max_body_size 25M` |
+| Frontend (Next.js) | PM2 `inventory-web` → `next start --port 3000` | `max_memory_restart: 700M` |
+| Backend (NestJS) | PM2 `inventory-api` → `dist/main.js`, puerto 4000 | `max_memory_restart: 600M` |
+| Base de datos | **MySQL 8.0.46 local** en el mismo VPS (`127.0.0.1:3306`, `DB_SSL=false`) | ~8 MB de datos |
+| Storage de archivos | **Filesystem local** (`STORAGE_DRIVER=local`) → `apps/api/uploads/` | ~125 MB |
+| Email transaccional | Resend | sigue igual que en el deploy original |
+| Firewall | hPanel Hostinger (no `ufw`) | default **drop**; solo 80 y 443 abiertos a `Any` |
 
-**Costo total**: $0/mes mientras no se supere ningún tier. Cero tarjetas requeridas.
-
-### Por qué Render en lugar de Railway (lo que decía PLAN.md)
-
-Railway eliminó su free tier real en 2024 (ahora da $5 USD de crédito mensual y exige tarjeta). El cliente no podía registrar otra cuenta de Google. Render Free es el equivalente más cercano sin tarjeta — el único trade-off es el cold start de ~30 seg después de 15 min de inactividad, aceptable para una demo donde el jefe entra ocasionalmente.
-
-### Por qué TiDB Cloud en lugar de MySQL gestionado de Railway
-
-Misma razón (free tier real sin tarjeta) + TiDB es wire-compatible con MySQL — el código existente funcionó sin cambios excepto los bugfixes documentados abajo. PlanetScale también murió su free tier de MySQL, así que TiDB Cloud Serverless quedó como la única opción gratis 100% MySQL-compatible.
+Node v20.20.2 y pnpm 9.12.0 instalados en el VPS.
 
 ### Stack del deploy
 
 ```
-   Browser (jefe)
-        │
-        ├──► https://inventory-chile.vercel.app  (Next.js, Vercel)
-        │
-        └──► /api/* (rewrite proxy del propio Vercel)
-                 │
-                 └──► https://inventory-chile-api.onrender.com/api/*  (NestJS, Render)
-                           │
-                           ├──► TiDB Cloud Serverless (MySQL, TLS obligatorio)
-                           ├──► Cloudinary (fotos producto + facturas PDF + comprobantes)
-                           └──► Resend (cotizaciones por email)
+   Browser  ──►  https://erpautopartesgpi.com   (nginx :443, TLS Certbot)
+                          │
+                          │  location /  →  proxy_pass 127.0.0.1:3000
+                          ▼
+                 Next.js  (PM2 "inventory-web", :3000)
+                          │
+                          │  rewrite /api/*  →  BACKEND_URL=http://localhost:4000
+                          ▼
+                 NestJS   (PM2 "inventory-api", :4000)
+                          │
+                          ├──► MySQL 8 local (127.0.0.1:3306, sin TLS)
+                          ├──► apps/api/uploads/  (fotos, PDFs, comprobantes)
+                          └──► Resend (cotizaciones por email)
 ```
 
-### Cambios de código que habilitaron el deploy
+Detalle importante: **nginx NO enruta `/api` al backend**. Todo el tráfico va a Next.js, y es el `rewrites()` de [`apps/web/next.config.mjs`](apps/web/next.config.mjs) el que reenvía `/api/*` a `localhost:4000`. Por eso las cookies siguen siendo first-party y el SSR las puede leer. Si algún día se mueve ese rewrite a nginx, hay que revisar el flujo de auth completo.
+
+### Cómo desplegar cambios
+
+PM2 arranca desde `ecosystem.config.js`, que vive **solo en el VPS** (está untracked — no se clona con el repo).
+
+```bash
+ssh root@2.25.71.195
+cd /opt/inventory-chile
+
+git pull --ff-only origin main
+pnpm install --frozen-lockfile
+pnpm --filter @inventory/shared build   # obligatorio: apps/web y apps/api lo importan
+pnpm --filter @inventory/api build      # solo si cambió apps/api
+pnpm --filter @inventory/web build      # solo si cambió apps/web
+
+pm2 reload inventory-web --update-env   # y/o inventory-api
+pm2 save
+```
+
+Verificación:
+
+```bash
+curl -sI http://localhost:3000/login | head -1        # 200
+curl -s  http://localhost:4000/api/health             # 200
+pm2 list && pm2 logs inventory-web --lines 30
+```
+
+Tres cosas que muerden:
+
+1. **`pnpm --filter @inventory/shared build` no es opcional.** Es un workspace package compilado; si `packages/shared/dist` está viejo, el build de web/api falla o compila tipos desactualizados.
+2. **`BACKEND_URL` tiene que estar en el entorno del proceso**, no solo del build — nginx no cubre `/api`. Vive en `apps/web/.env` (`NEXT_PUBLIC_API_URL=/api` + `BACKEND_URL=http://localhost:4000`). De ahí el `--update-env` en el reload.
+3. **`next build` reemplaza `.next` en caliente.** Los usuarios con la app abierta pueden ver un 404 de chunk hasta que recarguen. Es de segundos, pero conviene desplegar fuera de horario de mostrador.
+
+Para confirmar que el bundle nuevo llegó al browser, comparar el hash del chunk contra el que sirve producción:
+
+```bash
+ls apps/web/.next/static/chunks/app/\(dashboard\)/ | grep '^page-'
+curl -sI "https://erpautopartesgpi.com/_next/static/chunks/app/(dashboard)/page-<hash>.js" | head -1
+```
+
+### Acceso SSH y firewall
+
+El firewall es el de hPanel (VPS → Firewall), **no `ufw`**. Por defecto dropea todo: solo hay reglas `Accept TCP 80` y `Accept TCP 443` desde `Any`.
+
+El puerto **22 no está abierto de forma permanente**. Para entrar por SSH hay que agregar temporalmente una regla `Accept / TCP / 22 / Custom / <tu-IP>` y sincronizar — y **borrarla al terminar**. Si no, el `ssh` falla con `kex_exchange_identification: read: Connection reset by peer`: el TCP conecta (hay un SYN-proxy delante) pero la sesión nunca arranca. Ese error significa firewall, no credenciales.
+
+### Variables de entorno productivas
+
+Ambas apps leen su `.env` desde su propio directorio en el VPS (`/opt/inventory-chile/apps/{api,web}/.env`). No están en git.
+
+`apps/web/.env` — solo dos:
+
+```
+NEXT_PUBLIC_API_URL=/api
+BACKEND_URL=http://localhost:4000
+```
+
+`apps/api/.env` — las claves presentes hoy:
+
+```
+PORT NODE_ENV APP_TZ CORS_ORIGIN
+DB_HOST DB_PORT DB_USERNAME DB_PASSWORD DB_DATABASE DB_SYNCHRONIZE DB_LOGGING DB_POOL_SIZE DB_SSL
+JWT_SECRET JWT_EXPIRES_IN JWT_REFRESH_SECRET JWT_REFRESH_EXPIRES_IN
+STORAGE_DRIVER RESEND_API_KEY EMAIL_FROM
+PUBLIC_API_URL PUBLIC_BASE_URL SEED_ADMIN_EMAIL SEED_ADMIN_PASSWORD
+```
+
+Valores no sensibles vigentes: `APP_TZ=America/Santiago`, `STORAGE_DRIVER=local`, `DB_SSL=false`, `DB_HOST=127.0.0.1`, `PUBLIC_BASE_URL=https://erpautopartesgpi.com`, `CORS_ORIGIN=https://erpautopartesgpi.com,https://www.erpautopartesgpi.com`.
+
+> Ya **no** hay variables de Cloudinary: el storage volvió a driver local porque el filesystem del VPS es persistente (a diferencia del de Render). El código de Cloudinary sigue en [`storage.service.ts`](apps/api/src/uploads/storage.service.ts) y se reactiva con `STORAGE_DRIVER=cloudinary`.
+
+### Riesgos abiertos de la infra actual
+
+- **Sin backups automáticos.** La DB vive en el mismo VPS que la app: un disco perdido se lleva datos y uploads juntos. Es el hueco más grande hoy — un `mysqldump` diario a un bucket externo + `apps/api/uploads/` deberían ser lo próximo que se haga.
+- **`apps/api/uploads/` (~125 MB) tampoco está respaldado** ni versionado.
+- **Single point of failure**: nginx, Next.js, NestJS y MySQL comparten 4 GB de RAM. `max_memory_restart` de PM2 amortigua, pero un `next build` con la app corriendo deja poco margen.
+- **`ecosystem.config.js` no está en git.** Si hay que reconstruir el server, esa config se reescribe a mano.
+- **Certbot** renueva solo (`certbot.timer` enabled + active, corre 2×/día), pero nadie monitorea que lo logre: si falla, el sitio cae por certificado vencido sin aviso previo.
+
+---
+
+### Histórico — deploy free-tier original (mayo–junio 2026)
+
+> Todo lo que sigue describe la infra **anterior** (Vercel + Render + TiDB Cloud + Cloudinary), reemplazada el 27-jun-2026. Se conserva porque explica cambios de código que siguen vigentes en el repo.
+
+Era: frontend en Vercel Hobby (`inventory-chile.vercel.app`), backend en Render Free (`inventory-chile-api.onrender.com`), DB en TiDB Cloud Serverless, archivos en Cloudinary, email en Resend. Costo $0/mes. Se eligió Render sobre Railway porque Railway mató su free tier real en 2024, y TiDB Cloud porque era la única opción MySQL-compatible gratis sin tarjeta tras la muerte del free tier de PlanetScale. Se migró al VPS por el cold start de ~30 seg de Render y para tener dominio propio.
+
+#### Cambios de código que habilitaron el deploy
 
 | Cambio | Archivo | Por qué |
 | --- | --- | --- |
@@ -1682,7 +1771,7 @@ Misma razón (free tier real sin tarjeta) + TiDB es wire-compatible con MySQL �
 | **Vercel rewrites como proxy** | [`apps/web/next.config.mjs`](apps/web/next.config.mjs) | `/api/*` se proxea al backend de Render. Las cookies viven en el dominio del frontend (first-party) → SSR (`next/headers cookies()`) las puede leer. Resuelve el redirect loop a `/login` después del login exitoso. |
 | **Server API con `BACKEND_URL`** | [`apps/web/lib/server-api.ts`](apps/web/lib/server-api.ts) | Cuando `NEXT_PUBLIC_API_URL=/api` (path relativo del rewrite), el SSR necesita URL absoluta para `fetch` — la arma desde `BACKEND_URL`. |
 
-### Bugfixes específicos de TiDB Cloud (vs MySQL local)
+#### Bugfixes específicos de TiDB Cloud (vs MySQL local)
 
 TiDB tiene diferencias estrictas respecto a MySQL local. Los siguientes 3 puntos rompieron en el primer deploy y requirieron fix:
 
@@ -1695,23 +1784,24 @@ Otros fixes menores:
 - **`next.config.mjs eslint.ignoreDuringBuilds: true`** porque Next 13+ corre ESLint en `next build` por default y había warnings pre-existentes (rules-of-hooks, no-html-link-for-pages) que rompían el deploy. Estos warnings se siguen mostrando con `pnpm lint` local.
 - **Fix de `noUncheckedIndexedAccess`** en 3 archivos (`inventario/movimientos/page.tsx`, `productos/page.tsx`, `product-form.tsx`) — errores de TypeScript estricto que rompían `next build` pero no se notaban en dev.
 
-### Variables de entorno productivas (referencia)
+#### Limitaciones que tenía y que la migración al VPS resolvió
 
-Las **24 env vars** del backend en Render están documentadas en [DEPLOY.md → Paso 4.3](DEPLOY.md). La única env var del frontend en Vercel es `NEXT_PUBLIC_API_URL=/api` + `BACKEND_URL=https://inventory-chile-api.onrender.com` (esta última solo para el SSR).
+- **Cold start ~30 seg** en Render Free tras 15 min sin tráfico. Fue la razón principal de la migración.
+- **Sin custom domain** — usaba los subdominios gratis de Vercel/Render. Hoy hay dominio propio con TLS.
+- **Filesystem efímero** en Render, que obligaba a Cloudinary. En el VPS el disco persiste y el storage volvió a driver local.
 
-### Limitaciones conocidas
+---
 
-- **Cold start ~30 seg** en Render Free después de 15 min sin tráfico. Upgrade a Render Starter ($7/mes) lo elimina.
-- **Email solo a `a.eduardoperez.fp2019@gmail.com`** (la cuenta dueña de Resend). En modo dev de Resend solo se puede enviar a esa dirección. Para enviar a clientes reales, hay que verificar un dominio propio en Resend.
-- **Sin custom domain** — usa subdominios gratis de Vercel/Render.
+### Próximos pasos sugeridos
 
-### Próximos pasos sugeridos post-MVP
+1. **Backups automáticos** — `mysqldump` diario + `apps/api/uploads/` a almacenamiento externo. Es lo más urgente: hoy no hay ninguno.
+2. **Monitoreo de uptime y del certificado** (UptimeRobot o similar) — nadie se entera si PM2 cae o si Certbot falla la renovación.
+3. **Commitear `ecosystem.config.js`** al repo para que la config de PM2 no viva solo en el VPS.
+4. Verificar dominio propio en Resend para enviar cotizaciones desde `cotizaciones@erpautopartesgpi.com` (hoy sigue en modo dev, ver limitación de Resend abajo).
+5. Agregar Sentry / Logtail para observabilidad.
+6. Rate limiting con `@nestjs/throttler` en endpoints críticos (`/auth/login`, exports masivos).
 
-1. Verificar dominio propio en Resend para enviar cotizaciones desde `cotizaciones@dominiocliente.cl`.
-2. Migrar a Render Starter ($7/mes) si el uso pasa de demo a producción real (elimina cold starts + más RAM).
-3. Configurar backups automáticos diarios de TiDB (panel de TiDB → Backups).
-4. Agregar Sentry / Logtail para observabilidad.
-5. Rate limiting con `@nestjs/throttler` en endpoints críticos (`/auth/login`, exports masivos).
+> **Limitación vigente de Resend**: en modo dev solo se puede enviar a `a.eduardoperez.fp2019@gmail.com` (la cuenta dueña). Para mandar cotizaciones a clientes reales hay que verificar un dominio en Resend.
 
 ---
 

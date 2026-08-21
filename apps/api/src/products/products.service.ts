@@ -1,4 +1,4 @@
-import { ProductCodeKind, ProductKind } from '@inventory/shared';
+import { ProductCodeKind, ProductKind, SaleStatus } from '@inventory/shared';
 import {
   BadRequestException,
   ConflictException,
@@ -10,6 +10,7 @@ import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { CategoriesService } from '../categories/categories.service';
 import { CountersService } from '../common/counters.service';
 import { dayRange } from '../common/date-range';
+import { fmt2 } from '../common/document-totals';
 import {
   InventoryMovement,
   Product,
@@ -27,6 +28,8 @@ import {
 import type {
   ProductPurchaseHistoryRowDto,
   ProductRelationsDto,
+  ProductSaleHistoryRowDto,
+  ProductSalesHistoryDto,
 } from '@inventory/shared';
 import { PRODUCT_IMAGES_SUBDIR } from '../uploads/upload-config';
 import { StorageService } from '../uploads/storage.service';
@@ -431,6 +434,82 @@ export class ProductsService {
       unitCost: it.unitCost,
       subtotal: it.subtotal,
     }));
+  }
+
+  /**
+   * Historial de VENTAS del producto (espejo de `purchaseHistory`): últimas 100
+   * líneas de venta en las que aparece, más los acumulados sobre TODAS las
+   * ventas no canceladas (por eso el total no se calcula sumando `rows`).
+   *
+   * Las ventas canceladas SÍ salen en el detalle (con su badge) para no perder
+   * trazabilidad, pero no suman a los acumulados.
+   *
+   * `includeCost` refleja el permiso `PRODUCT_VIEW_COST` del viewer: cuando es
+   * false, `unitCost` / `profit` / `totalProfit` viajan en null (defense in
+   * depth: el dato no sale del backend, no se oculta solo en la UI).
+   */
+  async saleHistory(
+    productId: string,
+    includeCost: boolean,
+  ): Promise<ProductSalesHistoryDto> {
+    const items = await this.dataSource
+      .getRepository(SaleItem)
+      .createQueryBuilder('si')
+      .innerJoinAndSelect('si.sale', 'sale')
+      .leftJoinAndSelect('sale.customer', 'customer')
+      .where('si.productId = :productId', { productId })
+      .orderBy('sale.date', 'DESC')
+      .addOrderBy('sale.createdAt', 'DESC')
+      .take(100)
+      .getMany();
+
+    const rows = items.map((it) => {
+      const profit =
+        Number(it.subtotal) - it.qty * Number(it.unitCost ?? 0);
+      return {
+        saleId: it.saleId,
+        number: it.sale!.number,
+        date: it.sale!.date.toISOString(),
+        customerName: it.sale!.customer?.name ?? null,
+        status: it.sale!.status as ProductSaleHistoryRowDto['status'],
+        qty: it.qty,
+        unitPrice: it.unitPrice,
+        discount: it.discount,
+        subtotal: it.subtotal,
+        unitCost: includeCost ? it.unitCost : null,
+        profit: includeCost ? fmt2(profit) : null,
+      };
+    });
+
+    // Acumulados sobre TODAS las ventas del producto (no solo las 100 que
+    // muestra el detalle), excluyendo canceladas.
+    const agg = (await this.dataSource
+      .getRepository(SaleItem)
+      .createQueryBuilder('si')
+      .innerJoin('si.sale', 'sale')
+      .select('COALESCE(SUM(si.qty), 0)', 'qty')
+      .addSelect('COALESCE(SUM(si.subtotal), 0)', 'amount')
+      .addSelect('COALESCE(SUM(si.qty * si.unitCost), 0)', 'cost')
+      .addSelect('COUNT(DISTINCT si.saleId)', 'sales')
+      .where('si.productId = :productId', { productId })
+      .andWhere('sale.status <> :cancelled', { cancelled: SaleStatus.CANCELLED })
+      .getRawOne<{
+        qty: string | null;
+        amount: string | null;
+        cost: string | null;
+        sales: string | null;
+      }>()) ?? { qty: '0', amount: '0', cost: '0', sales: '0' };
+
+    const totalAmount = Number(agg.amount ?? 0);
+    const totalCost = Number(agg.cost ?? 0);
+
+    return {
+      rows,
+      totalQty: Number(agg.qty ?? 0),
+      totalAmount: fmt2(totalAmount),
+      totalProfit: includeCost ? fmt2(totalAmount - totalCost) : null,
+      salesCount: Number(agg.sales ?? 0),
+    };
   }
 
   /**

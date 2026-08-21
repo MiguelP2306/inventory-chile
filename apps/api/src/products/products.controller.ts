@@ -490,6 +490,23 @@ export class ProductsController {
     return this.svc.purchaseHistory(id);
   }
 
+  /**
+   * Historial de ventas del producto. A diferencia de `/purchases`, este SÍ es
+   * accesible para cualquier rol (el precio de venta no es dato sensible); el
+   * costo unitario y la ganancia se omiten cuando el viewer no tiene
+   * `PRODUCT_VIEW_COST`.
+   */
+  @Get(':id/sales')
+  sales(
+    @CurrentUser() viewer: JwtPayload,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    return this.svc.saleHistory(
+      id,
+      viewerHas(viewer, Permission.PRODUCT_VIEW_COST),
+    );
+  }
+
   @Get(':id')
   async getOne(
     @CurrentUser() viewer: JwtPayload,

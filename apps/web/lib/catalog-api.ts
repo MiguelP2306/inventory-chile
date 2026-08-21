@@ -10,6 +10,7 @@ import type {
   ProductKindDto,
   ProductPurchaseHistoryRowDto,
   ProductRelationsDto,
+  ProductSalesHistoryDto,
   ProductStockRowDto,
   VehicleMakeDto,
   VehicleModelDto,
@@ -269,6 +270,15 @@ export const getProductRelations = (id: string) =>
 export const getProductPurchases = (id: string) =>
   api
     .get<ProductPurchaseHistoryRowDto[]>(`/products/${id}/purchases`)
+    .then((r) => r.data);
+
+/**
+ * Historial de ventas del producto (tab "Ventas"). Disponible para cualquier
+ * rol; el backend recorta costo/ganancia si el viewer no ve costos.
+ */
+export const getProductSales = (id: string) =>
+  api
+    .get<ProductSalesHistoryDto>(`/products/${id}/sales`)
     .then((r) => r.data);
 
 /**
